@@ -1,11 +1,7 @@
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy.orm import relationship
+from server.database import Base
 
-# Base class for our models
-Base = declarative_base()
-
-# Example model for a User
 class User(Base):
     __tablename__ = 'users'
 
@@ -13,15 +9,39 @@ class User(Base):
     name = Column(String, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
+    
+    textbooks = relationship("Textbook", back_populates="owner")
 
-# SQLite URL for SQLAlchemy
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+class Textbook(Base):
+    __tablename__ = 'textbooks'
 
-# Create an engine
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    description = Column(Text, nullable=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    
+    chapters = relationship("Chapter", back_populates="textbook")
+    
+    owner = relationship("User", back_populates="textbooks")
 
-# Create a configured "Session" class
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+class Chapter(Base):
+    __tablename__ = 'chapters'
 
-# Create all tables
-Base.metadata.create_all(bind=engine)
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    content = Column(Text)  # This column is defined here
+    textbook_id = Column(Integer, ForeignKey('textbooks.id'))
+    
+    sections = relationship("Section", back_populates="chapter")
+    
+    textbook = relationship("Textbook", back_populates="chapters")
+
+class Section(Base):
+    __tablename__ = 'sections'
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    content = Column(Text)
+    chapter_id = Column(Integer, ForeignKey('chapters.id'))
+    
+    chapter = relationship("Chapter", back_populates="sections")
