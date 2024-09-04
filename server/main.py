@@ -1,20 +1,12 @@
+import os
 import re
-import pdfplumber
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
-import os
-import json  # Import JSON module
-from tqdm import tqdm
-from typing import List  # Add this line
 
-# Drop all existing tables
-#Base.metadata.drop_all(bind=engine)
-
-# Recreate all tables
+# Create all tables in the database
 Base.metadata.create_all(bind=engine)
-
 
 app = FastAPI()
 
@@ -26,68 +18,69 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/api/chapters/", response_model=List[schemas.Chapter])
-def get_chapters(db: Session = Depends(get_db)):
-    chapters = db.query(models.Chapter).all()
-    # Ensure sections is always a dictionary
-    return [schemas.Chapter(id=chapter.id, title=chapter.title, sections=json.loads(chapter.content) if chapter.content else {}) for chapter in chapters]
+# Function to extract chapters from TeX file
+def extract_chapters_from_tex(tex_content: str):
+    # Regular expression to match both \Chapter{*number*} and \Chapter[description]{*number*}
+    chapter_pattern = re.compile(r'\\Chapter(\[.*?\])?\{(.+?)\}', re.MULTILINE)
+    chapters = re.split(chapter_pattern, tex_content)
 
+    result = []
+    for i in range(1, len(chapters), 3):
+        # If there's a description in square brackets, we skip it and focus on the chapter title
+        title = chapters[i+1].strip()  # Chapter title
+        content = chapters[i+2].strip()  # Chapter content
+        result.append((title, content))
 
+    return result
 
-@app.post("/api/upload-textbook/")
-async def upload_textbook(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if file.content_type != 'application/pdf':
-        return {"error": "File format not supported."}
+@app.post("/upload")
+async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    # Check if the file is a .tex file by extension
+    if not file.filename.endswith('.tex'):
+        raise HTTPException(status_code=400, detail="File format not supported. Please upload a TeX file.")
+    
+    content = await file.read()
+    content_str = content.decode('utf-8')
+    
+    # Extract chapters from TeX content
+    chapters = extract_chapters_from_tex(content_str)
 
-    # Open the PDF file and extract text
-    with pdfplumber.open(file.file) as pdf:
-        text = ""
-        for page in tqdm(pdf.pages, desc="Processing PDF"):
-            text += page.extract_text()
+    # Save the textbook and chapters
+    textbook = models.Textbook(title=file.filename, description="Description of the textbook")
+    db.add(textbook)
+    db.commit()
+    db.refresh(textbook)
 
-    # Break the text into chapters and sections
-    chapters = extract_chapters(text)
-
-    # Save the chapters and sections in the database
-    for chapter_title, chapter_content in chapters.items():
-        # Convert the dictionary to a JSON string
-        chapter_content_json = json.dumps(chapter_content)
-
-        # Save to the database
-        chapter = models.Chapter(title=chapter_title, content=chapter_content_json)
+    for title, chapter_content in chapters:
+        chapter = models.Chapter(title=title, content=chapter_content, textbook_id=textbook.id)
         db.add(chapter)
-        db.commit()
-        db.refresh(chapter)
+    
+    db.commit()
 
-    return {"message": "Textbook uploaded and processed successfully."}
+    return {"message": "Textbook and chapters uploaded successfully"}
 
+# Endpoint to get all textbooks
+@app.get("/textbooks/")
+async def get_textbooks(db: Session = Depends(get_db)):
+    textbooks = db.query(models.Textbook).all()
+    return textbooks
 
-
-def extract_sections(chapter_content):
-    # This regex pattern should be updated to match the format of sections in your PDF
-    section_pattern = re.compile(r'Section\s+\d+\b.*', re.IGNORECASE)
-    sections = re.split(section_pattern, chapter_content)
-
-    section_dict = {}
-    for index, section in enumerate(sections):
-        if section.strip():
-            section_title = section_pattern.search(chapter_content)
-            if section_title:
-                section_dict[section_title.group()] = section.strip()
-            else:
-                section_dict[f'Section_{index}'] = section.strip()
-    return section_dict
-
-def extract_chapters(text):
-    chapter_pattern = re.compile(r'Chapter\s+\d+\b.*', re.IGNORECASE)
-    sections = re.split(chapter_pattern, text)
-
-    chapters = {}
-    for index, section in enumerate(sections):
-        if section.strip():
-            chapter_title = chapter_pattern.search(text)
-            if chapter_title:
-                chapters[chapter_title.group()] = {'Section_0': section.strip()}
-            else:
-                chapters[f'Introduction_{index}'] = {'Section_0': section.strip()}
+# Endpoint to get chapters of a specific textbook by textbook ID
+@app.get("/textbooks/{textbook_id}/chapters/")
+async def get_chapters(textbook_id: int, db: Session = Depends(get_db)):
+    chapters = db.query(models.Chapter).filter(models.Chapter.textbook_id == textbook_id).all()
+    
+    if not chapters:
+        raise HTTPException(status_code=404, detail="No chapters found for this textbook.")
+    
     return chapters
+
+# Endpoint to view individual chapter by chapter_id
+@app.get("/chapters/{chapter_id}/")
+async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
+    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    
+    return chapter
