@@ -35,18 +35,23 @@ def extract_chapters_from_tex(tex_content: str):
 
 @app.post("/upload")
 async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # Check if the file is a .tex file by extension
-    if not file.filename.endswith('.tex'):
+    # Ensure it's a TeX file
+    if not file.filename.endswith(".tex"):
         raise HTTPException(status_code=400, detail="File format not supported. Please upload a TeX file.")
     
-    content = await file.read()
-    content_str = content.decode('utf-8')
-    
-    # Extract chapters from TeX content
+    try:
+        # Attempt to read the file as UTF-8
+        content = await file.read()
+        content_str = content.decode('utf-8')
+    except UnicodeDecodeError:
+        # If UTF-8 decoding fails, try with latin-1 as fallback
+        content_str = content.decode('latin-1')
+
+    # Extract chapters from the TeX content
     chapters = extract_chapters_from_tex(content_str)
 
     # Save the textbook and chapters
-    textbook = models.Textbook(title=file.filename, description="Description of the textbook")
+    textbook = models.Textbook(title="Some Title", description="Description of the textbook")
     db.add(textbook)
     db.commit()
     db.refresh(textbook)
@@ -58,6 +63,7 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
     db.commit()
 
     return {"message": "Textbook and chapters uploaded successfully"}
+
 
 # Endpoint to get all textbooks
 @app.get("/textbooks/")
