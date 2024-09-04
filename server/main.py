@@ -1,3 +1,4 @@
+import chardet
 import os
 import re
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException
@@ -18,51 +19,71 @@ def get_db():
     finally:
         db.close()
 
-# Function to extract chapters from TeX file
-def extract_chapters_from_tex(tex_content: str):
-    # Regular expression to match both \Chapter{*number*} and \Chapter[description]{*number*}
+def extract_chapters_and_sections_from_tex(tex_content: str):
+    # Regular expression to match chapters (\Chapter{*number*} or \Chapter[description]{*number*})
     chapter_pattern = re.compile(r'\\Chapter(\[.*?\])?\{(.+?)\}', re.MULTILINE)
-    chapters = re.split(chapter_pattern, tex_content)
+    # Regular expression to match sections (\Section[]{} or \Section{})
+    section_pattern = re.compile(r'\\Section(\[.*?\])?\{(.+?)\}', re.MULTILINE)
 
+    chapters = re.split(chapter_pattern, tex_content)
     result = []
+
     for i in range(1, len(chapters), 3):
-        # If there's a description in square brackets, we skip it and focus on the chapter title
-        title = chapters[i+1].strip()  # Chapter title
-        content = chapters[i+2].strip()  # Chapter content
-        result.append((title, content))
+        title = chapters[i + 1].strip()  # Chapter title
+        content = chapters[i + 2].strip()  # Chapter content
+
+        # Find sections within each chapter
+        sections = re.split(section_pattern, content)
+        chapter_data = {"title": title, "content": sections[0].strip(), "sections": []}
+
+        for j in range(1, len(sections), 3):
+            section_title = sections[j + 1].strip()  # Section title
+            section_content = sections[j + 2].strip()  # Section content
+            chapter_data["sections"].append({"title": section_title, "content": section_content})
+
+        result.append(chapter_data)
 
     return result
 
 @app.post("/upload")
 async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # Ensure it's a TeX file
-    if not file.filename.endswith(".tex"):
+    # Check if the file has a .tex extension
+    if not file.filename.endswith('.tex'):
         raise HTTPException(status_code=400, detail="File format not supported. Please upload a TeX file.")
     
+    content = await file.read()
+
+    # Detect file encoding using chardet
+    result = chardet.detect(content)
+    encoding = result['encoding']
+
     try:
-        # Attempt to read the file as UTF-8
-        content = await file.read()
-        content_str = content.decode('utf-8')
+        content_str = content.decode(encoding)
     except UnicodeDecodeError:
-        # If UTF-8 decoding fails, try with latin-1 as fallback
-        content_str = content.decode('latin-1')
+        raise HTTPException(status_code=400, detail="File encoding not supported.")
 
-    # Extract chapters from the TeX content
-    chapters = extract_chapters_from_tex(content_str)
+    # Use the function to extract chapters and sections
+    chapters = extract_chapters_and_sections_from_tex(content_str)
 
-    # Save the textbook and chapters
+    # Save the textbook
     textbook = models.Textbook(title="Some Title", description="Description of the textbook")
     db.add(textbook)
     db.commit()
     db.refresh(textbook)
 
-    for title, chapter_content in chapters:
-        chapter = models.Chapter(title=title, content=chapter_content, textbook_id=textbook.id)
+    for chapter_data in chapters:
+        chapter = models.Chapter(title=chapter_data['title'], content=chapter_data['content'], textbook_id=textbook.id)
         db.add(chapter)
-    
-    db.commit()
+        db.commit()
+        db.refresh(chapter)
 
-    return {"message": "Textbook and chapters uploaded successfully"}
+        # Save sections for each chapter
+        for section_data in chapter_data['sections']:
+            section = models.Section(title=section_data['title'], content=section_data['content'], chapter_id=chapter.id)
+            db.add(section)
+
+    db.commit()
+    return {"message": "Textbook and chapters with sections uploaded successfully"}
 
 
 # Endpoint to get all textbooks
@@ -81,12 +102,19 @@ async def get_chapters(textbook_id: int, db: Session = Depends(get_db)):
     
     return chapters
 
-# Endpoint to view individual chapter by chapter_id
-@app.get("/chapters/{chapter_id}/")
+@app.get("/chapters/{chapter_id}")
 async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
-    
     if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found.")
-    
-    return chapter
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    # Get associated sections
+    sections = db.query(models.Section).filter(models.Section.chapter_id == chapter_id).all()
+
+    return {
+        "id": chapter.id,
+        "title": chapter.title,
+        "content": chapter.content,
+        "sections": [{"id": section.id, "title": section.title, "content": section.content} for section in sections]
+    }
+

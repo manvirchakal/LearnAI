@@ -7,11 +7,9 @@ class Textbook(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, index=True)
-    description = Column(Text, nullable=True)
-    
-    # Relationship with chapters
-    chapters = relationship("Chapter", back_populates="textbook")
+    description = Column(String)
 
+    chapters = relationship("Chapter", back_populates="textbook")
 
 class Chapter(Base):
     __tablename__ = "chapters"
@@ -19,7 +17,17 @@ class Chapter(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, index=True)
     content = Column(Text)
+    textbook_id = Column(Integer, ForeignKey("textbooks.id"))
 
-    # Link to the textbook this chapter belongs to
-    textbook_id = Column(Integer, ForeignKey('textbooks.id'))
     textbook = relationship("Textbook", back_populates="chapters")
+    sections = relationship("Section", back_populates="chapter")
+
+class Section(Base):
+    __tablename__ = "sections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    content = Column(Text)
+    chapter_id = Column(Integer, ForeignKey("chapters.id"))
+
+    chapter = relationship("Chapter", back_populates="sections")
