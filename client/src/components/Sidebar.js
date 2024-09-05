@@ -1,5 +1,5 @@
-// src/components/Sidebar.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios'; // Import axios
 import { Drawer, List, ListItem, ListItemText, IconButton, Divider, Collapse, Box } from '@mui/material';
 import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as ExitToAppIcon, ExpandLess, ExpandMore } from '@mui/icons-material';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -7,6 +7,8 @@ import MenuIcon from '@mui/icons-material/Menu';
 const Sidebar = () => {
   const [open, setOpen] = useState(false);
   const [bookOpen, setBookOpen] = useState(false);
+  const [chapters, setChapters] = useState([]);
+  const [textbookTitle, setTextbookTitle] = useState('');
 
   const toggleDrawer = () => {
     setOpen(!open);
@@ -15,6 +17,22 @@ const Sidebar = () => {
   const handleBookClick = () => {
     setBookOpen(!bookOpen);
   };
+
+  // Fetch textbook structure (chapters and sections) using Axios
+  useEffect(() => {
+    const fetchTextbookStructure = async () => {
+      try {
+        const response = await axios.get('http://localhost:8000/textbooks/1/structure/');
+        const data = response.data;
+        setTextbookTitle(data.textbook_title);
+        setChapters(data.chapters);
+      } catch (error) {
+        console.error('Error fetching textbook structure:', error);
+      }
+    };
+
+    fetchTextbookStructure();
+  }, []);
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
@@ -51,26 +69,23 @@ const Sidebar = () => {
           <Divider />
           <ListItem button onClick={handleBookClick} sx={{ justifyContent: open ? 'flex-start' : 'center', paddingLeft: open ? '16px' : '8px' }}>
             <BookIcon />
-            {open && <ListItemText primary="Book Name" sx={{ marginLeft: '15px' }} />}
+            {open && <ListItemText primary={textbookTitle || "Book Name"} sx={{ marginLeft: '15px' }} />}
             {open && (bookOpen ? <ExpandLess /> : <ExpandMore />)}
           </ListItem>
           <Collapse in={bookOpen && open} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              <ListItem button sx={{ paddingLeft: open ? '30px' : '16px' }}>
-                <ListItemText primary="Chapter Name" />
-              </ListItem>
-              <ListItem button sx={{ paddingLeft: open ? '45px' : '16px' }}>
-                <ListItemText primary="SectionTitle" />
-              </ListItem>
-              <ListItem button sx={{ paddingLeft: open ? '45px' : '16px' }}>
-                <ListItemText primary="Current Section" />
-              </ListItem>
-              <ListItem button sx={{ paddingLeft: open ? '45px' : '16px' }}>
-                <ListItemText primary="SectionTitle" />
-              </ListItem>
-              <ListItem button sx={{ paddingLeft: open ? '30px' : '16px' }}>
-                <ListItemText primary="Chapter Name" />
-              </ListItem>
+              {chapters.map((chapter) => (
+                <div key={chapter.id}>
+                  <ListItem button sx={{ paddingLeft: open ? '30px' : '16px' }}>
+                    <ListItemText primary={chapter.title} />
+                  </ListItem>
+                  {chapter.sections.map((section) => (
+                    <ListItem key={section.id} button sx={{ paddingLeft: open ? '45px' : '16px' }}>
+                      <ListItemText primary={section.title} />
+                    </ListItem>
+                  ))}
+                </div>
+              ))}
             </List>
           </Collapse>
         </List>

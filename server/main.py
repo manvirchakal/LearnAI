@@ -1,20 +1,38 @@
 import chardet
 import os
 import re
+import logging 
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
+from fastapi.middleware.cors import CORSMiddleware
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
 
+# Initialize logging
+logging.basicConfig(level=logging.DEBUG)
+
 app = FastAPI()
 
+# Allow your frontend origin
+origins = [
+    "http://localhost:3000",  # React frontend origin
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Load Llama 3.1 8B with 4-bit quantization
-model_name = "LoneStriker/Meta-Llama-3.1-8B-Instruct-8.0bpw-h8-exl2"
+model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 # Initialize quantization config for 4-bit
 quantization_config = BitsAndBytesConfig(
@@ -40,26 +58,40 @@ def get_db():
         db.close()
 
 def extract_chapters_and_sections_from_tex(tex_content: str):
-    # Regular expression to match chapters (\Chapter{*number*} or \Chapter[description]{*number*})
-    chapter_pattern = re.compile(r'\\Chapter(\[.*?\])?\{(.+?)\}', re.MULTILINE)
-    # Regular expression to match sections (\Section[]{} or \Section{})
-    section_pattern = re.compile(r'\\Section(\[.*?\])?\{(.+?)\}', re.MULTILINE)
+    # Updated Chapter pattern with more flexibility
+    chapter_pattern = re.compile(r'\\Chapter(\[.*?\])?\s*\n*\{([IVXLCDM]+)\}\s*\{(.+?)\}\n*', re.MULTILINE)
 
+    # Section pattern remains the same but with added flexibility for spacing
+    section_pattern = re.compile(r'\\Section(\[.*?\])?\s*\{(.+?)\}', re.MULTILINE)
+
+    # Debug: log content length and first 500 chars to ensure content is being processed
+    logging.debug(f"Processing TeX content of length {len(tex_content)}. First 500 chars:\n{tex_content[:500]}")
+    
+    # Split chapters
     chapters = re.split(chapter_pattern, tex_content)
+    
     result = []
-
-    for i in range(1, len(chapters), 3):
-        title = chapters[i + 1].strip()  # Chapter title
-        content = chapters[i + 2].strip()  # Chapter content
+    
+    logging.debug(f"Number of chapters found: {len(chapters)//3}")
+    
+    for i in range(1, len(chapters), 4):
+        title = chapters[i + 2].strip()  # Chapter title
+        content = chapters[i + 3].strip()  # Chapter content
+        
+        logging.debug(f"Processing Chapter: {title}. Content length: {len(content)}")
 
         # Find sections within each chapter
         sections = re.split(section_pattern, content)
         chapter_data = {"title": title, "content": sections[0].strip(), "sections": []}
 
+        logging.debug(f"Number of sections found: {len(sections)//3}")
+
         for j in range(1, len(sections), 3):
             section_title = sections[j + 1].strip()  # Section title
             section_content = sections[j + 2].strip()  # Section content
             chapter_data["sections"].append({"title": section_title, "content": section_content})
+            
+            logging.debug(f"Added Section: {section_title}. Content length: {len(section_content)}")
 
         result.append(chapter_data)
 
@@ -72,6 +104,9 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
         raise HTTPException(status_code=400, detail="File format not supported. Please upload a TeX file.")
     
     content = await file.read()
+    
+    # Debug: log file size
+    logging.debug(f"Uploaded file: {file.filename}, size: {len(content)} bytes")
 
     # Detect file encoding using chardet
     result = chardet.detect(content)
@@ -79,7 +114,10 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
 
     try:
         content_str = content.decode(encoding)
+        # Debug: log successful decoding
+        logging.debug(f"File decoded successfully using {encoding} encoding.")
     except UnicodeDecodeError:
+        logging.error("File encoding not supported.")
         raise HTTPException(status_code=400, detail="File encoding not supported.")
 
     # Extract chapters and sections
@@ -90,6 +128,9 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
     db.add(textbook)
     db.commit()
     db.refresh(textbook)
+
+    # Debug: log chapters being saved
+    logging.debug(f"Saving textbook with {len(chapters)} chapters.")
 
     for chapter_data in chapters:
         chapter = models.Chapter(title=chapter_data['title'], content=chapter_data['content'], textbook_id=textbook.id)
@@ -103,6 +144,7 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
             db.add(section)
 
     db.commit()
+    logging.debug("Textbook and chapters with sections uploaded successfully.")
     return {"message": "Textbook and chapters with sections uploaded successfully"}
 
 def remove_latex_commands(text: str) -> str:
@@ -199,4 +241,31 @@ async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
         "title": chapter.title,
         "content": chapter.content,
         "sections": [{"id": section.id, "title": section.title, "content": section.content} for section in sections]
+    }
+
+@app.get("/textbooks/{textbook_id}/structure/")
+async def get_textbook_structure(textbook_id: int, db: Session = Depends(get_db)):
+    textbook = db.query(models.Textbook).filter(models.Textbook.id == textbook_id).first()
+    
+    if not textbook:
+        raise HTTPException(status_code=404, detail="Textbook not found")
+    
+    chapters = db.query(models.Chapter).filter(models.Chapter.textbook_id == textbook_id).all()
+    
+    textbook_structure = []
+    
+    for chapter in chapters:
+        sections = db.query(models.Section).filter(models.Section.chapter_id == chapter.id).all()
+        section_data = [{"title": section.title, "id": section.id} for section in sections]
+        
+        chapter_data = {
+            "id": chapter.id,
+            "title": chapter.title,
+            "sections": section_data
+        }
+        textbook_structure.append(chapter_data)
+    
+    return {
+        "textbook_title": textbook.title,
+        "chapters": textbook_structure
     }
