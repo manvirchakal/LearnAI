@@ -32,7 +32,10 @@ app.add_middleware(
 )
 
 # Load Llama 3.1 8B with 4-bit quantization
-model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+# model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+# Load Llama 3.1 8B with 4-bit quantization
+model_name = "mistralai/Mistral-7B-Instruct-v0.3"
 
 # Initialize quantization config for 4-bit
 quantization_config = BitsAndBytesConfig(
@@ -174,9 +177,9 @@ def generate_narrative(text: str):
     output_tokens = model.generate(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        max_new_tokens=4000,  # Increased to allow for more detailed outputs
-        temperature=0.5,  # Lowered to make explanations more consistent and focused
-        repetition_penalty=1.1,  # Reduced to allow for more depth in the explanation
+        max_new_tokens=2000,  # Increased to allow for more detailed outputs
+        temperature=0.9,  # Lowered to make explanations more consistent and focused
+        repetition_penalty=1.0,  # Reduced to allow for more depth in the explanation
     )
 
     # Decode the output

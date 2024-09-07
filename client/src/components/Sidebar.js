@@ -22,7 +22,7 @@ const Sidebar = () => {
   useEffect(() => {
     const fetchTextbookStructure = async () => {
       try {
-        const response = await axios.get('http://localhost:8000/textbooks/1/structure/');
+        const response = await axios.get('http://localhost:8000/textbooks/5/structure/');
         const data = response.data;
         setTextbookTitle(data.textbook_title);
         setChapters(data.chapters);
