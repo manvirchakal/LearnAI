@@ -2,13 +2,19 @@ import chardet
 import os
 import re
 import logging 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 from fastapi.middleware.cors import CORSMiddleware
+import cv2
+import threading
+from fer import FER
+from fastapi.responses import StreamingResponse
+import json
+import asyncio
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -31,6 +37,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Manage WebSocket connections
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
+
+# Emotion Detection using FER
+emotion_detector = FER()
+emotion_websocket = None  # Store the WebSocket globally
+
 # Load Llama 3.1 8B with 4-bit quantization
 # model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
@@ -52,6 +80,61 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=quantization_config
 )
 
+# Global variable to store the captured frame
+frame = None
+
+def capture_video():
+    global frame, emotion_websocket
+    cap = cv2.VideoCapture(0)  # Default webcam
+    logging.info("Video capture started.")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            logging.error("Failed to capture frame from webcam.")
+            break
+
+        # Emotion detection
+        emotions = emotion_detector.detect_emotions(frame)
+        if emotions:
+            for face in emotions:
+                logging.debug(f"Detected emotions: {face['emotions']}")
+                
+                dominant_emotion = max(face["emotions"], key=face["emotions"].get)
+                confidence = face["emotions"][dominant_emotion]
+                logging.debug(f"Dominant emotion: {dominant_emotion}, confidence: {confidence}")
+
+                # Send "angry" emotion if confidence > 0.5
+                if dominant_emotion == "angry" and confidence > 0.5:
+                    emotion_data = json.dumps({"emotion": "angry"})
+                    if emotion_websocket:
+                        asyncio.run(manager.broadcast(emotion_data))
+                        logging.info(f"Broadcasting emotion data: {emotion_data}")
+
+        cv2.waitKey(10)
+    cap.release()
+    logging.info("Video capture stopped.")
+
+
+# Start capturing video in a separate thread
+thread = threading.Thread(target=capture_video, daemon=True)
+thread.start()
+
+@app.get("/webcam_feed")
+async def webcam_feed():
+    global frame
+    def generate():
+        global frame
+        while True:
+            if frame is not None:
+                resized_frame = cv2.resize(frame, (200, 150))  # Resize for viewport
+                ret, jpeg = cv2.imencode('.jpg', resized_frame)
+                frame_bytes = jpeg.tobytes()
+                yield (b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+    return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
 # Dependency to get DB session
 def get_db():
     db = SessionLocal()
@@ -59,6 +142,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# WebSocket connection handler
+@app.websocket("/ws/emotion")
+async def emotion_websocket(websocket: WebSocket):
+    logging.debug("WebSocket connection request received.")
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logging.debug(f"Received from client: {data}")
+            await websocket.send_text(f"Emotion received: {data}")
+            logging.debug(f"Sent emotion confirmation to client: {data}")
+    except WebSocketDisconnect:
+        logging.info("WebSocket connection closed")
+    except Exception as e:
+        logging.error(f"Error in WebSocket connection: {e}")
+
 
 def extract_chapters_and_sections_from_tex(tex_content: str):
     # Updated Chapter pattern with more flexibility
@@ -181,6 +281,15 @@ def generate_narrative(text: str):
         temperature=0.9,  # Lowered to make explanations more consistent and focused
         repetition_penalty=1.0,  # Reduced to allow for more depth in the explanation
     )
+
+    # Generate response with a higher token limit and lower temperature
+    #output_tokens = model.generate(
+    #    input_ids=input_ids,
+    #    attention_mask=attention_mask,
+    #    max_new_tokens=2000,  # Increased to allow for more detailed outputs
+    #    temperature=0.9,  # Lowered to make explanations more consistent and focused
+    #    repetition_penalty=1.0,  # Reduced to allow for more depth in the explanation
+    #)
 
     # Decode the output
     generated_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
