@@ -16,6 +16,11 @@ from fastapi.responses import StreamingResponse
 import json
 import asyncio
 
+from haystack.document_stores import InMemoryDocumentStore
+from haystack.nodes import BM25Retriever, PromptNode
+from haystack.pipelines import Pipeline
+
+
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
 
@@ -82,6 +87,11 @@ model = AutoModelForCausalLM.from_pretrained(
 
 # Global variable to store the captured frame
 frame = None
+
+# Set up Haystack components
+document_store = InMemoryDocumentStore()
+retriever = BM25Retriever(document_store=document_store)
+
 
 def capture_video():
     global frame, emotion_websocket
@@ -261,7 +271,21 @@ def remove_latex_commands(text: str) -> str:
     return cleaned_text.strip()
 
 
-def generate_narrative(text: str):
+# Adding the other textbooks to the document store for RAG Purposes
+#This function also adds the textbook which has the chapter we generate the narrative from as well so there might be slight redundant data
+def add_textbooks_to_store(db: Session):
+    textbooks = db.query(models.Textbook).all()
+    documents = [{"content": remove_latex_commands(textbook.content)} for textbook in textbooks]
+    document_store.write_documents(documents)
+
+# Retrieve supplementary textbooks to use for RAG
+def retrieve_supplementary_content(textbook_content: str, top_k=3):
+    # Retrieve top-k relevant documents
+    retrieved_docs = retriever.retrieve(query=textbook_content, top_k=top_k)
+    supplementary_content = " ".join([doc.content for doc in retrieved_docs])
+    return supplementary_content
+
+def generate_narrative(text: str, supplementary_chapters: str):
     # Preprocess the text to remove LaTeX commands
     cleaned_text = remove_latex_commands(text)
 
@@ -309,11 +333,18 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
     # Clean the LaTeX content before sending it to the model
     cleaned_chapter_content = remove_latex_commands(chapter.content)
 
+    # Retrieve supplementary content from other textbooks
+    supplementary_content = retrieve_supplementary_content(cleaned_chapter_content)
+    #Does this supplementary content need to cleaned of Latex Content as well?
+    cleaned_supplementary_content = remove_latex_commands(supplementary_content)
+
     system_message = (
         f"Act as an experienced teacher who wants to make complex topics simple and interesting. List out and explain the key concepts from the following chapter with clear analogies and relatable examples. "
         f"Use varied, real-world scenarios to demonstrate how each concept works in practical situations. Provide detailed explanations that uncover different aspects of the material, and don't hesitate to go deep into each idea. "
+        f"Also use the additional texbook material to help supplement the narrative you build. Use examples and information from the additional textbooks to help build the narrative which explains the chapter that is the focus, but the supplementary textbooks should not become the focus. "
         f"Instead of summarizing, imagine you are guiding the learner through each concept with patience, ensuring they grasp not just the 'what' but also the 'why' behind the material.\n\n"
         f"Chapter content: {cleaned_chapter_content}\n"
+        f"Additional content from other textbooks: {supplementary_content}\n\n"
         f"---\n"
         f"Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"
     )
