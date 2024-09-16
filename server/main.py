@@ -6,15 +6,15 @@ from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-import torch
-from fastapi.middleware.cors import CORSMiddleware
+from google.cloud import aiplatform
+from vertexai.language_models import TextGenerationModel
 import cv2
 import threading
 from fer import FER
 from fastapi.responses import StreamingResponse
 import json
 import asyncio
+from fastapi.middleware.cors import CORSMiddleware
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -59,26 +59,11 @@ manager = ConnectionManager()
 emotion_detector = FER()
 emotion_websocket = None  # Store the WebSocket globally
 
-# Load Llama 3.1 8B with 4-bit quantization
-# model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+# Initialize Vertex AI
+aiplatform.init(project="the-program-434420-u3", location="us-central1")
 
-# Load Llama 3.1 8B with 4-bit quantization
-model_name = "mistralai/Mistral-7B-Instruct-v0.3"
-
-# Initialize quantization config for 4-bit
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,  # Changed to fp16 for performance
-    llm_int8_enable_fp32_cpu_offload=True  # Enable fp32 offload for larger models
-)
-
-# Load the tokenizer and model with quantization config
-tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    device_map="auto",
-    quantization_config=quantization_config
-)
+# Initialize the Vertex AI model
+model = TextGenerationModel.from_pretrained("text-bison@001")
 
 # Global variable to store the captured frame
 frame = None
@@ -265,35 +250,31 @@ def generate_narrative(text: str):
     # Preprocess the text to remove LaTeX commands
     cleaned_text = remove_latex_commands(text)
 
-    # Set pad_token to eos_token if it's not already set
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    prompt = f"""
+    Based on the following chapter content, provide an in-depth explanation of the key concepts. For each concept:
+    1. Define it clearly
+    2. Provide a real-world analogy
+    3. Give at least two practical examples
+    4. Explain how it relates to other concepts in the chapter
+    5. Discuss its importance or applications
 
-    inputs = tokenizer(cleaned_text, return_tensors="pt", padding=True).to("cuda")
-    input_ids = inputs["input_ids"]
-    attention_mask = inputs["attention_mask"]
+    Use clear, engaging language suitable for a student new to these concepts. Aim for a comprehensive explanation that covers all major points in the chapter.
 
-    # Generate response with a higher token limit and lower temperature
-    output_tokens = model.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        max_new_tokens=2000,  # Increased to allow for more detailed outputs
-        temperature=0.9,  # Lowered to make explanations more consistent and focused
-        repetition_penalty=1.0,  # Reduced to allow for more depth in the explanation
+    Chapter content: {cleaned_text}
+
+    Now, provide the detailed explanation:
+    """
+
+    # Generate response using Vertex AI
+    response = model.predict(
+        prompt,
+        max_output_tokens=1024,
+        temperature=0.7,
+        top_k=40,
+        top_p=0.8,
     )
 
-    # Generate response with a higher token limit and lower temperature
-    #output_tokens = model.generate(
-    #    input_ids=input_ids,
-    #    attention_mask=attention_mask,
-    #    max_new_tokens=2000,  # Increased to allow for more detailed outputs
-    #    temperature=0.9,  # Lowered to make explanations more consistent and focused
-    #    repetition_penalty=1.0,  # Reduced to allow for more depth in the explanation
-    #)
-
-    # Decode the output
-    generated_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-
+    generated_text = response.text
     print(generated_text)
 
     return generated_text
@@ -301,10 +282,15 @@ def generate_narrative(text: str):
 
 @app.get("/generate-narrative/{chapter_id}")
 async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get_db)):
+    logging.info(f"Generating narrative for chapter_id: {chapter_id}")
+    
     # Fetch the chapter content
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
     if not chapter:
+        logging.error(f"Chapter with id {chapter_id} not found")
         raise HTTPException(status_code=404, detail="Chapter not found")
+
+    logging.info(f"Found chapter: {chapter.title}")
 
     # Clean the LaTeX content before sending it to the model
     cleaned_chapter_content = remove_latex_commands(chapter.content)
@@ -380,4 +366,22 @@ async def get_textbook_structure(textbook_id: int, db: Session = Depends(get_db)
     return {
         "textbook_title": textbook.title,
         "chapters": textbook_structure
+    }
+
+@app.get("/check-chapters")
+async def check_chapters(db: Session = Depends(get_db)):
+    chapters = db.query(models.Chapter).all()
+    return {"total_chapters": len(chapters), "chapters": [{"id": c.id, "title": c.title} for c in chapters]}
+
+@app.get("/sections/{section_id}")
+async def get_section(section_id: int, db: Session = Depends(get_db)):
+    section = db.query(models.Section).filter(models.Section.id == section_id).first()
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    return {
+        "id": section.id,
+        "title": section.title,
+        "content": section.content,
+        "chapter_id": section.chapter_id
     }

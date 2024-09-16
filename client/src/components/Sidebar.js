@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios'; // Import axios
+import axios from 'axios';
 import { Drawer, List, ListItem, ListItemText, IconButton, Divider, Collapse, Box } from '@mui/material';
 import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as ExitToAppIcon, ExpandLess, ExpandMore } from '@mui/icons-material';
 import MenuIcon from '@mui/icons-material/Menu';
 
-const Sidebar = () => {
-  const [open, setOpen] = useState(false);
+const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
+  const [open, setOpenState] = useState(false);
   const [bookOpen, setBookOpen] = useState(false);
   const [chapters, setChapters] = useState([]);
   const [textbookTitle, setTextbookTitle] = useState('');
 
   const toggleDrawer = () => {
+    setOpenState(!open);
     setOpen(!open);
   };
 
@@ -22,7 +23,7 @@ const Sidebar = () => {
   useEffect(() => {
     const fetchTextbookStructure = async () => {
       try {
-        const response = await axios.get('http://localhost:8000/textbooks/5/structure/');
+        const response = await axios.get('http://localhost:8000/textbooks/1/structure/');
         const data = response.data;
         setTextbookTitle(data.textbook_title);
         setChapters(data.chapters);
@@ -35,13 +36,10 @@ const Sidebar = () => {
   }, []);
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
+    <div>
       <Drawer
         variant="permanent"
-        anchor="left"
-        open={open}
         sx={{
-          width: open ? 240 : 60,
           flexShrink: 0,
           '& .MuiDrawer-paper': {
             width: open ? 240 : 60,
@@ -76,11 +74,11 @@ const Sidebar = () => {
             <List component="div" disablePadding>
               {chapters.map((chapter) => (
                 <div key={chapter.id}>
-                  <ListItem button sx={{ paddingLeft: open ? '30px' : '16px' }}>
+                  <ListItem button sx={{ paddingLeft: open ? '30px' : '16px' }} onClick={() => onChapterSelect(chapter.id)}>
                     <ListItemText primary={chapter.title} />
                   </ListItem>
                   {chapter.sections.map((section) => (
-                    <ListItem key={section.id} button sx={{ paddingLeft: open ? '45px' : '16px' }}>
+                    <ListItem key={section.id} button sx={{ paddingLeft: open ? '45px' : '16px' }} onClick={() => onSectionSelect(section.id)}>
                       <ListItemText primary={section.title} />
                     </ListItem>
                   ))}
