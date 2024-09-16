@@ -74,7 +74,7 @@ To install LearnAI, follow these steps:
 
 To use LearnAI, follow these steps:
 
-1. Replace:
+1. Replace at line 63 in server/main.py:
    ```
    aiplatform.init(project="the-program-434420-u3", location="us-central1")
    ```
