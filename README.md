@@ -60,7 +60,6 @@ To install LearnAI, follow these steps:
      ```
      source venv/Scripts/activate
      ```
-4. Install specific PyTorch version for you CUDA from the link: https://pytorch.org/get-started/locally/
 5. Install the required dependencies:
    ```
    pip install -r requirements.txt
@@ -75,11 +74,23 @@ To install LearnAI, follow these steps:
 
 To use LearnAI, follow these steps:
 
-1. To run the server:
+1. Replace:
+   ```
+   aiplatform.init(project="the-program-434420-u3", location="us-central1")
+   ```
+   with
+   ```
+   aiplatform.init(project="{your project ID from GCP}", location="us-central1")
+   ```
+2. Login to Gcloud using(install GCP CLI if you have not from https://cloud.google.com/sdk/docs/install):
+   ```
+   gcloud auth login
+   ```
+3. To run the server:
    ```
    uvicorn server.main:app --reload
    ```
-2. To run the client:
+4. To run the client:
    ```
    cd client
    npm start
