@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
 from google.cloud import aiplatform
-from vertexai.language_models import TextGenerationModel
 import cv2
 import threading
 from fer import FER
@@ -15,6 +14,17 @@ from fastapi.responses import StreamingResponse
 import json
 import asyncio
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
+import google.auth
+from google.auth.transport.requests import Request
+import os
+import json
+import logging
+
+import os
+
+os.environ['GOOGLE_PROJECT_ID'] = 'the-program-434420-u3'
+os.environ['GOOGLE_REGION'] = 'us-central1'
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -61,9 +71,6 @@ emotion_websocket = None  # Store the WebSocket globally
 
 # Initialize Vertex AI
 aiplatform.init(project="the-program-434420-u3", location="us-central1")
-
-# Initialize the Vertex AI model
-model = TextGenerationModel.from_pretrained("text-bison@001")
 
 # Global variable to store the captured frame
 frame = None
@@ -245,40 +252,100 @@ def remove_latex_commands(text: str) -> str:
     cleaned_text = re.sub(r"[{}%]", "", cleaned_text)
     return cleaned_text.strip()
 
+def get_credentials():
+    credentials, project_id = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    credentials.refresh(Request())
+    return credentials.token
 
-def generate_narrative(text: str):
-    # Preprocess the text to remove LaTeX commands
+def build_endpoint_url(
+    region: str,
+    project_id: str,
+    model_name: str,
+    model_version: str,
+    streaming: bool = False,
+):
+    base_url = f"https://{region}-aiplatform.googleapis.com/v1/"
+    project_fragment = f"projects/{project_id}"
+    location_fragment = f"locations/{region}"
+    specifier = "streamRawPredict" if streaming else "rawPredict"
+    model_fragment = f"publishers/mistralai/models/{model_name}@{model_version}"
+    url = f"{base_url}{'/'.join([project_fragment, location_fragment, model_fragment])}:{specifier}"
+    
+    logging.info(f"Built URL: {url}")
+    logging.info(f"Project ID: {project_id}")
+    logging.info(f"Region: {region}")
+    
+    return url
+
+def generate_narrative(text: str, max_attempts=3, max_tokens=8192):
+    model = "mistral-large"
+    model_version = "2407"
     cleaned_text = remove_latex_commands(text)
 
-    prompt = f"""
-    Based on the following chapter content, provide an in-depth explanation of the key concepts. For each concept:
+    project_id = os.environ.get('GOOGLE_PROJECT_ID')
+    region = os.environ.get('GOOGLE_REGION')
+    url = build_endpoint_url(region, project_id, model, model_version)
+
+    headers = {
+        "Authorization": f"Bearer {get_credentials()}",
+        "Accept": "application/json",
+    }
+
+    prompt_template = """
+    Continue the explanation of key concepts from the following chapter content. For each concept:
     1. Define it clearly
     2. Provide a real-world analogy
     3. Give at least two practical examples
     4. Explain how it relates to other concepts in the chapter
     5. Discuss its importance or applications
 
-    Use clear, engaging language suitable for a student new to these concepts. Aim for a comprehensive explanation that covers all major points in the chapter.
+    Use clear, engaging language suitable for a student new to these concepts. 
+    Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
-    Chapter content: {cleaned_text}
+    If this is a continuation, pick up where the previous explanation left off.
 
-    Now, provide the detailed explanation:
+    Chapter content: {content}
+
+    Now, continue or start the detailed explanation:
     """
 
-    # Generate response using Vertex AI
-    response = model.predict(
-        prompt,
-        max_output_tokens=1024,
-        temperature=0.7,
-        top_k=40,
-        top_p=0.8,
-    )
+    full_response = ""
+    for i in range(max_attempts):
+        current_prompt = prompt_template.format(content=cleaned_text)
+        if i > 0:
+            current_prompt = "Continue from: " + full_response[-500:] + "\n" + current_prompt
 
-    generated_text = response.text
-    print(generated_text)
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": current_prompt}],
+            "stream": False,
+        }
 
-    return generated_text
+        with httpx.Client() as client:
+            resp = client.post(url, json=payload, headers=headers, timeout=None)
 
+        if resp.status_code == 200:
+            try:
+                response_data = resp.json()
+                # Update this part to match the actual response structure
+                generated_text = response_data['choices'][0]['message']['content']
+                full_response += " " + generated_text
+
+                # Check if the response seems complete
+                if generated_text.endswith(".") and len(generated_text) < max_tokens * 0.9:
+                    break
+            except (json.JSONDecodeError, KeyError) as e:
+                logging.error(f"Error parsing response: {e}")
+                logging.debug(f"Response content: {resp.text}")  # Add this line for debugging
+                return f"Error parsing response: {str(e)}"
+        else:
+            logging.error(f"API returned non-200 status code: {resp.status_code}")
+            logging.debug(f"Response content: {resp.text}")  # Add this line for debugging
+            return f"Error: API returned status code {resp.status_code}"
+
+    return full_response
 
 @app.get("/generate-narrative/{chapter_id}")
 async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get_db)):
@@ -304,10 +371,12 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
         f"Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"
     )
 
-    # Generate the narrative using the updated message
-    narrative = generate_narrative(system_message)
-
-    return {"narrative": narrative}
+    try:
+        narrative = generate_narrative(system_message)
+        return {"narrative": narrative}
+    except Exception as e:
+        logging.exception("Error in generate_narrative")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to get all textbooks
 @app.get("/textbooks/")

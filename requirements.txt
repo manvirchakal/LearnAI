@@ -12,3 +12,4 @@ websockets
 aiofiles
 huggingface_hub
 tensorflow
+httpx
