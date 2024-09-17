@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Typography, Paper, InputBase, Divider, IconButton, Button, Collapse } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
@@ -8,6 +8,25 @@ import axios from 'axios';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000'; // Replace with your backend server URL
+
+const processLatex = (content) => {
+  // Replace \First{text} with <strong>text</strong>
+  content = content.replace(/\\First\{(.*?)\}/g, '<strong>$1</strong>');
+
+  // Replace \emph{text} with <em>text</em>
+  content = content.replace(/\\emph\{(.*?)\}/g, '<em>$1</em>');
+
+  // Replace \ds\int with ∫
+  content = content.replace(/\\ds\\int/g, '∫');
+
+  // Replace ~ with &nbsp;
+  content = content.replace(/~/g, '&nbsp;');
+
+  // Wrap inline math in MathJax delimiters
+  content = content.replace(/\$(.*?)\$/g, '\\($1\\)');
+
+  return content;
+};
 
 const Study = () => {
   const [textbookId, setTextbookId] = useState(1); // Example textbook ID
@@ -20,6 +39,8 @@ const Study = () => {
   const [narrative, setNarrative] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
+
+  const contentRef = useRef(null);
 
   // WebSocket connection for emotion detection
   useEffect(() => {
@@ -156,6 +177,16 @@ const Study = () => {
     setChatExpanded(!chatExpanded);
   };
 
+  useEffect(() => {
+    if (window.MathJax && contentRef.current) {
+      const content = section ? section.content : chapter ? chapter.content : 'Loading content...';
+      contentRef.current.innerHTML = processLatex(content);
+      window.MathJax.typesetPromise([contentRef.current]).then(() => {
+        console.log('MathJax typesetting completed');
+      }).catch((err) => console.error('MathJax typesetting failed:', err));
+    }
+  }, [section, chapter]);
+
   return (
     <Box display="flex" height="100vh">
       <Sidebar onChapterSelect={handleChapterSelect} onSectionSelect={handleSectionSelect} setOpen={setSidebarOpen} />
@@ -172,9 +203,7 @@ const Study = () => {
           {/* Left Pane: Chapter Content */}
           <Box display="flex" flexDirection="column" flex={1} marginRight={2}>
             <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto' }}>
-              <Typography variant="body1">
-                {section ? section.content : chapter ? chapter.content : 'Loading content...'}
-              </Typography>
+              <div ref={contentRef} />
             </Paper>
           </Box>
           {/* Right Pane: Generated Narrative */}

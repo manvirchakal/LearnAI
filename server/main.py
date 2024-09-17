@@ -244,13 +244,32 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
 
 def remove_latex_commands(text: str) -> str:
     """
-    Remove common LaTeX commands and symbols from the text.
+    Prepare LaTeX commands for rendering in the browser.
     """
-    # Remove LaTeX commands
-    cleaned_text = re.sub(r"\\[a-zA-Z]+(\[.*?\])?(\{.*?\})?", "", text)
-    # Remove curly braces and percent signs
-    cleaned_text = re.sub(r"[{}%]", "", cleaned_text)
-    return cleaned_text.strip()
+    # Replace display math environments
+    text = re.sub(r'\\begin\{equation\}(.*?)\\end\{equation\}', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
+    
+    # Replace inline math environments
+    text = re.sub(r'\\\((.*?)\\\)', r'$\1$', text)
+    text = re.sub(r'\$\$(.*?)\$\$', r'$$\1$$', text)
+    
+    # Replace \efrac with \frac
+    text = re.sub(r'\\efrac', r'\\frac', text)
+    
+    # Replace \DPtypo{wrong}{right} with right
+    text = re.sub(r'\\DPtypo\{.*?\}\{(.*?)\}', r'\1', text)
+    
+    # Remove other LaTeX commands that MathJax doesn't need
+    text = re.sub(r'\\(chapter|section|subsection|paragraph)\*?(\[.*?\])?\{(.*?)\}', r'\3', text)
+    
+    # Replace \Pagelabel, \DPPageSep, etc. with nothing
+    text = re.sub(r'\\(Pagelabel|DPPageSep|Pageref|BindMath)(\{.*?\})+', '', text)
+    
+    # Replace \emph{text} with *text*
+    text = re.sub(r'\\emph\{(.*?)\}', r'*\1*', text)
+    
+    return text.strip()
 
 def get_credentials():
     credentials, project_id = google.auth.default(
@@ -280,7 +299,7 @@ def build_endpoint_url(
     return url
 
 def generate_narrative(text: str, max_attempts=3, max_tokens=8192):
-    model = "mistral-large"
+    model = "mistral-nemo"
     model_version = "2407"
     cleaned_text = remove_latex_commands(text)
 
@@ -400,14 +419,13 @@ async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    # Get associated sections
     sections = db.query(models.Section).filter(models.Section.chapter_id == chapter_id).all()
 
     return {
         "id": chapter.id,
         "title": chapter.title,
-        "content": chapter.content,
-        "sections": [{"id": section.id, "title": section.title, "content": section.content} for section in sections]
+        "content": remove_latex_commands(chapter.content),
+        "sections": [{"id": section.id, "title": section.title, "content": remove_latex_commands(section.content)} for section in sections]
     }
 
 @app.get("/textbooks/{textbook_id}/structure/")
@@ -451,6 +469,6 @@ async def get_section(section_id: int, db: Session = Depends(get_db)):
     return {
         "id": section.id,
         "title": section.title,
-        "content": section.content,
+        "content": remove_latex_commands(section.content),
         "chapter_id": section.chapter_id
     }
