@@ -20,6 +20,9 @@ from google.auth.transport.requests import Request
 import os
 import json
 import logging
+import tempfile
+import subprocess
+from fastapi.responses import FileResponse
 
 import os
 
@@ -47,69 +50,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Manage WebSocket connections
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-manager = ConnectionManager()
-
-# Emotion Detection using FER
-emotion_detector = FER()
-emotion_websocket = None  # Store the WebSocket globally
-
 # Initialize Vertex AI
 aiplatform.init(project="the-program-434420-u3", location="us-central1")
-
-# Global variable to store the captured frame
-frame = None
-
-def capture_video():
-    global frame, emotion_websocket
-    cap = cv2.VideoCapture(0)  # Default webcam
-    logging.info("Video capture started.")
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            logging.error("Failed to capture frame from webcam.")
-            break
-
-        # Emotion detection
-        emotions = emotion_detector.detect_emotions(frame)
-        if emotions:
-            for face in emotions:
-                logging.debug(f"Detected emotions: {face['emotions']}")
-                
-                dominant_emotion = max(face["emotions"], key=face["emotions"].get)
-                confidence = face["emotions"][dominant_emotion]
-                logging.debug(f"Dominant emotion: {dominant_emotion}, confidence: {confidence}")
-
-                # Send "angry" emotion if confidence > 0.5
-                if dominant_emotion == "angry" and confidence > 0.5:
-                    emotion_data = json.dumps({"emotion": "angry"})
-                    if emotion_websocket:
-                        asyncio.run(manager.broadcast(emotion_data))
-                        logging.info(f"Broadcasting emotion data: {emotion_data}")
-
-        cv2.waitKey(10)
-    cap.release()
-    logging.info("Video capture stopped.")
-
-
-# Start capturing video in a separate thread
-thread = threading.Thread(target=capture_video, daemon=True)
-thread.start()
 
 @app.get("/webcam_feed")
 async def webcam_feed():
@@ -419,13 +361,11 @@ async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    sections = db.query(models.Section).filter(models.Section.chapter_id == chapter_id).all()
-
     return {
         "id": chapter.id,
         "title": chapter.title,
-        "content": remove_latex_commands(chapter.content),
-        "sections": [{"id": section.id, "title": section.title, "content": remove_latex_commands(section.content)} for section in sections]
+        "content": chapter.content,
+        "sections": [{"id": section.id, "title": section.title} for section in chapter.sections]
     }
 
 @app.get("/textbooks/{textbook_id}/structure/")
@@ -469,6 +409,6 @@ async def get_section(section_id: int, db: Session = Depends(get_db)):
     return {
         "id": section.id,
         "title": section.title,
-        "content": remove_latex_commands(section.content),
+        "content": section.content,
         "chapter_id": section.chapter_id
     }

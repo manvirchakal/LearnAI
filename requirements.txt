@@ -13,3 +13,4 @@ aiofiles
 huggingface_hub
 tensorflow
 httpx
+pdflatex

@@ -1,102 +1,102 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, InputBase, Divider, IconButton, Button, Collapse } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
+import styles from '../styles/Study.module.css'; // Import the CSS module
+import MathJax from 'react-mathjax';
 
 // Set the base URL for Axios
-axios.defaults.baseURL = 'http://localhost:8000'; // Replace with your backend server URL
+axios.defaults.baseURL = 'http://localhost:8000';
 
-const processLatex = (content) => {
-  // Replace \First{text} with <strong>text</strong>
-  content = content.replace(/\\First\{(.*?)\}/g, '<strong>$1</strong>');
+// Add this function inside your component file, but outside of the component function
+const preprocessLatex = (content) => {
+  return content
+    // Preserve LaTeX math environments
+    .replace(/\\\[/g, '<div class="equation">\\[')
+    .replace(/\\\]/g, '\\]</div>')
+    .replace(/\$\$(.*?)\$\$/g, '<div class="equation">$$$$1$$</div>')
+    
+    // Handle inline math
+    .replace(/\\\((.*?)\\\)/g, '<span class="inline-math">\\($1\\)</span>')
+    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$1$</span>')
+    
+    // Text formatting
+    .replace(/\\textit{([^}]*)}/g, '<i>$1</i>')
+    .replace(/\\textbf{([^}]*)}/g, '<strong>$1</strong>')
+    .replace(/\\emph{([^}]*)}/g, '<em>$1</em>')
+    
+    // Spacing
+    .replace(/\\quad/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+    .replace(/\\qquad/g, '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')
+    
+    // Sections
+    .replace(/\\section{([^}]*)}/g, '<h2>$1</h2>')
+    .replace(/\\subsection{([^}]*)}/g, '<h3>$1</h3>')
+    
+    // Lists
+    .replace(/\\begin{itemize}([\s\S]*?)\\end{itemize}/g, '<ul>$1</ul>')
+    .replace(/\\begin{enumerate}([\s\S]*?)\\end{enumerate}/g, '<ol>$1</ol>')
+    .replace(/\\item\s/g, '<li>')
+    
+    // Paragraphs
+    .replace(/\n\n/g, '</p><p>')
+    
+    // Wrap content in paragraphs
+    .replace(/^(.|\n)*$/, '<p>$&</p>')
+    
+    // Clean up empty paragraphs
+    .replace(/<p>\s*<\/p>/g, '')
+    
+    // Remove any remaining LaTeX commands
+    .replace(/\\[a-zA-Z]+/g, '')
+    
+    // Clean up extra spaces
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 
-  // Replace \emph{text} with <em>text</em>
-  content = content.replace(/\\emph\{(.*?)\}/g, '<em>$1</em>');
-
-  // Replace \ds\int with ∫
-  content = content.replace(/\\ds\\int/g, '∫');
-
-  // Replace ~ with &nbsp;
-  content = content.replace(/~/g, '&nbsp;');
-
-  // Wrap inline math in MathJax delimiters
-  content = content.replace(/\$(.*?)\$/g, '\\($1\\)');
-
-  return content;
+const formatNarrative = (content) => {
+  return content
+    // Format headings
+    .replace(/\*\*\*(.*?)\*\*\*/g, '<h2>$1</h2>')
+    .replace(/\*\*(.*?)\*\*/g, '<h3>$1</h3>')
+    // Format definition lists
+    .replace(/^(.*?):\s*$/gm, '<dt>$1</dt>')
+    .replace(/^:\s*(.*?)$/gm, '<dd>$1</dd>')
+    // Wrap definition lists
+    .replace(/<dt>.*?<\/dd>/gs, match => `<dl>${match}</dl>`)
+    // Format numbered lists
+    .replace(/^\d+\.\s*(.*?)$/gm, '<li>$1</li>')
+    .replace(/<li>.*?<\/li>/gs, match => `<ol>${match}</ol>`)
+    // Format bullet lists
+    .replace(/^-\s*(.*?)$/gm, '<li>$1</li>')
+    .replace(/<li>.*?<\/li>/gs, match => `<ul>${match}</ul>`)
+    // Format paragraphs (excluding list items and definition terms/descriptions)
+    .replace(/^(?!<[oud]l|<li|<d[td])(.*?)$/gm, '<p>$1</p>')
+    // Format inline math
+    .replace(/\$([^$]+)\$/g, '<span class="inline-math">\\($1\\)</span>')
+    // Format block math
+    .replace(/\$\$([\s\S]*?)\$\$/g, '<div class="equation">\\[$1\\]</div>')
+    // Format italic text
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    // Remove empty paragraphs
+    .replace(/<p>\s*<\/p>/g, '')
+    // Clean up extra spaces
+    .replace(/\s+/g, ' ')
+    .trim();
 };
 
 const Study = () => {
-  const [textbookId, setTextbookId] = useState(1); // Example textbook ID
-  const [chapters, setChapters] = useState([]);
   const [chapter, setChapter] = useState(null);
   const [section, setSection] = useState(null);
   const [message, setMessage] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
-  const [emotionAlert, setEmotionAlert] = useState(null);
   const [narrative, setNarrative] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
-
-  const contentRef = useRef(null);
-
-  // WebSocket connection for emotion detection
-  useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8000/ws/emotion');
-
-    ws.onopen = () => {
-      console.log("WebSocket connection established.");
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("Raw WebSocket message received:", event.data);
-        console.log("Parsed emotion received:", data.emotion);
-
-        if (data.emotion === 'angry') {
-          setEmotionAlert('Angry emotion detected! Please take a break.');
-        } else {
-          setEmotionAlert(null);  // Reset the alert if the emotion is not angry
-        }
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error occurred:", error);
-    };
-
-    ws.onclose = (event) => {
-      console.log("WebSocket connection closed. Reason:", event.reason);
-    };
-
-    return () => {
-      console.log("Cleaning up WebSocket connection.");
-      ws.close();
-    };
-  }, []);
-
-  // Fetch chapters by textbook ID
-  useEffect(() => {
-    const fetchChapters = async () => {
-      try {
-        const response = await axios.get(`/textbooks/${textbookId}/chapters/`);
-        console.log("Fetched chapters:", response.data);
-        setChapters(response.data);
-        if (response.data.length > 0) {
-          fetchChapter(response.data[0].id); // Fetch the first chapter by default
-        }
-      } catch (error) {
-        console.error('Error fetching chapters:', error);
-      }
-    };
-
-    fetchChapters();
-  }, [textbookId]);
 
   // Fetch chapter by chapter ID
   const fetchChapter = async (chapterId) => {
@@ -104,11 +104,18 @@ const Study = () => {
       const response = await axios.get(`/chapters/${chapterId}`);
       console.log("Fetched chapter data:", response.data);
       setChapter(response.data);
-      setSection(response.data.sections.length > 0 ? response.data.sections[0] : null); // Automatically load the first section if available
+      setSection(response.data.sections.length > 0 ? response.data.sections[0] : null);
     } catch (error) {
       console.error('Error fetching chapter:', error);
     }
   };
+
+  // Use effect to render LaTeX when chapter content changes
+  useEffect(() => {
+    if (chapter && window.MathJax) {
+      window.MathJax.typesetPromise();
+    }
+  }, [chapter]);
 
   // Fetch section by section ID
   const fetchSection = async (sectionId) => {
@@ -116,6 +123,10 @@ const Study = () => {
       const response = await axios.get(`/sections/${sectionId}`);
       console.log("Fetched section data:", response.data);
       setSection(response.data);
+      setChapter(prevChapter => ({
+        ...prevChapter,
+        content: response.data.content
+      }));
     } catch (error) {
       console.error('Error fetching section:', error);
     }
@@ -123,6 +134,7 @@ const Study = () => {
 
   // Handle chapter selection from the sidebar
   const handleChapterSelect = (chapterId) => {
+    setSection(null);
     fetchChapter(chapterId);
   };
 
@@ -177,74 +189,47 @@ const Study = () => {
     setChatExpanded(!chatExpanded);
   };
 
-  useEffect(() => {
-    if (window.MathJax && contentRef.current) {
-      const content = section ? section.content : chapter ? chapter.content : 'Loading content...';
-      contentRef.current.innerHTML = processLatex(content);
-      window.MathJax.typesetPromise([contentRef.current]).then(() => {
-        console.log('MathJax typesetting completed');
-      }).catch((err) => console.error('MathJax typesetting failed:', err));
-    }
-  }, [section, chapter]);
-
   return (
-    <Box display="flex" height="100vh">
+    <Box display="flex" height="100vh" overflow="hidden">
       <Sidebar onChapterSelect={handleChapterSelect} onSectionSelect={handleSectionSelect} setOpen={setSidebarOpen} />
-      <Box display="flex" flexDirection="column" flexGrow={1} p={2} ml={sidebarOpen ? '240px' : '60px'} transition="margin-left 0.3s ease">
+      <Box 
+        display="flex" 
+        flexDirection="column" 
+        flexGrow={1} 
+        p={2} 
+        ml={sidebarOpen ? '240px' : '60px'} 
+        transition="margin-left 0.3s ease"
+        overflow="hidden"
+      >
         <Typography variant="h4" gutterBottom>
           {chapter ? `${chapter.title} > ${section?.title || 'Chapter Content'}` : 'Loading...'}
         </Typography>
-        {emotionAlert && (
-          <Typography variant="h6" color="error" gutterBottom>
-            {emotionAlert}
-          </Typography>
-        )}
-        <Box display="flex" flexDirection="row" flexGrow={1}>
+        <Box display="flex" flexDirection="row" flexGrow={1} overflow="hidden">
           {/* Left Pane: Chapter Content */}
-          <Box display="flex" flexDirection="column" flex={1} marginRight={2}>
-            <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto' }}>
-              <div ref={contentRef} />
+          <Box display="flex" flexDirection="column" flex={1} marginRight={2} overflow="hidden">
+            <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 150px)' }}>
+              {(chapter && chapter.content) && (
+                <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
+              )}
+              {(section && section.content && !chapter.content) && (
+                <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
+              )}
             </Paper>
           </Box>
           {/* Right Pane: Generated Narrative */}
-          <Box display="flex" flexDirection="column" flex={1}>
-            <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto', mb: 2 }}>
+          <Box display="flex" flexDirection="column" flex={1} overflow="hidden">
+            <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 150px)' }}>
               <Button variant="contained" color="primary" onClick={fetchNarrative}>
                 Generate Narrative
               </Button>
               {narrative && (
                 <Box mt={2}>
                   <Typography variant="h6">Generated Narrative:</Typography>
-                  <Typography variant="body1">{narrative}</Typography>
+                  <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: formatNarrative(narrative) }} />
                 </Box>
               )}
             </Paper>
           </Box>
-        </Box>
-        {/* Webcam feed container */}
-        <Box 
-          sx={{ 
-            position: 'absolute', 
-            top: 10, 
-            right: 10, 
-            width: 200, 
-            height: 150, 
-            border: '2px solid black', 
-            overflow: 'hidden'
-          }}
-        >
-          <iframe 
-            src="http://localhost:8000/webcam_feed"
-            width="100%" 
-            height="100%" 
-            title="Webcam Feed"
-            style={{ 
-              border: 'none', 
-              objectFit: 'contain', 
-              maxWidth: '100%', 
-              maxHeight: '100%'
-            }}
-          />
         </Box>
       </Box>
       {/* Chat Section */}

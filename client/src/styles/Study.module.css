@@ -1,0 +1,92 @@
+.chapterContent {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #333;
+    word-spacing: 0.1em;
+  }
+  
+  .chapterContent p {
+    margin-bottom: 1em;
+    text-align: justify;
+  }
+  
+  .chapterContent h2, .chapterContent h3 {
+    margin-top: 1.5em;
+    margin-bottom: 0.75em;
+  }
+  
+  .chapterContent h3 {
+    font-size: 1.3em;
+    color: #2c3e50;
+  }
+  
+  .chapterContent .equation {
+    margin: 1em 0;
+    overflow-x: auto;
+  }
+  
+  .chapterContent .inline-math {
+    white-space: nowrap;
+  }
+  
+  .chapterContent ul, .chapterContent ol {
+    margin-bottom: 1em;
+    padding-left: 2em;
+  }
+  
+  .chapterContent li {
+    margin-bottom: 0.5em;
+  }
+  
+  .chapterContent .spaced-list-item {
+    margin-top: 0.5em;
+  }
+  
+  .chapterContent .cite, .chapterContent .ref {
+    color: #3498db;
+    cursor: pointer;
+  }
+  
+  .chapterContent blockquote {
+    margin: 1.5em 0;
+    padding: 0.5em 1em;
+    border-left: 4px solid #3498db;
+    background-color: #ecf0f1;
+    font-style: italic;
+  }
+  
+  /* Add spacing between inline math elements */
+  .chapterContent .katex-display {
+    margin: 1em 0;
+  }
+  
+  /* Ensure proper word spacing */
+  .chapterContent {
+    word-spacing: 0.1em;
+  }
+  
+  .chapterContent em {
+    font-style: italic;
+  }
+  
+  .chapterContent dl {
+    margin-left: 20px;
+  }
+
+  .chapterContent dt {
+    font-weight: bold;
+  }
+
+  .chapterContent dd {
+    margin-left: 20px;
+    margin-bottom: 10px;
+  }
+
+  .chapterContent ul, .chapterContent ol {
+    margin-left: 20px;
+    margin-bottom: 10px;
+  }
+
+  .chapterContent li {
+    margin-bottom: 5px;
+  }

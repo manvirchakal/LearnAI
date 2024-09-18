@@ -1,0 +1,74 @@
+.MathJax {
+  font-size: 1.1em !important;
+}
+
+.footnote {
+  font-size: 0.8em;
+  vertical-align: super;
+}
+
+.note {
+  font-size: 0.9em;
+  color: #666;
+}
+
+.small {
+  font-size: 0.85em;
+}
+
+.latex-center {
+  text-align: center;
+}
+
+.latex-equation, .latex-align, .latex-align* {
+  display: block;
+  margin: 1em 0;
+  text-align: center;
+}
+
+figure {
+  text-align: center;
+  margin: 1em 0;
+}
+
+figcaption {
+  font-style: italic;
+}
+
+.minipage {
+  display: inline-block;
+  vertical-align: top;
+  max-width: 100%;
+}
+
+.math {
+  font-style: italic;
+}
+
+.math sub {
+  font-size: 0.8em;
+  vertical-align: sub;
+}
+
+.poetry {
+  white-space: pre-wrap;
+  margin: 1em 0;
+  font-style: italic;
+}
+
+q {
+  quotes: """ """ "'" "'";
+}
+
+q::before {
+  content: open-quote;
+}
+
+q::after {
+  content: close-quote;
+}
+
+sup {
+  font-size: 0.8em;
+  vertical-align: super;
+}

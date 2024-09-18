@@ -25,12 +25,11 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
     <title>React App</title>
-    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script>
       MathJax = {
         tex: {
-          inlineMath: [['\\(', '\\)']],
-          displayMath: [['$$', '$$']],
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']],
           processEscapes: true,
           processEnvironments: true
         },
