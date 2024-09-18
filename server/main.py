@@ -23,11 +23,17 @@ import logging
 import tempfile
 import subprocess
 from fastapi.responses import FileResponse
+from google.cloud import discoveryengine
+from google.cloud import aiplatform
+from google.cloud import storage
 
 import os
 
 os.environ['GOOGLE_PROJECT_ID'] = 'the-program-434420-u3'
 os.environ['GOOGLE_REGION'] = 'us-central1'
+os.environ['BUCKET_NAME'] = 'learn-ai-bucket'
+os.environ['DATASTORE_ID'] = 'learnairag_1726636747260'
+os.environ['SEARCH_APP_ID'] = 'learnai_1726636706798'
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -53,6 +59,79 @@ app.add_middleware(
 # Initialize Vertex AI
 aiplatform.init(project="the-program-434420-u3", location="us-central1")
 
+# Initialize Vertex AI Search client
+search_client = discoveryengine.SearchServiceClient()
+
+# Initialize Vertex AI PaLM API
+aiplatform.init(project="the-program-434420-u3", location="us-central1")
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def index_content(db: Session):
+    bucket_name = os.environ.get('BUCKET_NAME')
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+
+    textbooks = db.query(models.Textbook).all()
+    for textbook in textbooks:
+        for chapter in textbook.chapters:
+            blob = bucket.blob(f"chapter_{chapter.id}.txt")
+            content = f"""
+            Title: {chapter.title}
+            Textbook: {textbook.title}
+            Content: {chapter.content}
+            """
+            blob.upload_from_string(content, content_type="text/plain")
+
+    # After uploading all documents, you might need to use a different API call
+    # to trigger indexing, depending on the supported methods for your datastore
+
+@app.post("/index-content")
+async def index_content_endpoint(db: Session = Depends(get_db)):
+    index_content(db)
+    return {"message": "Content indexed successfully"}
+
+@app.post("/rag-query")
+async def rag_query(query: str, db: Session = Depends(get_db)):
+    # Step 1: Retrieve relevant documents
+    search_engine_id = os.environ.get('DATASTORE_ID')
+    search_app_id = os.environ.get('SEARCH_APP_ID')
+    location = os.environ.get('GOOGLE_REGION')
+    project_id = os.environ.get('GOOGLE_PROJECT_ID')
+
+    parent = f"projects/{project_id}/locations/{location}/dataStores/{search_engine_id}/servingConfigs/{search_app_id}"
+
+    request = discoveryengine.SearchRequest(
+        parent=parent,
+        query=query,
+        page_size=5,
+    )
+    response = search_client.search(request)
+
+    # Extract relevant content from search results
+    relevant_content = []
+    for result in response.results:
+        relevant_content.append(result.document.struct_data["content"])
+
+    # Step 2: Generate response using PaLM API
+    model = "text-bison@001"
+    prompt = f"""Based on the following information, answer the question: {query}
+
+    Relevant information:
+    {' '.join(relevant_content)}
+
+    Answer:"""
+
+    response = aiplatform.TextGenerationModel.from_pretrained(model).predict(prompt)
+
+    return {"answer": response.text}
+
 @app.get("/webcam_feed")
 async def webcam_feed():
     global frame
@@ -67,15 +146,6 @@ async def webcam_feed():
                     b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
     return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # WebSocket connection handler
 @app.websocket("/ws/emotion")

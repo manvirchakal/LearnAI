@@ -48,7 +48,6 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
             overflowX: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'space-between',
           },
         }}
       >
@@ -70,6 +69,9 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
             {open && <ListItemText primary={textbookTitle || "Book Name"} sx={{ marginLeft: '15px' }} />}
             {open && (bookOpen ? <ExpandLess /> : <ExpandMore />)}
           </ListItem>
+        </List>
+
+        <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
           <Collapse in={bookOpen && open} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
               {chapters.map((chapter) => (
@@ -86,9 +88,9 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
               ))}
             </List>
           </Collapse>
-        </List>
+        </Box>
 
-        <Box sx={{ bgcolor: '#4A90E2', marginTop: 'auto' }}>
+        <Box sx={{ bgcolor: '#4A90E2', mt: 'auto' }}>
           <List>
             <ListItem button sx={{ justifyContent: open ? 'flex-start' : 'center', paddingLeft: open ? '16px' : '8px' }}>
               <PersonIcon sx={{ color: '#FFFFFF' }} />
