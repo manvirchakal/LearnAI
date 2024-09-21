@@ -6,10 +6,7 @@ from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
-from google.cloud import aiplatform
-import cv2
 import threading
-from fer import FER
 from fastapi.responses import StreamingResponse
 import json
 import asyncio
@@ -17,23 +14,18 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import google.auth
 from google.auth.transport.requests import Request
-import os
-import json
-import logging
 import tempfile
 import subprocess
 from fastapi.responses import FileResponse
-from google.cloud import discoveryengine
-from google.cloud import aiplatform
-from google.cloud import storage
+import boto3
+from botocore.exceptions import ClientError
+from server import models
 
-import os
-
-os.environ['GOOGLE_PROJECT_ID'] = 'the-program-434420-u3'
-os.environ['GOOGLE_REGION'] = 'us-central1'
-os.environ['BUCKET_NAME'] = 'learn-ai-bucket'
-os.environ['DATASTORE_ID'] = 'learnairag_1726636747260'
-os.environ['SEARCH_APP_ID'] = 'learnai_1726636706798'
+# Add AWS Bedrock client initialization
+bedrock = boto3.client(
+    service_name='bedrock-runtime',
+    region_name='us-east-1'  # replace with your preferred region
+)
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -55,15 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize Vertex AI
-aiplatform.init(project="the-program-434420-u3", location="us-central1")
-
-# Initialize Vertex AI Search client
-search_client = discoveryengine.SearchServiceClient()
-
-# Initialize Vertex AI PaLM API
-aiplatform.init(project="the-program-434420-u3", location="us-central1")
 
 # Dependency to get DB session
 def get_db():
@@ -310,22 +293,10 @@ def build_endpoint_url(
     
     return url
 
-def generate_narrative(text: str, max_attempts=3, max_tokens=8192):
-    model = "mistral-nemo"
-    model_version = "2407"
+def generate_narrative(text: str, max_attempts=3, max_tokens=4096):
     cleaned_text = remove_latex_commands(text)
 
-    project_id = os.environ.get('GOOGLE_PROJECT_ID')
-    region = os.environ.get('GOOGLE_REGION')
-    url = build_endpoint_url(region, project_id, model, model_version)
-
-    headers = {
-        "Authorization": f"Bearer {get_credentials()}",
-        "Accept": "application/json",
-    }
-
-    prompt_template = """
-    Continue the explanation of key concepts from the following chapter content. For each concept:
+    prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
     1. Define it clearly
     2. Provide a real-world analogy
     3. Give at least two practical examples
@@ -335,46 +306,44 @@ def generate_narrative(text: str, max_attempts=3, max_tokens=8192):
     Use clear, engaging language suitable for a student new to these concepts. 
     Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
-    If this is a continuation, pick up where the previous explanation left off.
+    Chapter content: {cleaned_text}
 
-    Chapter content: {content}
-
-    Now, continue or start the detailed explanation:
-    """
+    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"""
 
     full_response = ""
     for i in range(max_attempts):
-        current_prompt = prompt_template.format(content=cleaned_text)
-        if i > 0:
-            current_prompt = "Continue from: " + full_response[-500:] + "\n" + current_prompt
+        try:
+            native_request = {
+                'anthropic_version': 'bedrock-2023-05-31',
+                'max_tokens': max_tokens,
+                'temperature': 0.7,
+                'top_p': 0.9,
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [{'type': 'text', 'text': prompt}],
+                    }
+                ],
+            }
 
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": current_prompt}],
-            "stream": False,
-        }
+            request = json.dumps(native_request)
 
-        with httpx.Client() as client:
-            resp = client.post(url, json=payload, headers=headers, timeout=None)
+            response = bedrock.invoke_model_with_response_stream(
+                modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                body=request
+            )
 
-        if resp.status_code == 200:
-            try:
-                response_data = resp.json()
-                # Update this part to match the actual response structure
-                generated_text = response_data['choices'][0]['message']['content']
-                full_response += " " + generated_text
+            for event in response['body']:
+                chunk = json.loads(event['chunk']['bytes'])
+                if chunk['type'] == 'content_block_delta':
+                    full_response += chunk['delta'].get('text', '')
 
-                # Check if the response seems complete
-                if generated_text.endswith(".") and len(generated_text) < max_tokens * 0.9:
-                    break
-            except (json.JSONDecodeError, KeyError) as e:
-                logging.error(f"Error parsing response: {e}")
-                logging.debug(f"Response content: {resp.text}")  # Add this line for debugging
-                return f"Error parsing response: {str(e)}"
-        else:
-            logging.error(f"API returned non-200 status code: {resp.status_code}")
-            logging.debug(f"Response content: {resp.text}")  # Add this line for debugging
-            return f"Error: API returned status code {resp.status_code}"
+            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
+                break
+
+        except ClientError as e:
+            logging.error(f"Error calling Bedrock: {e}")
+            return f"Error: {str(e)}"
 
     return full_response
 
@@ -382,7 +351,6 @@ def generate_narrative(text: str, max_attempts=3, max_tokens=8192):
 async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get_db)):
     logging.info(f"Generating narrative for chapter_id: {chapter_id}")
     
-    # Fetch the chapter content
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
     if not chapter:
         logging.error(f"Chapter with id {chapter_id} not found")
@@ -390,7 +358,6 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
 
     logging.info(f"Found chapter: {chapter.title}")
 
-    # Clean the LaTeX content before sending it to the model
     cleaned_chapter_content = remove_latex_commands(chapter.content)
 
     system_message = (
