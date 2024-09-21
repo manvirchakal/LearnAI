@@ -80,72 +80,6 @@ async def index_content_endpoint(db: Session = Depends(get_db)):
     index_content(db)
     return {"message": "Content indexed successfully"}
 
-@app.post("/rag-query")
-async def rag_query(query: str, db: Session = Depends(get_db)):
-    # Step 1: Retrieve relevant documents
-    search_engine_id = os.environ.get('DATASTORE_ID')
-    search_app_id = os.environ.get('SEARCH_APP_ID')
-    location = os.environ.get('GOOGLE_REGION')
-    project_id = os.environ.get('GOOGLE_PROJECT_ID')
-
-    parent = f"projects/{project_id}/locations/{location}/dataStores/{search_engine_id}/servingConfigs/{search_app_id}"
-
-    request = discoveryengine.SearchRequest(
-        parent=parent,
-        query=query,
-        page_size=5,
-    )
-    response = search_client.search(request)
-
-    # Extract relevant content from search results
-    relevant_content = []
-    for result in response.results:
-        relevant_content.append(result.document.struct_data["content"])
-
-    # Step 2: Generate response using PaLM API
-    model = "text-bison@001"
-    prompt = f"""Based on the following information, answer the question: {query}
-
-    Relevant information:
-    {' '.join(relevant_content)}
-
-    Answer:"""
-
-    response = aiplatform.TextGenerationModel.from_pretrained(model).predict(prompt)
-
-    return {"answer": response.text}
-
-@app.get("/webcam_feed")
-async def webcam_feed():
-    global frame
-    def generate():
-        global frame
-        while True:
-            if frame is not None:
-                resized_frame = cv2.resize(frame, (200, 150))  # Resize for viewport
-                ret, jpeg = cv2.imencode('.jpg', resized_frame)
-                frame_bytes = jpeg.tobytes()
-                yield (b'--frame\r\n'
-                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-    return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-# WebSocket connection handler
-@app.websocket("/ws/emotion")
-async def emotion_websocket(websocket: WebSocket):
-    logging.debug("WebSocket connection request received.")
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_text()
-            logging.debug(f"Received from client: {data}")
-            await websocket.send_text(f"Emotion received: {data}")
-            logging.debug(f"Sent emotion confirmation to client: {data}")
-    except WebSocketDisconnect:
-        logging.info("WebSocket connection closed")
-    except Exception as e:
-        logging.error(f"Error in WebSocket connection: {e}")
-
 
 def extract_chapters_and_sections_from_tex(tex_content: str):
     # Updated Chapter pattern with more flexibility
@@ -265,13 +199,6 @@ def remove_latex_commands(text: str) -> str:
     text = re.sub(r'\\emph\{(.*?)\}', r'*\1*', text)
     
     return text.strip()
-
-def get_credentials():
-    credentials, project_id = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    credentials.refresh(Request())
-    return credentials.token
 
 def build_endpoint_url(
     region: str,
