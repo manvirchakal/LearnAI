@@ -20,6 +20,8 @@ from fastapi.responses import FileResponse
 import boto3
 from botocore.exceptions import ClientError
 from server import models
+from pydantic import BaseModel
+import textwrap
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
@@ -55,30 +57,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-def index_content(db: Session):
-    bucket_name = os.environ.get('BUCKET_NAME')
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-
-    textbooks = db.query(models.Textbook).all()
-    for textbook in textbooks:
-        for chapter in textbook.chapters:
-            blob = bucket.blob(f"chapter_{chapter.id}.txt")
-            content = f"""
-            Title: {chapter.title}
-            Textbook: {textbook.title}
-            Content: {chapter.content}
-            """
-            blob.upload_from_string(content, content_type="text/plain")
-
-    # After uploading all documents, you might need to use a different API call
-    # to trigger indexing, depending on the supported methods for your datastore
-
-@app.post("/index-content")
-async def index_content_endpoint(db: Session = Depends(get_db)):
-    index_content(db)
-    return {"message": "Content indexed successfully"}
 
 
 def extract_chapters_and_sections_from_tex(tex_content: str):
@@ -200,27 +178,7 @@ def remove_latex_commands(text: str) -> str:
     
     return text.strip()
 
-def build_endpoint_url(
-    region: str,
-    project_id: str,
-    model_name: str,
-    model_version: str,
-    streaming: bool = False,
-):
-    base_url = f"https://{region}-aiplatform.googleapis.com/v1/"
-    project_fragment = f"projects/{project_id}"
-    location_fragment = f"locations/{region}"
-    specifier = "streamRawPredict" if streaming else "rawPredict"
-    model_fragment = f"publishers/mistralai/models/{model_name}@{model_version}"
-    url = f"{base_url}{'/'.join([project_fragment, location_fragment, model_fragment])}:{specifier}"
-    
-    logging.info(f"Built URL: {url}")
-    logging.info(f"Project ID: {project_id}")
-    logging.info(f"Region: {region}")
-    
-    return url
-
-def generate_narrative(text: str, max_attempts=3, max_tokens=4096):
+def generate_narrative(text: str, max_attempts=1, max_tokens=4096):
     cleaned_text = remove_latex_commands(text)
 
     prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
@@ -230,12 +188,18 @@ def generate_narrative(text: str, max_attempts=3, max_tokens=4096):
     4. Explain how it relates to other concepts in the chapter
     5. Discuss its importance or applications
 
+    After explaining the concepts, suggest a simple interactive game idea related to these concepts. The game should:
+    1. Be implementable in JavaScript
+    2. Reinforce one or more key concepts from the chapter
+    3. Be engaging and educational for students
+    4. Be described in 2-3 sentences
+
     Use clear, engaging language suitable for a student new to these concepts. 
     Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
     Chapter content: {cleaned_text}
 
-    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"""
+    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples, followed by a game idea:"""
 
     full_response = ""
     for i in range(max_attempts):
@@ -298,7 +262,22 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
 
     try:
         narrative = generate_narrative(system_message)
-        return {"narrative": narrative}
+        
+        # Generate game idea
+        game_idea_prompt = f"Based on the concepts in this chapter, suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
+        game_idea = generate_narrative(game_idea_prompt)
+        
+        # Generate game code
+        game_code_request = GameIdeaRequest(game_idea=game_idea)
+        game_code_response = await generate_game_code(game_code_request)
+        game_code = game_code_response["code"]
+        
+        # Return narrative and game code separately
+        return {
+            "narrative": narrative,
+            "game_idea": game_idea,
+            "game_code": game_code
+        }
     except Exception as e:
         logging.exception("Error in generate_narrative")
         raise HTTPException(status_code=500, detail=str(e))
@@ -376,3 +355,95 @@ async def get_section(section_id: int, db: Session = Depends(get_db)):
         "content": section.content,
         "chapter_id": section.chapter_id
     }
+
+class GameIdeaRequest(BaseModel):
+    game_idea: str
+
+@app.post("/generate-game-code")
+async def generate_game_code(request: GameIdeaRequest):
+    game_idea = request.game_idea
+    
+    prompt = f"""Create a fully functional React component for the following game idea:
+
+    {game_idea}
+
+    The component should:
+    1. Use React hooks (useState, useEffect) without any import statements or React. prefix
+    2. Include complete game logic (initialization, gameplay, scoring, game over)
+    3. Use MathJax for rendering mathematical expressions
+    4. Handle all user interactions (input, button clicks)
+    5. Include basic styling using inline styles
+    6. Be completely self-contained and ready to run
+
+    IMPORTANT: Use ONLY React.createElement to create elements. DO NOT use JSX syntax.
+    For example, instead of:
+    <div style={{ color: 'red' }}>Hello World</div>
+    Use:
+    React.createElement('div', {{ style: {{ color: 'red' }} }}, 'Hello World')
+
+    For MathJax expressions, use:
+    React.createElement('div', {{ style: {{ fontSize: '1.2em' }} }}, '\\(your_math_expression_here\\)')
+
+    Ensure the component includes:
+    - All necessary state variables defined at the beginning
+    - All required event handlers and helper functions defined before the useEffect hook
+    - A clear return statement that creates and returns all UI elements using React.createElement
+
+    The code should follow this structure:
+    1. State declarations
+    2. Function declarations (including event handlers and helper functions)
+    3. useEffect hooks
+    4. UI element creation (stored in a variable called 'elements')
+
+    DO NOT include any import statements, export statements, or the 'const Game = () => {{' declaration.
+    The code should be fully functional and not rely on any external functions or variables.
+    DO NOT include any usage examples or additional explanations outside the component code.
+    Ensure all values being rendered are strings or numbers, not objects.
+    Do not wrap the code in any markers or code block syntax.
+    Do not include any introductory text or explanations before or after the code."""
+
+    try:
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 3000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "temperature": 0.7,
+            "top_p": 0.9,
+        })
+
+        response = bedrock.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",  # or use the latest Claude model available
+            body=body
+        )
+
+        response_body = json.loads(response.get('body').read())
+        generated_code = response_body['content'][0]['text']
+        # Remove any potential markdown code block syntax and introductory/explanatory text
+        generated_code = generated_code.replace('```jsx', '').replace('```', '').strip()
+        generated_code = re.sub(r'^Here.*?:\n*', '', generated_code, flags=re.DOTALL)
+        generated_code = re.sub(r'\n*This component includes.*$', '', generated_code, flags=re.DOTALL)
+        
+        # Remove the 'javascript' line if it exists
+        generated_code = re.sub(r'^javascript\s*\n', '', generated_code)
+        
+        # Ensure the code doesn't start with 'javascript'
+        if generated_code.startswith('javascript'):
+            generated_code = generated_code[len('javascript'):].lstrip()
+        
+        # Ensure the code is properly indented
+        generated_code = textwrap.dedent(generated_code)
+        
+        print("Generated game code:", generated_code)  # Add this line for debugging
+        return {"code": generated_code}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

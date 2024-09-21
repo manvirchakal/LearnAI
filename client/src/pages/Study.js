@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, InputBase, Divider, IconButton, Button, Collapse, CircularProgress } from '@mui/material';
+import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import styles from '../styles/Study.module.css'; // Import the CSS module
-import { MathJaxContext, MathJax } from 'better-react-mathjax'
+import { MathJaxContext, MathJax } from 'better-react-mathjax';
+import Prism from 'prismjs';
+import 'prismjs/themes/prism.css';
+import ErrorBoundary from '../components/ErrorBoundary';
+import DynamicGameComponent from '../components/DynamicGameComponent';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -58,39 +62,29 @@ const preprocessLatex = (content) => {
     .trim();
 };
 
-const formatNarrative = (content) => {
+const formatSummary = (content) => {
   return content
-    // Format headings
-    .replace(/^(Key Concept:.*?)$/gm, '<h2>$1</h2>')
-    .replace(/^\*(.*?)\*$/gm, '<h3>$1</h3>')
-    // Format definition lists
-    .replace(/^(.*?):\s*$/gm, '<dt>$1</dt>')
-    .replace(/^:\s*(.*?)$/gm, '<dd>$1</dd>')
-    // Wrap definition lists
-    .replace(/<dt>.*?<\/dd>/gs, match => `<dl>${match}</dl>`)
-    // Format numbered lists
-    .replace(/^\d+\.\s*(.*?)$/gm, '<li>$1</li>')
-    .replace(/(?<!<\/li>)\n<li>/g, '</li>\n<li>')
-    .replace(/(<li>.*?<\/li>\n*)+/gs, match => `<ol>${match}</ol>`)
-    // Format bullet lists
-    .replace(/^-\s*(.*?)$/gm, '<li>$1</li>')
-    .replace(/(?<!<\/li>)\n<li>/g, '</li>\n<li>')
-    .replace(/(<li>.*?<\/li>\n*)+/gs, match => `<ul>${match}</ul>`)
-    // Format paragraphs (excluding list items and definition terms/descriptions)
-    .replace(/^(?!<[oud]l|<li|<d[td]|<h[23])(.*?)$/gm, '<p>$1</p>')
-    // Format inline math
-    .replace(/\\\((.*?)\\\)/g, '\\($1\\)')
-    .replace(/\$(.*?)\$/g, '\\($1\\)')
-    // Format block math
-    .replace(/\\\[(.*?)\\\]/g, '\\[$1\\]')
-    .replace(/\$\$(.*?)\$\$/g, '\\[$1\\]')
+    // Format main headings
+    .replace(/^### (.*?)$/gm, '<h2 class="main-heading">$1</h2>')
+    // Format subheadings
+    .replace(/^## (.*?)$/gm, '<h3 class="sub-heading">$1</h3>')
+    // Format sub-subheadings
+    .replace(/^# (.*?)$/gm, '<h4 class="sub-sub-heading">$1</h4>')
+    // Format lists
+    .replace(/^- (.*?)$/gm, '<li>$1</li>')
+    .replace(/<li>.*?<\/li>/gs, '<ul class="summary-list">$&</ul>')
+    // Format paragraphs
+    .replace(/^(?!<h[2-4]|<ul)(.*?)$/gm, '<p class="summary-paragraph">$1</p>')
+    // Format bold text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     // Format italic text
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    // Format inline math
+    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$$1$$</span>')
     // Remove empty paragraphs
-    .replace(/<p>\s*<\/p>/g, '')
-    // Clean up extra spaces
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/<p class="summary-paragraph">\s*<\/p>/g, '')
+    // Add section dividers
+    .replace(/<h2 class="main-heading">/g, '<hr class="section-divider"><h2 class="main-heading">');
 };
 
 const Study = () => {
@@ -99,6 +93,8 @@ const Study = () => {
   const [message, setMessage] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [narrative, setNarrative] = useState('');
+  const [gameIdea, setGameIdea] = useState('');
+  const [gameCode, setGameCode] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
   const [isNarrativeLoading, setIsNarrativeLoading] = useState(false);
@@ -118,6 +114,8 @@ const Study = () => {
     } catch (error) {
       console.error('Error fetching chapter:', error);
       setNarrative('Failed to load narrative. Please try again.');
+      setGameIdea('');
+      setGameCode('');
       setIsNarrativeLoading(false);
     }
   };
@@ -125,12 +123,18 @@ const Study = () => {
   // New function to fetch narrative separately
   const fetchNarrative = async (chapterId) => {
     try {
-      const narrativeResponse = await axios.get(`/generate-narrative/${chapterId}`);
-      console.log("Fetched narrative:", narrativeResponse.data);
-      setNarrative(narrativeResponse.data.narrative);
+      setIsNarrativeLoading(true);
+      const response = await axios.get(`/generate-narrative/${chapterId}`);
+      console.log("Fetched narrative:", response.data);
+      
+      setNarrative(response.data.narrative);
+      setGameIdea(response.data.game_idea);
+      setGameCode(response.data.game_code);
     } catch (error) {
       console.error('Error fetching narrative:', error);
       setNarrative('Failed to load narrative. Please try again.');
+      setGameIdea('');
+      setGameCode('');
     } finally {
       setIsNarrativeLoading(false);
     }
@@ -154,6 +158,8 @@ const Study = () => {
     } catch (error) {
       console.error('Error fetching section:', error);
       setNarrative('Failed to load narrative. Please try again.');
+      setGameIdea('');
+      setGameCode('');
       setIsNarrativeLoading(false);
     }
   };
@@ -197,6 +203,10 @@ const Study = () => {
     }
   }, [narrative]);
 
+  useEffect(() => {
+    Prism.highlightAll();
+  }, [narrative]);
+
   return (
     <MathJaxContext>
       <Box display="flex" height="100vh" overflow="hidden">
@@ -208,7 +218,7 @@ const Study = () => {
           p={2} 
           ml={sidebarOpen ? '240px' : '60px'} 
           transition="margin-left 0.3s ease"
-          overflow="hidden"
+          overflow="auto"
         >
           <Box display="flex" mb={2}>
             <Typography variant="h4" flex={1}>
@@ -218,10 +228,10 @@ const Study = () => {
               Summary
             </Typography>
           </Box>
-          <Box display="flex" flexDirection="row" flexGrow={1} overflow="hidden">
+          <Box display="flex" flexDirection="row" mb={2}>
             {/* Left Pane: Chapter Content */}
-            <Box display="flex" flexDirection="column" flex={1} marginRight={2} overflow="hidden">
-              <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+            <Box display="flex" flexDirection="column" flex={1} marginRight={2}>
+              <Paper elevation={3} sx={{ p: 2, maxHeight: '60vh', overflowY: 'auto' }}>
                 {(chapter && chapter.content) && (
                   <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
                 )}
@@ -231,15 +241,18 @@ const Study = () => {
               </Paper>
             </Box>
             {/* Right Pane: Summary */}
-            <Box display="flex" flexDirection="column" flex={1} overflow="hidden">
-              <Paper elevation={3} sx={{ p: 2, flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+            <Box display="flex" flexDirection="column" flex={1}>
+              <Paper elevation={3} sx={{ p: 2, maxHeight: '60vh', overflowY: 'auto' }}>
                 {isNarrativeLoading ? (
                   <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                     <CircularProgress />
                   </Box>
                 ) : narrative ? (
                   <MathJax>
-                    <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: formatNarrative(narrative) }} />
+                    <div 
+                      className={styles.chapterContent} 
+                      dangerouslySetInnerHTML={{ __html: formatSummary(preprocessLatex(narrative)) }} 
+                    />
                   </MathJax>
                 ) : (
                   <Typography>No summary available.</Typography>
@@ -247,7 +260,18 @@ const Study = () => {
               </Paper>
             </Box>
           </Box>
+          
+          {/* Interactive Game Component */}
+          {gameCode && (
+            <ErrorBoundary>
+              <Paper elevation={3} sx={{ p: 2, mt: 2, mb: 2 }}>
+                <Typography variant="h6">Interactive Game:</Typography>
+                <DynamicGameComponent gameCode={gameCode} />
+              </Paper>
+            </ErrorBoundary>
+          )}
         </Box>
+        
         {/* Chat Section */}
         <Box 
           sx={{ 
