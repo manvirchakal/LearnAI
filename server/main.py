@@ -2,7 +2,7 @@ import chardet
 import os
 import re
 import logging 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
@@ -12,8 +12,6 @@ import json
 import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
-import google.auth
-from google.auth.transport.requests import Request
 import tempfile
 import subprocess
 from fastapi.responses import FileResponse
@@ -22,6 +20,7 @@ from botocore.exceptions import ClientError
 from server import models
 from pydantic import BaseModel
 import textwrap
+from functools import lru_cache
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
@@ -202,11 +201,11 @@ def generate_narrative(text: str, max_attempts=1, max_tokens=4096):
     Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples, followed by a game idea:"""
 
     full_response = ""
-    for i in range(max_attempts):
+    for i in range(1):
         try:
             native_request = {
                 'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': max_tokens,
+                'max_tokens': 4096,
                 'temperature': 0.7,
                 'top_p': 0.9,
                 'messages': [
@@ -229,26 +228,26 @@ def generate_narrative(text: str, max_attempts=1, max_tokens=4096):
                 if chunk['type'] == 'content_block_delta':
                     full_response += chunk['delta'].get('text', '')
 
-            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
+            if full_response.endswith(".") and len(full_response) < 4096 * 0.9:
                 break
 
         except ClientError as e:
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
+    # Store the generated narrative
+    narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
+    db.add(narrative_model)
+    db.commit()
+    
     return full_response
 
 @app.get("/generate-narrative/{chapter_id}")
 async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get_db)):
-    logging.info(f"Generating narrative for chapter_id: {chapter_id}")
-    
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
     if not chapter:
-        logging.error(f"Chapter with id {chapter_id} not found")
         raise HTTPException(status_code=404, detail="Chapter not found")
-
-    logging.info(f"Found chapter: {chapter.title}")
-
+    
     cleaned_chapter_content = remove_latex_commands(chapter.content)
 
     system_message = (
