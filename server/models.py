@@ -21,6 +21,7 @@ class Chapter(Base):
 
     textbook = relationship("Textbook", back_populates="chapters")
     sections = relationship("Section", back_populates="chapter")
+    narrative = relationship("Narrative", back_populates="chapter", uselist=False)
 
 class Section(Base):
     __tablename__ = "sections"
@@ -31,3 +32,12 @@ class Section(Base):
     chapter_id = Column(Integer, ForeignKey("chapters.id"))
 
     chapter = relationship("Chapter", back_populates="sections")
+
+class Narrative(Base):
+    __tablename__ = "narratives"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chapter_id = Column(Integer, ForeignKey("chapters.id"), unique=True)
+    content = Column(Text)
+
+    chapter = relationship("Chapter", back_populates="narrative")

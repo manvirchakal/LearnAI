@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Typography, Paper, InputBase, Divider, IconButton, Button, Collapse, CircularProgress } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
@@ -102,6 +102,15 @@ const Study = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
   const [isNarrativeLoading, setIsNarrativeLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(scrollToBottom, [chatMessages]);
 
   // Modify fetchChapter to handle loading state
   const fetchChapter = async (chapterId) => {
@@ -173,16 +182,34 @@ const Study = () => {
   const handleSendMessage = async (event) => {
     event.preventDefault();
     
-    if (!message.trim()) return;
+    if (!message.trim() || !chapter) return;
+
+    const newUserMessage = { user: 'You', text: message };
+    setChatMessages(prevMessages => [...prevMessages, newUserMessage]);
+    const currentMessage = message;
+    setMessage('');
 
     try {
-      const response = await axios.post('/api/chat', { message });
-      console.log("Sent message:", message);
-      console.log("AI response received:", response.data.reply);
-      setChatMessages([...chatMessages, { user: 'You', text: message }, { user: 'AI', text: response.data.reply }]);
-      setMessage('');
+      setIsGenerating(true);
+      const response = await axios.post('/api/chat', {
+        message: currentMessage,
+        chat_history: chatMessages,
+        chapter_id: chapter.id
+      });
+
+      if (response.data && response.data.reply) {
+        setChatMessages(response.data.updated_chat_history);
+      } else {
+        throw new Error('Invalid response from server');
+      }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error in chat:', error);
+      setChatMessages(prevMessages => [
+        ...prevMessages,
+        { user: 'AI', text: `Sorry, an error occurred: ${error.message}. Please try again.` }
+      ]);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -275,32 +302,51 @@ const Study = () => {
               color: 'white'
             }}
           >
-            <Typography variant="h6" flexGrow={1}>Chat</Typography>
+            <Typography variant="h6" color="white" flexGrow={1}>Chat</Typography>
             <IconButton size="small" sx={{ color: 'white' }}>
               {chatExpanded ? <ExpandMoreIcon /> : <ExpandLessIcon />}
             </IconButton>
           </Box>
-          <Collapse in={chatExpanded} sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ p: 2, flexGrow: 1, overflowY: 'auto' }}>
-              {chatMessages.map((msg, index) => (
-                <Typography key={index} variant="body2">
-                  <strong>{msg.user}: </strong>{msg.text}
-                </Typography>
-              ))}
+          {chatExpanded && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
+              <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
+                {chatMessages.map((msg, index) => (
+                  <Box 
+                    key={index} 
+                    sx={{ 
+                      mb: 2, 
+                      p: 1, 
+                      bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
+                      borderRadius: 1,
+                      width: '90%',
+                      mx: 'auto', // This centers the message box
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
+                      {msg.user}:
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white' }}>
+                      {msg.text}
+                    </Typography>
+                  </Box>
+                ))}
+                <div ref={messagesEndRef} />
+              </Box>
+              <Divider />
+              <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
+                <InputBase
+                  sx={{ ml: 1, flex: 1 }}
+                  placeholder="Enter message"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  disabled={isGenerating}
+                />
+                <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating}>
+                  {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
+                </IconButton>
+              </Paper>
             </Box>
-            <Divider />
-            <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
-              <InputBase
-                sx={{ ml: 1, flex: 1 }}
-                placeholder="Enter message"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-              />
-              <IconButton type="submit" sx={{ p: '10px' }} aria-label="send">
-                <SendIcon />
-              </IconButton>
-            </Paper>
-          </Collapse>
+          )}
         </Box>
       </Box>
     </MathJaxContext>
