@@ -177,7 +177,7 @@ def remove_latex_commands(text: str) -> str:
     
     return text.strip()
 
-def generate_narrative(text: str, max_attempts=1, max_tokens=4096):
+def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
     cleaned_text = remove_latex_commands(text)
 
     prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
@@ -235,7 +235,10 @@ def generate_narrative(text: str, max_attempts=1, max_tokens=4096):
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
-    # Store the generated narrative
+    # Delete existing narrative if it exists
+    db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).delete()
+
+    # Create new narrative
     narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
     db.add(narrative_model)
     db.commit()
@@ -260,11 +263,11 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
     )
 
     try:
-        narrative = generate_narrative(system_message)
+        narrative = generate_narrative(system_message, chapter_id, db)
         
         # Generate game idea
         game_idea_prompt = f"Based on the concepts in this chapter, suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
-        game_idea = generate_narrative(game_idea_prompt)
+        game_idea = generate_narrative(game_idea_prompt, chapter_id, db)
         
         # Generate game code
         game_code_request = GameIdeaRequest(game_idea=game_idea)
@@ -446,3 +449,101 @@ async def generate_game_code(request: GameIdeaRequest):
         return {"code": generated_code}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+def get_stored_narrative(chapter_id: int, db: Session):
+    narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
+    if narrative:
+        return narrative.content
+    return None
+
+@app.post("/api/chat")
+async def chat(request: Request, db: Session = Depends(get_db)):
+    try:
+        data = await request.json()
+        user_message = data.get('message')
+        chapter_id = data.get('chapter_id')
+        chat_history = data.get('chat_history', [])
+
+        logging.info(f"Received chat request: message={user_message}, chapter_id={chapter_id}, chat_history_length={len(chat_history)}")
+
+        if not user_message:
+            raise HTTPException(status_code=400, detail="Message is required")
+
+        if chapter_id is None:
+            context = "You are an AI tutor. The student hasn't selected a specific chapter yet."
+        else:
+            # Fetch the stored narrative
+            chapter_summary = get_stored_narrative(chapter_id, db)
+            if chapter_summary is None:
+                raise HTTPException(status_code=404, detail="Chapter summary not found")
+            context = f"You are an AI tutor assisting a student with their studies. Here's a summary of the chapter they're studying:\n\n{chapter_summary}"
+
+        prompt = f"""{context}
+
+        Remember the context of the previous messages in this conversation. Here's the student's latest question:
+
+        {user_message}
+
+        Provide a helpful, accurate, and concise answer based on the given context, your general knowledge, and the conversation history. If the question is related to the chapter summary (if provided), make sure to reference it in your answer. If the question is not related to the provided context, politely guide the student back to the relevant material. Answer the question but be as concise as possible(4-6 sentences)."""
+
+        # Generate AI response using the chat function
+        ai_response = generate_chat_response(prompt, chat_history)
+
+        # Update chat history
+        chat_history.append({"user": "You", "text": user_message})
+        chat_history.append({"user": "AI", "text": ai_response})
+
+        return {"reply": ai_response, "updated_chat_history": chat_history}
+
+    except Exception as e:
+        logging.exception("Error in chat endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 500, max_history_tokens: int = 1000) -> str:
+    full_response = ""
+    
+    try:
+        # Prepare the chat history for the model
+        formatted_history = []
+        total_tokens = 0
+        for msg in reversed(chat_history):
+            role = "user" if msg['user'] == 'You' else "assistant"
+            content = msg['text']
+            message_tokens = len(content.split())  # Simple token count estimation
+            if total_tokens + message_tokens > max_history_tokens:
+                break
+            formatted_history.insert(0, {"role": role, "content": content})
+            total_tokens += message_tokens
+
+        # Add the current prompt
+        formatted_history.append({"role": "user", "content": prompt})
+
+        native_request = {
+            'anthropic_version': 'bedrock-2023-05-31',
+            'max_tokens': max_tokens,
+            'messages': formatted_history,
+            'temperature': 0.7,
+            'top_k': 250,
+            'top_p': 1,
+            'stop_sequences': ['\n\nHuman:'],
+        }
+
+        request = json.dumps(native_request)
+
+        logging.debug(f"Sending request to Bedrock: {json.dumps(native_request, indent=2)}")
+
+        response = bedrock.invoke_model_with_response_stream(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=request
+        )
+
+        for event in response['body']:
+            chunk = json.loads(event['chunk']['bytes'])
+            if chunk['type'] == 'content_block_delta':
+                full_response += chunk['delta'].get('text', '')
+
+        return full_response.strip()
+
+    except ClientError as e:
+        logging.error(f"Error calling Bedrock: {e}")
+        return f"Error: {str(e)}"
