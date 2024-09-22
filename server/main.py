@@ -19,6 +19,7 @@ import boto3
 from botocore.exceptions import ClientError
 from server import models
 from functools import lru_cache
+from sqlalchemy.exc import IntegrityError
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
@@ -271,10 +272,21 @@ def generate_narrative(chapter_content: str, chapter_id: int, db: Session):
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
-    # Store the generated narrative
-    narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
-    db.add(narrative_model)
-    db.commit()
+    try:
+        # Try to create a new narrative
+        narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
+        db.add(narrative_model)
+        db.commit()
+    except IntegrityError:
+        # If a narrative already exists, update it
+        db.rollback()  # Roll back the failed transaction
+        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
+        if existing_narrative:
+            existing_narrative.content = full_response
+            db.commit()
+        else:
+            # This shouldn't happen, but just in case
+            raise Exception("Failed to create or update narrative")
     
     return full_response
 
