@@ -16,12 +16,16 @@ import tempfile
 import subprocess
 from fastapi.responses import FileResponse
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
 from server import models
 from pydantic import BaseModel
 import textwrap
 from functools import lru_cache
 from sqlalchemy.exc import IntegrityError
+import boto3
+from fastapi import UploadFile, File
+from contextlib import closing
+from tempfile import gettempdir
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
@@ -31,6 +35,14 @@ bedrock = boto3.client(
 
 # Add AWS Translate client initialization
 translate = boto3.client('translate')
+
+# Add this with your other AWS client initializations
+transcribe = boto3.client('transcribe',
+    region_name='us-east-1'
+)
+
+# Initialize Polly client
+polly_client = boto3.client('polly', region_name='us-east-1')
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -548,9 +560,14 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         chapter_id = data.get('chapter_id')
         chat_history = data.get('chat_history', [])
         chapter_content = data.get('chapter_content', '')
+        language = data.get('language', 'en')
 
         if not user_message or not chapter_content:
             raise HTTPException(status_code=400, detail="Message and chapter content are required")
+
+        # Translate user message to English if not already in English
+        if language != 'en':
+            user_message = translate_text(user_message, 'en')
 
         context = f"You are an AI tutor assisting a student with their studies. The current chapter is about: {chapter_content[:200]}... Please ensure your responses are relevant to this topic."
 
@@ -565,8 +582,12 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         # Generate AI response using the chat function
         ai_response = generate_chat_response(prompt, chat_history)
 
+        # Translate AI response if not in English
+        if language != 'en':
+            ai_response = translate_text(ai_response, language)
+
         # Update chat history
-        chat_history.append({"user": "You", "text": user_message})
+        chat_history.append({"user": "You", "text": data.get('message')})  # Use original message for history
         chat_history.append({"user": "AI", "text": ai_response})
 
         return {"reply": ai_response, "updated_chat_history": chat_history}
@@ -624,18 +645,94 @@ def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 50
         logging.error(f"Error calling Bedrock: {e}")
         return f"Error: {str(e)}"
 
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    # Save the uploaded file temporarily
+    temp_file_path = f"/tmp/{uuid.uuid4()}.wav"
+    with open(temp_file_path, "wb") as buffer:
+        buffer.write(await audio.read())
+    
+    job_name = f"transcribe_job_{int(time.time())}"
+    job_uri = f"s3://YOUR_S3_BUCKET/{audio.filename}"
+    
+    # Upload the file to S3 (you need to implement this)
+    # upload_to_s3(temp_file_path, "YOUR_S3_BUCKET", audio.filename)
+    
+    transcribe.start_transcription_job(
+        TranscriptionJobName=job_name,
+        Media={'MediaFileUri': job_uri},
+        MediaFormat='wav',
+        LanguageCode='en-US'
+    )
+    
+    while True:
+        status = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+        if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+            break
+        time.sleep(5)
+    
+    if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+        result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+        transcript_uri = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
+        # Fetch and parse the transcript JSON from the URI
+        # You'll need to implement this part
+        transcript_text = fetch_and_parse_transcript(transcript_uri)
+        return {"transcript": transcript_text}
+    else:
+        return {"error": "Transcription failed"}
+
+@app.post("/api/synthesize-speech")
+async def synthesize_speech(request: Request):
+    data = await request.json()
+    text = data.get('text')
+    language = data.get('language', 'en-US')
+
+    try:
+        # Map language codes to Polly voice IDs
+        voice_map = {
+            'en-US': 'Joanna',
+            'es-ES': 'Conchita',
+            'fr-FR': 'Celine',
+            'de-DE': 'Marlene',
+            # Add more languages and voices as needed
+        }
+
+        response = polly_client.synthesize_speech(
+            Text=text,
+            OutputFormat='mp3',
+            VoiceId=voice_map.get(language, 'Joanna')
+        )
+
+        if "AudioStream" in response:
+            with closing(response["AudioStream"]) as stream:
+                output = os.path.join(gettempdir(), "speech.mp3")
+                try:
+                    with open(output, "wb") as file:
+                        file.write(stream.read())
+                except IOError as error:
+                    print(error)
+                    raise HTTPException(status_code=500, detail="Error writing audio stream to file")
+
+            return FileResponse(output, media_type='audio/mpeg', filename="speech.mp3")
+        else:
+            raise HTTPException(status_code=500, detail="Could not stream audio")
+
+    except (BotoCoreError, ClientError) as error:
+        print(error)
+        raise HTTPException(status_code=500, detail=str(error))
+
 @app.post("/translate")
 async def translate_text_endpoint(request: Request):
     data = await request.json()
-    text = data.get('text', '')
-    target_language = data.get('target_language', 'en')
-    
-    if not text:
-        raise HTTPException(status_code=400, detail="Text to translate is required")
-    
-    try:
-        translated_text = translate_text(text, target_language)
-        return {"translated_text": translated_text}
-    except Exception as e:
-        logging.exception("Error in translate_text_endpoint")
-        raise HTTPException(status_code=500, detail=str(e))
+    text = data.get('text')
+    target_language = data.get('target_language')
+
+    if not text or not target_language:
+        raise HTTPException(status_code=400, detail="Text and target language are required")
+
+    translated_text = translate_text(text, target_language)
+
+    if translated_text is None:
+        raise HTTPException(status_code=500, detail="Translation failed")
+
+    return {"translated_text": translated_text}

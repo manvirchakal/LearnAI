@@ -11,6 +11,10 @@ import Prism from 'prismjs';
 import 'prismjs/themes/prism.css';
 import ErrorBoundary from '../components/ErrorBoundary';
 import DynamicGameComponent from '../components/DynamicGameComponent';
+import MicIcon from '@mui/icons-material/Mic';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import StopIcon from '@mui/icons-material/Stop';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -19,8 +23,8 @@ axios.defaults.baseURL = 'http://localhost:8000';
 const preprocessLatex = (content) => {
   return content
     // Preserve LaTeX math environments
-    .replace(/\$\$(.*?)\$\$/g, '<div class="equation">$$$$1$$</div>')
-    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$$1$$</span>')
+    .replace(/\$\$([\s\S]*?)\$\$/g, (match, p1) => `<div class="equation">$$${p1}$$</div>`)
+    .replace(/\$(.*?)\$/g, (match, p1) => `<span class="inline-math">$${p1}$</span>`)
     // Text formatting
     .replace(/\\textit{([^}]*)}/g, '<i>$1</i>')
     .replace(/\\textbf{([^}]*)}/g, '<strong>$1</strong>')
@@ -47,9 +51,6 @@ const preprocessLatex = (content) => {
     
     // Clean up empty paragraphs
     .replace(/<p>\s*<\/p>/g, '')
-    
-    // Remove any remaining LaTeX commands
-    .replace(/\\[a-zA-Z]+/g, '')
     
     // Clean up extra spaces
     .replace(/\s+/g, ' ')
@@ -99,8 +100,14 @@ const Study = () => {
   const [targetLanguage, setTargetLanguage] = useState('en');
   const [originalNarrative, setOriginalNarrative] = useState('');
   const [translatedNarrative, setTranslatedNarrative] = useState('');
+  const [chatLanguage, setChatLanguage] = useState('en');
+  const [isListening, setIsListening] = useState(false);
+  const [recognition, setRecognition] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechSynthesis, setSpeechSynthesis] = useState(null);
 
   const messagesEndRef = useRef(null);
+  const audioRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -207,35 +214,38 @@ const Study = () => {
   };
 
   // Modify handleSendMessage to include chapter content in the chat request
-  const handleSendMessage = async (event) => {
-    event.preventDefault();
-    
-    if (!message.trim() || !chapter) return;
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (message.trim() === '' || isGenerating) return;
 
-    const newUserMessage = { user: 'You', text: message };
-    setChatMessages(prevMessages => [...prevMessages, newUserMessage]);
-    const currentMessage = message;
+    setIsGenerating(true);
+    const newMessage = { user: 'You', text: message };
+    setChatMessages(prevMessages => [...prevMessages, newMessage]);
     setMessage('');
 
     try {
-      setIsGenerating(true);
       const response = await axios.post('/api/chat', {
-        message: currentMessage,
+        message: message,
+        chapter_id: chapter?.id,
         chat_history: chatMessages,
-        chapter_id: chapter.id,
-        chapter_content: chapter.content // Include chapter content in the request
+        chapter_content: chapter?.content || '',
+        language: chatLanguage
       });
 
-      if (response.data && response.data.reply) {
-        setChatMessages(response.data.updated_chat_history);
-      } else {
-        throw new Error('Invalid response from server');
-      }
-    } catch (error) {
-      console.error('Error in chat:', error);
+      const aiResponse = response.data.reply;
       setChatMessages(prevMessages => [
         ...prevMessages,
-        { user: 'AI', text: `Sorry, an error occurred: ${error.message}. Please try again.` }
+        { user: 'AI', text: aiResponse }
+      ]);
+
+      // Speak the AI's response
+      speakText(aiResponse);
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setChatMessages(prevMessages => [
+        ...prevMessages,
+        { user: 'AI', text: 'Sorry, there was an error processing your request.' }
       ]);
     } finally {
       setIsGenerating(false);
@@ -262,6 +272,7 @@ const Study = () => {
   const handleLanguageChange = async (event) => {
     const newLanguage = event.target.value;
     setTargetLanguage(newLanguage);
+    setChatLanguage(newLanguage);
     if (newLanguage === 'en') {
       setTranslatedNarrative(originalNarrative);
     } else {
@@ -271,6 +282,91 @@ const Study = () => {
       setIsNarrativeLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (window.MathJax) {
+      window.MathJax.typesetPromise().then(() => {
+        console.log('MathJax typesetting complete');
+      }).catch((err) => console.error('MathJax typesetting failed:', err));
+    }
+  }, [translatedNarrative]);
+
+  const handleSpeechRecognition = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error("Speech recognition not supported in this browser");
+      return;
+    }
+
+    const recognitionInstance = new SpeechRecognition();
+    recognitionInstance.lang = chatLanguage;
+    recognitionInstance.continuous = false;
+    recognitionInstance.interimResults = false;
+
+    recognitionInstance.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognitionInstance.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setMessage(transcript);
+    };
+
+    recognitionInstance.onerror = (event) => {
+      console.error('Speech recognition error', event.error);
+      setIsListening(false);
+    };
+
+    recognitionInstance.onend = () => {
+      setIsListening(false);
+    };
+
+    setRecognition(recognitionInstance);
+
+    if (isListening) {
+      recognitionInstance.stop();
+    } else {
+      recognitionInstance.start();
+    }
+  };
+
+  const speakText = async (text) => {
+    if (isSpeaking) {
+      setIsSpeaking(false);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      return;
+    }
+
+    try {
+      const response = await axios.post('/api/synthesize-speech', 
+        { text, language: chatLanguage },
+        { responseType: 'blob' }
+      );
+
+      const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.play();
+        setIsSpeaking(true);
+      }
+    } catch (error) {
+      console.error('Error synthesizing speech:', error);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+    };
+  }, []);
 
   return (
     <MathJaxContext>
@@ -322,7 +418,12 @@ const Study = () => {
                     <CircularProgress />
                   </Box>
                 ) : translatedNarrative ? (
-                  <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(translatedNarrative) }} />
+                  <div 
+                    className={styles.chapterContent} 
+                    dangerouslySetInnerHTML={{ 
+                      __html: preprocessLatex(translatedNarrative) 
+                    }} 
+                  />
                 ) : (
                   <Typography>No summary available.</Typography>
                 )}
@@ -385,15 +486,33 @@ const Study = () => {
                       bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
                       borderRadius: 1,
                       width: '90%',
-                      mx: 'auto', // This centers the message box
+                      mx: 'auto',
+                      position: 'relative',
                     }}
                   >
                     <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
                       {msg.user}:
                     </Typography>
-                    <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white' }}>
+                    <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
                       {msg.text}
                     </Typography>
+                    {msg.user === 'AI' && (
+                      <IconButton 
+                        onClick={() => speakText(msg.text)} 
+                        sx={{ 
+                          color: 'white',
+                          position: 'absolute',
+                          right: 8,
+                          top: 8,
+                          backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                          '&:hover': {
+                            backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                          },
+                        }}
+                      >
+                        {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
+                      </IconButton>
+                    )}
                   </Box>
                 ))}
                 <div ref={messagesEndRef} />
@@ -405,15 +524,19 @@ const Study = () => {
                   placeholder="Enter message"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  disabled={isGenerating}
+                  disabled={isGenerating || isListening}
                 />
-                <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating}>
+                <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
+                  <MicIcon color={isListening ? "secondary" : "primary"} />
+                </IconButton>
+                <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
                   {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
                 </IconButton>
               </Paper>
             </Box>
           )}
         </Box>
+        <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} />
       </Box>
     </MathJaxContext>
   );
