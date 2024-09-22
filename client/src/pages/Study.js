@@ -108,7 +108,7 @@ const Study = () => {
 
   useEffect(scrollToBottom, [chatMessages]);
 
-  // Modify fetchChapter to handle loading state
+  // Modify fetchChapter to include chapter content in the narrative generation request
   const fetchChapter = async (chapterId) => {
     try {
       setIsNarrativeLoading(true);
@@ -118,8 +118,8 @@ const Study = () => {
       setChapter(chapterResponse.data);
       setSection(chapterResponse.data.sections.length > 0 ? chapterResponse.data.sections[0] : null);
       
-      // Fetch narrative asynchronously
-      fetchNarrative(chapterId);
+      // Fetch narrative with chapter content
+      fetchNarrative(chapterId, chapterResponse.data.content);
     } catch (error) {
       console.error('Error fetching chapter:', error);
       setNarrative('Failed to load narrative. Please try again.');
@@ -129,11 +129,13 @@ const Study = () => {
     }
   };
 
-  // New function to fetch narrative separately
-  const fetchNarrative = async (chapterId) => {
+  // Modify fetchNarrative to include chapter content
+  const fetchNarrative = async (chapterId, chapterContent) => {
     try {
       setIsNarrativeLoading(true);
-      const response = await axios.get(`/generate-narrative/${chapterId}`);
+      const response = await axios.post(`/generate-narrative/${chapterId}`, {
+        chapter_content: chapterContent
+      });
       console.log("Fetched narrative:", response.data);
       
       setNarrative(response.data.narrative);
@@ -163,7 +165,7 @@ const Study = () => {
       }));
       
       // Fetch narrative asynchronously
-      fetchNarrative(sectionResponse.data.chapter_id);
+      fetchNarrative(sectionResponse.data.chapter_id, sectionResponse.data.content);
     } catch (error) {
       console.error('Error fetching section:', error);
       setNarrative('Failed to load narrative. Please try again.');
@@ -184,7 +186,7 @@ const Study = () => {
     fetchSection(sectionId);
   };
 
-  // Handle sending a message
+  // Modify handleSendMessage to include chapter content in the chat request
   const handleSendMessage = async (event) => {
     event.preventDefault();
     
@@ -200,7 +202,8 @@ const Study = () => {
       const response = await axios.post('/api/chat', {
         message: currentMessage,
         chat_history: chatMessages,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        chapter_content: chapter.content // Include chapter content in the request
       });
 
       if (response.data && response.data.reply) {

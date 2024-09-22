@@ -245,13 +245,15 @@ def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, 
     
     return full_response
 
-@app.get("/generate-narrative/{chapter_id}")
-async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get_db)):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
+@app.post("/generate-narrative/{chapter_id}")
+async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    chapter_content = data.get('chapter_content', '')
     
-    cleaned_chapter_content = remove_latex_commands(chapter.content)
+    if not chapter_content:
+        raise HTTPException(status_code=400, detail="Chapter content is required")
+    
+    cleaned_chapter_content = remove_latex_commands(chapter_content)
 
     system_message = (
         f"Act as an experienced teacher who wants to make complex topics simple and interesting. List out and explain the key concepts from the following chapter with clear analogies and relatable examples. "
@@ -265,8 +267,8 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
     try:
         narrative = generate_narrative(system_message, chapter_id, db)
         
-        # Generate game idea
-        game_idea_prompt = f"Based on the concepts in this chapter, suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
+        # Generate game idea based on chapter content
+        game_idea_prompt = f"Based on the concepts in this chapter about {cleaned_chapter_content[:100]}..., suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
         game_idea = generate_narrative(game_idea_prompt, chapter_id, db)
         
         # Generate game code
@@ -274,7 +276,6 @@ async def generate_narrative_endpoint(chapter_id: int, db: Session = Depends(get
         game_code_response = await generate_game_code(game_code_request)
         game_code = game_code_response["code"]
         
-        # Return narrative and game code separately
         return {
             "narrative": narrative,
             "game_idea": game_idea,
@@ -463,20 +464,12 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         user_message = data.get('message')
         chapter_id = data.get('chapter_id')
         chat_history = data.get('chat_history', [])
+        chapter_content = data.get('chapter_content', '')
 
-        logging.info(f"Received chat request: message={user_message}, chapter_id={chapter_id}, chat_history_length={len(chat_history)}")
+        if not user_message or not chapter_content:
+            raise HTTPException(status_code=400, detail="Message and chapter content are required")
 
-        if not user_message:
-            raise HTTPException(status_code=400, detail="Message is required")
-
-        if chapter_id is None:
-            context = "You are an AI tutor. The student hasn't selected a specific chapter yet."
-        else:
-            # Fetch the stored narrative
-            chapter_summary = get_stored_narrative(chapter_id, db)
-            if chapter_summary is None:
-                raise HTTPException(status_code=404, detail="Chapter summary not found")
-            context = f"You are an AI tutor assisting a student with their studies. Here's a summary of the chapter they're studying:\n\n{chapter_summary}"
+        context = f"You are an AI tutor assisting a student with their studies. The current chapter is about: {chapter_content[:200]}... Please ensure your responses are relevant to this topic."
 
         prompt = f"""{context}
 
@@ -484,7 +477,7 @@ async def chat(request: Request, db: Session = Depends(get_db)):
 
         {user_message}
 
-        Provide a helpful, accurate, and concise answer based on the given context, your general knowledge, and the conversation history. If the question is related to the chapter summary (if provided), make sure to reference it in your answer. If the question is not related to the provided context, politely guide the student back to the relevant material. Answer the question but be as concise as possible(4-6 sentences)."""
+        Provide a helpful, accurate, and concise answer based on the given context, your general knowledge, and the conversation history. Make sure to reference the chapter content in your answer. Answer the question but be as concise as possible (4-6 sentences)."""
 
         # Generate AI response using the chat function
         ai_response = generate_chat_response(prompt, chat_history)
