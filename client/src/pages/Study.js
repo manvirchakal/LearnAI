@@ -11,6 +11,7 @@ import Prism from 'prismjs';
 import 'prismjs/themes/prism.css';
 import ErrorBoundary from '../components/ErrorBoundary';
 import DynamicGameComponent from '../components/DynamicGameComponent';
+import MermaidDiagram from '../components/MermaidDiagram';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -19,8 +20,14 @@ axios.defaults.baseURL = 'http://localhost:8000';
 const preprocessLatex = (content) => {
   return content
     // Preserve LaTeX math environments
+    .replace(/\\\[/g, '<div class="equation">\\[')
+    .replace(/\\\]/g, '\\]</div>')
     .replace(/\$\$(.*?)\$\$/g, '<div class="equation">$$$$1$$</div>')
-    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$$1$$</span>')
+    
+    // Handle inline math
+    .replace(/\\\((.*?)\\\)/g, '<span class="inline-math">\\($1\\)</span>')
+    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$1$</span>')
+    
     // Text formatting
     .replace(/\\textit{([^}]*)}/g, '<i>$1</i>')
     .replace(/\\textbf{([^}]*)}/g, '<strong>$1</strong>')
@@ -96,6 +103,8 @@ const Study = () => {
   const [chatExpanded, setChatExpanded] = useState(false);
   const [isNarrativeLoading, setIsNarrativeLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [diagrams, setDiagrams] = useState([]);
+  const [isMounted, setIsMounted] = useState(false);
 
   const messagesEndRef = useRef(null);
 
@@ -104,6 +113,10 @@ const Study = () => {
   };
 
   useEffect(scrollToBottom, [chatMessages]);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Modify fetchChapter to include chapter content in the narrative generation request
   const fetchChapter = async (chapterId) => {
@@ -138,11 +151,13 @@ const Study = () => {
       setNarrative(response.data.narrative);
       setGameIdea(response.data.game_idea);
       setGameCode(response.data.game_code);
+      setDiagrams(response.data.diagrams);
     } catch (error) {
       console.error('Error fetching narrative:', error);
       setNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
       setGameCode('');
+      setDiagrams([]);
     } finally {
       setIsNarrativeLoading(false);
     }
@@ -277,9 +292,15 @@ const Study = () => {
                     <CircularProgress />
                   </Box>
                 ) : narrative ? (
-                  <div className={styles.chapterContent}>
-                    {narrative}
-                  </div>
+                  <>
+                    <div 
+                      className={styles.chapterContent} 
+                      dangerouslySetInnerHTML={{ __html: preprocessLatex(narrative) }} 
+                    />
+                    {isMounted && diagrams.map((diagram, index) => (
+                      <MermaidDiagram key={index} chart={diagram} />
+                    ))}
+                  </>
                 ) : (
                   <Typography>No summary available.</Typography>
                 )}

@@ -187,12 +187,18 @@ def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, 
     4. Explain how it relates to other concepts in the chapter
     5. Discuss its importance or applications
 
+    Additionally, for each main concept, provide a Mermaid.js diagram description that illustrates the concept visually. Use the following format for diagram descriptions:
+
+    ```mermaid
+    [Mermaid.js diagram code here]
+    ```
+
     Use clear, engaging language suitable for a student new to these concepts. 
     Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
     Chapter content: {cleaned_text}
 
-    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"""
+    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies, practical examples, and Mermaid.js diagram descriptions:"""
 
     full_response = ""
     for i in range(1):
@@ -324,6 +330,12 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
     try:
         narrative = generate_narrative(system_message, chapter_id, db)
         
+        # Extract Mermaid diagrams
+        mermaid_diagrams = re.findall(r'```mermaid\n(.*?)```', narrative, re.DOTALL)
+        
+        # Remove Mermaid diagrams from the narrative
+        narrative = re.sub(r'```mermaid\n.*?```', '', narrative, flags=re.DOTALL)
+        
         # Generate game idea based on chapter content
         game_idea_prompt = f"Based on the concepts in this chapter about {cleaned_chapter_content[:100]}..., suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
         game_idea = generate_game_idea(game_idea_prompt, chapter_id, db)
@@ -336,7 +348,8 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
         return {
             "narrative": narrative,
             "game_idea": game_idea,
-            "game_code": game_code
+            "game_code": game_code,
+            "diagrams": mermaid_diagrams
         }
     except Exception as e:
         logging.exception("Error in generate_narrative")
