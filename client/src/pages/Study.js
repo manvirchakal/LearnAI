@@ -15,42 +15,29 @@ import MicIcon from '@mui/icons-material/Mic';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import StopIcon from '@mui/icons-material/Stop';
+import MermaidDiagram from '../components/MermaidDiagram';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
 
 // Add this function inside your component file, but outside of the component function
 const preprocessLatex = (content) => {
+  if (typeof content !== 'string') {
+    console.error('preprocessLatex received non-string content:', content);
+    return '';
+  }
+
   return content
-    // Preserve LaTeX math environments
-    .replace(/\$\$([\s\S]*?)\$\$/g, (match, p1) => `<div class="equation">$$${p1}$$</div>`)
-    .replace(/\$(.*?)\$/g, (match, p1) => `<span class="inline-math">$${p1}$</span>`)
-    // Text formatting
+    // Wrap display math in specific divs
+    .replace(/\$\$(.*?)\$\$/g, '<div class="math-display">\\[$1\\]</div>')
+    
+    // Wrap inline math in specific spans
+    .replace(/\$(.*?)\$/g, '<span class="math-inline">\\($1\\)</span>')
+    
+    // Other transformations...
     .replace(/\\textit{([^}]*)}/g, '<i>$1</i>')
     .replace(/\\textbf{([^}]*)}/g, '<strong>$1</strong>')
     .replace(/\\emph{([^}]*)}/g, '<em>$1</em>')
-    
-    // Spacing
-    .replace(/\\quad/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
-    .replace(/\\qquad/g, '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')
-    
-    // Sections
-    .replace(/\\section{([^}]*)}/g, '<h2>$1</h2>')
-    .replace(/\\subsection{([^}]*)}/g, '<h3>$1</h3>')
-    
-    // Lists
-    .replace(/\\begin{itemize}([\s\S]*?)\\end{itemize}/g, '<ul>$1</ul>')
-    .replace(/\\begin{enumerate}([\s\S]*?)\\end{enumerate}/g, '<ol>$1</ol>')
-    .replace(/\\item\s/g, '<li>')
-    
-    // Paragraphs
-    .replace(/\n\n/g, '</p><p>')
-    
-    // Wrap content in paragraphs
-    .replace(/^(.|\n)*$/, '<p>$&</p>')
-    
-    // Clean up empty paragraphs
-    .replace(/<p>\s*<\/p>/g, '')
     
     // Clean up extra spaces
     .replace(/\s+/g, ' ')
@@ -58,7 +45,17 @@ const preprocessLatex = (content) => {
 };
 
 const formatSummary = (content) => {
-  return content
+  let processedContent = content;
+  
+  // Store LaTeX equations temporarily
+  const equations = [];
+  processedContent = processedContent.replace(/\$\$(.*?)\$\$|\$(.*?)\$|\\\[(.*?)\\\]|\\\((.*?)\\\)/gs, (match) => {
+    equations.push(match);
+    return `%%EQUATION${equations.length - 1}%%`;
+  });
+
+  // Apply other transformations
+  processedContent = processedContent
     // Format main headings
     .replace(/^### (.*?)$/gm, '<h2 class="main-heading">$1</h2>')
     // Format subheadings
@@ -74,15 +71,17 @@ const formatSummary = (content) => {
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     // Format italic text
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    // Format inline math
-    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$$1$$</span>')
-    // Remove empty paragraphs
-    .replace(/<p class="summary-paragraph">\s*<\/p>/g, '')
     // Add section dividers
     .replace(/<h2 class="main-heading">/g, '<hr class="section-divider"><h2 class="main-heading">')
-    // Preserve LaTeX equations
-    .replace(/<span class="inline-math">(.*?)<\/span>/g, '$1')
-    .replace(/<div class="equation">(.*?)<\/div>/g, '$1');
+    // Remove empty paragraphs
+    .replace(/<p class="summary-paragraph">\s*<\/p>/g, '');
+
+  // Restore LaTeX equations
+  equations.forEach((eq, index) => {
+    processedContent = processedContent.replace(`%%EQUATION${index}%%`, eq);
+  });
+
+  return processedContent;
 };
 
 const Study = () => {
@@ -105,6 +104,7 @@ const Study = () => {
   const [recognition, setRecognition] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSynthesis, setSpeechSynthesis] = useState(null);
+  const [diagrams, setDiagrams] = useState([]);
 
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
@@ -154,12 +154,14 @@ const Study = () => {
       } else {
         setTranslatedNarrative(response.data.narrative);
       }
+      setDiagrams(response.data.diagrams);
     } catch (error) {
       console.error('Error fetching narrative:', error);
       setOriginalNarrative('Failed to load narrative. Please try again.');
       setTranslatedNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
       setGameCode('');
+      setDiagrams([]);
     } finally {
       setIsNarrativeLoading(false);
     }
@@ -259,9 +261,11 @@ const Study = () => {
   // Use effect to render LaTeX when narrative changes
   useEffect(() => {
     if (narrative && window.MathJax) {
-      window.MathJax.typesetPromise().then(() => {
-        console.log('MathJax typesetting complete');
-      }).catch((err) => console.error('MathJax typesetting failed:', err));
+      window.MathJax.typesetPromise([document.querySelector('.chapterContent')])
+        .then(() => {
+          console.log('MathJax typesetting complete');
+        })
+        .catch((err) => console.error('MathJax typesetting failed:', err));
     }
   }, [narrative]);
 
@@ -367,6 +371,22 @@ const Study = () => {
       }
     };
   }, []);
+  useEffect(() => {
+    if ((chapter && chapter.content) || (section && section.content) || narrative) {
+      if (window.MathJax) {
+        window.MathJax.typesetPromise().then(() => {
+          console.log('MathJax typesetting complete');
+        }).catch((err) => console.error('MathJax typesetting failed:', err));
+      }
+    }
+  }, [chapter, section, narrative]);
+
+  useEffect(() => {
+    if (narrative) {
+      console.log("Raw narrative:", narrative);
+      console.log("Processed narrative:", preprocessLatex(narrative));
+    }
+  }, [narrative]);
 
   return (
     <MathJaxContext>
@@ -403,10 +423,14 @@ const Study = () => {
             <Box display="flex" flexDirection="column" flex={1} marginRight={2}>
               <Paper elevation={3} sx={{ p: 2, maxHeight: '60vh', overflowY: 'auto' }}>
                 {(chapter && chapter.content) && (
-                  <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
+                  <MathJax key={narrative}>
+                    <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
+                  </MathJax>
                 )}
                 {(section && section.content && !chapter.content) && (
-                  <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
+                  <MathJax key={narrative}>
+                    <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
+                  </MathJax>
                 )}
               </Paper>
             </Box>

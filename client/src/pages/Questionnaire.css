@@ -1,0 +1,42 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f9;
+  }
+  
+  .questionnaire-container {
+    max-width: 800px;
+    margin: 20px auto;
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  }
+  
+  .questionnaire-container h2 {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  
+  .question {
+    margin-bottom: 20px;
+  }
+  
+  .options {
+    display: flex;
+    justify-content: space-between;
+  }
+  
+  .options label {
+    display: flex;
+    align-items: center;
+    margin-right: 10px;
+    cursor: pointer;
+    font-color: black;
+  }
+  
+  .options input {
+    margin-right: 5px;
+  }
+
+  

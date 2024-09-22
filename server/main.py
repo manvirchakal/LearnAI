@@ -23,9 +23,16 @@ import textwrap
 from functools import lru_cache
 from sqlalchemy.exc import IntegrityError
 import boto3
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, Depends, HTTPException, status, Body
 from contextlib import closing
 from tempfile import gettempdir
+from fastapi.security import OAuth2AuthorizationCodeBearer
+from jose import JWTError, jwt
+import requests
+from jose import jwk
+from jose.utils import base64url_decode
+import time
+import tempfile
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
@@ -73,6 +80,135 @@ def get_db():
     finally:
         db.close()
 
+# Configure the OAuth2 scheme
+oauth2_scheme = OAuth2AuthorizationCodeBearer(
+    authorizationUrl="https://learnai.auth.us-east-1.amazoncognito.com/oauth2/authorize",
+    tokenUrl="https://cognito-idp.us-east-1.amazonaws.com/us-east-1_48IJcanGU/.well-known/jwks.json"
+)
+
+# Add this function to fetch and cache the JWKS
+@lru_cache()
+def get_jwks():
+    jwks_url = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_48IJcanGU/.well-known/jwks.json"
+    response = requests.get(jwks_url)
+    return response.json()["keys"]
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        # Get the kid from the headers prior to verification
+        headers = jwt.get_unverified_headers(token)
+        kid = headers["kid"]
+        
+        # Search for the kid in the downloaded public keys
+        key_index = -1
+        for i in range(len(get_jwks())):
+            if kid == get_jwks()[i]["kid"]:
+                key_index = i
+                break
+        if key_index == -1:
+            raise HTTPException(status_code=401, detail="Public key not found in jwks.json")
+        
+        # Construct the public key
+        public_key = jwk.construct(get_jwks()[key_index])
+        
+        # Get the last two sections of the token,
+        # message and signature (encoded in base64)
+        message, encoded_signature = str(token).rsplit(".", 1)
+        
+        # Decode the signature
+        decoded_signature = base64url_decode(encoded_signature.encode("utf-8"))
+        
+        # Verify the signature
+        if not public_key.verify(message.encode("utf8"), decoded_signature):
+            raise HTTPException(status_code=401, detail="Signature verification failed")
+        
+        # Since we passed the verification, we can now safely
+        # use the unverified claims
+        claims = jwt.get_unverified_claims(token)
+        
+        # Additionally we can verify the token expiration
+        if time.time() > claims["exp"]:
+            raise HTTPException(status_code=401, detail="Token is expired")
+        
+        # And the Audience  (use claims["client_id"] if verifying an access token)
+        if claims["aud"] != "7ri0hp1t0jl1l2cb3vdnok67tu":
+            raise HTTPException(status_code=401, detail="Token was not issued for this audience")
+        
+        return claims["sub"]
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+
+@app.post("/save-learning-profile")
+async def save_learning_profile(
+    profile: dict = Body(...),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        print(f"Received answers: {profile}")  # Log the received answers
+        
+        # Generate textual description using Claude Haiku
+        learning_profile = generate_learning_profile_description(profile['answers'])
+        
+        user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user).first()
+        
+        if user_profile:
+            user_profile.learning_profile = learning_profile
+        else:
+            user_profile = models.UserProfile(user_id=current_user, learning_profile=learning_profile)
+            db.add(user_profile)
+        
+        db.commit()
+        db.refresh(user_profile)
+        print(f"Saved profile for user {current_user}")  # Log the successful save
+        return {"message": "Learning profile saved successfully"}
+    except Exception as e:
+        print(f"Error saving profile: {str(e)}")  # Log any errors
+        raise HTTPException(status_code=500, detail=str(e))
+
+def generate_learning_profile_description(answers: dict) -> str:
+    prompt = f"""Based on the following questionnaire answers, generate a paragraph-long textual description of the user's learning style. The answers are organized by learning category (Visual, Auditory, ReadingWriting, Kinesthetic) and represent the user's agreement level with each statement (1: Strongly Disagree, 5: Strongly Agree).
+
+Questionnaire answers:
+{json.dumps(answers, indent=2)}
+
+Please provide a comprehensive description of the user's learning style, highlighting their strengths and preferences across different learning modalities. The description should be informative and tailored to the individual based on their responses."""
+
+    try:
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 300,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "temperature": 0.7,
+            "top_p": 0.9,
+        })
+
+        response = bedrock.invoke_model_with_response_stream(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=body
+        )
+
+        full_response = ""
+        for event in response['body']:
+            chunk = json.loads(event['chunk']['bytes'])
+            if chunk['type'] == 'content_block_delta':
+                full_response += chunk['delta'].get('text', '')
+
+        return full_response.strip()
+    except Exception as e:
+        logging.error(f"Error generating learning profile description: {str(e)}")
+        return "Error generating learning profile description"
+    
 
 def extract_chapters_and_sections_from_tex(tex_content: str):
     # Updated Chapter pattern with more flexibility
@@ -203,12 +339,18 @@ def generate_narrative(system_message: str, chapter_id: int, db: Session, max_at
     4. Explain how it relates to other concepts in the chapter
     5. Discuss its importance or applications
 
+    Additionally, for each main concept, provide a Mermaid.js diagram description that illustrates the concept visually. Use the following format for diagram descriptions:
+
+    ```mermaid
+    [Mermaid.js diagram code here]
+    ```
+
     Use clear, engaging language suitable for a student new to these concepts. 
     Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
     Chapter content: {cleaned_text}
 
-    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"""
+    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies, practical examples, and Mermaid.js diagram descriptions:"""
 
     full_response = ""
     for i in range(1):
@@ -359,7 +501,15 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
     try:
         system_message = f"You are an AI tutor. Your task is to provide a comprehensive summary and explanation of the following chapter content: {chapter_content}"
         narrative = generate_narrative(system_message, chapter_id, db)
-        game_idea_prompt = f"Based on the following chapter content, suggest a simple interactive game idea that reinforces the key concepts: {chapter_content}"
+        
+        # Extract Mermaid diagrams
+        mermaid_diagrams = re.findall(r'```mermaid\n(.*?)```', narrative, re.DOTALL)
+        
+        # Remove Mermaid diagrams from the narrative
+        narrative = re.sub(r'```mermaid\n.*?```', '', narrative, flags=re.DOTALL)
+        
+        # Generate game idea based on chapter content
+        game_idea_prompt = f"Based on the concepts in this chapter about {cleaned_chapter_content[:100]}..., suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
         game_idea = generate_game_idea(game_idea_prompt, chapter_id, db)
         game_code_response = await generate_game_code(GameIdeaRequest(game_idea=game_idea))
         game_code = game_code_response["code"]
@@ -372,7 +522,8 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
         return {
             "narrative": narrative,
             "game_idea": game_idea,
-            "game_code": game_code
+            "game_code": game_code,
+            "diagrams": mermaid_diagrams
         }
     except Exception as e:
         logging.exception("Error in generate_narrative")

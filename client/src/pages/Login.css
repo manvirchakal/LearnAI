@@ -1,0 +1,95 @@
+/* Login.css */
+
+body {
+    font-family: 'Arial', sans-serif;
+  }
+  
+  .login-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 50vh;
+  }
+  
+  .logo-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-right: 50px;
+  }
+  
+  .logo {
+    width: 500px;
+  }
+  
+  h1 {
+    font-size: 48px;
+    color: #000;
+  }
+  
+  .login-box {
+    background-color: #4A90E2;
+    padding: 40px;
+    border-radius: 15px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: 400px;
+  }
+  
+  form {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .input-field {
+    margin-bottom: 20px;
+    position: relative;
+  }
+  
+  label {
+    display: block;
+    font-size: 14px;
+    color: black;
+    margin-bottom: 8px;
+  }
+
+  label1 {
+    display: block;
+    font-size: 14px;
+    color: white;
+    margin-bottom: 8px;
+  }
+  
+  input {
+    padding: 10px;
+    border: none;
+    border-radius: 10px;
+    width: 100%;
+    background-color: #f2f2f2;
+  }
+  
+  input::placeholder {
+    color: #999;
+  }
+  
+  .icon-user, .icon-lock {
+    position: absolute;
+    right: 10px;
+    top: 35px;
+    color: gray;
+  }
+  
+  .signup-link {
+    text-align: center;
+  }
+  
+  .signup-link p {
+    color: white;
+  }
+  
+  .signup-link a {
+    color: #ffffff;
+    text-decoration: underline;
+  }
+  

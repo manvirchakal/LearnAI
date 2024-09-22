@@ -1,0 +1,61 @@
+/* Main container that wraps everything */
+.main-container {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+/* Navigation bar styling */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 50px;
+  background-color: white;
+  border-bottom: 2px solid #3B82F6; /* Blue bottom border */
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+}
+
+.logo-img {
+  width: 80px; /* Increased the width of the logo */
+  height: auto; /* Let the height adjust proportionally */
+}
+
+.nav-links {
+  list-style-type: none;
+  display: flex;
+  gap: 30px;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-links a {
+  text-decoration: none;
+  color: black; /* Default link color */
+  font-weight: 600;
+}
+
+.nav-links a:hover {
+  color: #3B82F6; /* Change to blue on hover */
+}
+
+/* Styling the Sign-up button */
+.sign-up-btn {
+  background-color: #3B82F6; /* Blue background */
+  color: white !important; /* Enforcing white text with !important */
+  padding: 10px 20px;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none; /* No underline */
+}
+
+.sign-up-btn:hover {
+  background-color: #2563EB; /* Darker blue on hover */
+  color: white !important; /* Keep text white on hover with !important */
+}

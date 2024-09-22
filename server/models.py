@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from server.database import Base
 
@@ -41,3 +41,10 @@ class Narrative(Base):
     content = Column(Text)
 
     chapter = relationship("Chapter", back_populates="narrative")
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, unique=True, index=True)
+    learning_profile = Column(Text)  # Changed from JSON to Text
