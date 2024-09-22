@@ -19,14 +19,8 @@ axios.defaults.baseURL = 'http://localhost:8000';
 const preprocessLatex = (content) => {
   return content
     // Preserve LaTeX math environments
-    .replace(/\\\[/g, '<div class="equation">\\[')
-    .replace(/\\\]/g, '\\]</div>')
     .replace(/\$\$(.*?)\$\$/g, '<div class="equation">$$$$1$$</div>')
-    
-    // Handle inline math
-    .replace(/\\\((.*?)\\\)/g, '<span class="inline-math">\\($1\\)</span>')
-    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$1$</span>')
-    
+    .replace(/\$(.*?)\$/g, '<span class="inline-math">$$$1$$</span>')
     // Text formatting
     .replace(/\\textit{([^}]*)}/g, '<i>$1</i>')
     .replace(/\\textbf{([^}]*)}/g, '<strong>$1</strong>')
@@ -84,7 +78,10 @@ const formatSummary = (content) => {
     // Remove empty paragraphs
     .replace(/<p class="summary-paragraph">\s*<\/p>/g, '')
     // Add section dividers
-    .replace(/<h2 class="main-heading">/g, '<hr class="section-divider"><h2 class="main-heading">');
+    .replace(/<h2 class="main-heading">/g, '<hr class="section-divider"><h2 class="main-heading">')
+    // Preserve LaTeX equations
+    .replace(/<span class="inline-math">(.*?)<\/span>/g, '$1')
+    .replace(/<div class="equation">(.*?)<\/div>/g, '$1');
 };
 
 const Study = () => {
@@ -229,7 +226,9 @@ const Study = () => {
   // Use effect to render LaTeX when narrative changes
   useEffect(() => {
     if (narrative && window.MathJax) {
-      window.MathJax.typesetPromise();
+      window.MathJax.typesetPromise().then(() => {
+        console.log('MathJax typesetting complete');
+      }).catch((err) => console.error('MathJax typesetting failed:', err));
     }
   }, [narrative]);
 
@@ -278,12 +277,9 @@ const Study = () => {
                     <CircularProgress />
                   </Box>
                 ) : narrative ? (
-                  <MathJax>
-                    <div 
-                      className={styles.chapterContent} 
-                      dangerouslySetInnerHTML={{ __html: formatSummary(preprocessLatex(narrative)) }} 
-                    />
-                  </MathJax>
+                  <div className={styles.chapterContent}>
+                    {narrative}
+                  </div>
                 ) : (
                   <Typography>No summary available.</Typography>
                 )}
