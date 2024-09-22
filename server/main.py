@@ -188,18 +188,75 @@ def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, 
     4. Explain how it relates to other concepts in the chapter
     5. Discuss its importance or applications
 
-    After explaining the concepts, suggest a simple interactive game idea related to these concepts. The game should:
+    Use clear, engaging language suitable for a student new to these concepts. 
+    Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
+
+    Chapter content: {cleaned_text}
+
+    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"""
+
+    full_response = ""
+    for i in range(1):
+        try:
+            native_request = {
+                'anthropic_version': 'bedrock-2023-05-31',
+                'max_tokens': 4096,
+                'temperature': 0.7,
+                'top_p': 0.9,
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [{'type': 'text', 'text': prompt}],
+                    }
+                ],
+            }
+
+            request = json.dumps(native_request)
+
+            response = bedrock.invoke_model_with_response_stream(
+                modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                body=request
+            )
+
+            for event in response['body']:
+                chunk = json.loads(event['chunk']['bytes'])
+                if chunk['type'] == 'content_block_delta':
+                    full_response += chunk['delta'].get('text', '')
+
+            if full_response.endswith(".") and len(full_response) < 4096 * 0.9:
+                break
+
+        except ClientError as e:
+            logging.error(f"Error calling Bedrock: {e}")
+            return f"Error: {str(e)}"
+
+    # Delete existing narrative if it exists
+    db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).delete()
+
+    # Create new narrative
+    narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
+    db.add(narrative_model)
+    db.commit()
+    
+    return full_response
+
+def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
+    cleaned_text = remove_latex_commands(text)
+
+    prompt = f"""Based on the following chapter content, suggest a simple interactive game idea that reinforces the key concepts. The game should:
     1. Be implementable in JavaScript
     2. Reinforce one or more key concepts from the chapter
     3. Be engaging and educational for students
     4. Be described in 2-3 sentences
+
+    Additionally, provide a brief summary of the chapter's main concepts (2-3 sentences).
 
     Use clear, engaging language suitable for a student new to these concepts. 
     Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
     Chapter content: {cleaned_text}
 
-    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples, followed by a game idea:"""
+    Now, provide a brief summary of the chapter's key concepts, followed by an engaging game idea:"""
 
     full_response = ""
     for i in range(1):
@@ -270,7 +327,7 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
         
         # Generate game idea based on chapter content
         game_idea_prompt = f"Based on the concepts in this chapter about {cleaned_chapter_content[:100]}..., suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
-        game_idea = generate_narrative(game_idea_prompt, chapter_id, db)
+        game_idea = generate_game_idea(game_idea_prompt, chapter_id, db)
         
         # Generate game code
         game_code_request = GameIdeaRequest(game_idea=game_idea)
@@ -386,12 +443,13 @@ async def generate_game_code(request: GameIdeaRequest):
     React.createElement('div', {{ style: {{ color: 'red' }} }}, 'Hello World')
 
     For MathJax expressions, use:
-    React.createElement('div', {{ style: {{ fontSize: '1.2em' }} }}, '\\(your_math_expression_here\\)')
+    React.createElement(MathJax, {{ style: {{ fontSize: '1.2em' }} }}, '\\(your_math_expression_here\\)')
 
     Ensure the component includes:
     - All necessary state variables defined at the beginning
     - All required event handlers and helper functions defined before the useEffect hook
     - A clear return statement that creates and returns all UI elements using React.createElement
+    - Game instructions and chapter relation explanation should be included as part of the UI elements, not as separate text
 
     The code should follow this structure:
     1. State declarations
@@ -399,12 +457,13 @@ async def generate_game_code(request: GameIdeaRequest):
     3. useEffect hooks
     4. UI element creation (stored in a variable called 'elements')
 
+    CRITICAL: DO NOT include any text, comments, or explanations outside of the actual JavaScript code.
     DO NOT include any import statements, export statements, or the 'const Game = () => {{' declaration.
     The code should be fully functional and not rely on any external functions or variables.
-    DO NOT include any usage examples or additional explanations outside the component code.
+    DO NOT include any usage examples or additional explanations.
     Ensure all values being rendered are strings or numbers, not objects.
     Do not wrap the code in any markers or code block syntax.
-    Do not include any introductory text or explanations before or after the code."""
+    The output should be pure JavaScript code that can be directly executed within a React component."""
 
     try:
         body = json.dumps({
