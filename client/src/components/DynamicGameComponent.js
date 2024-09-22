@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MathJaxContext, MathJax } from 'better-react-mathjax';
+import ErrorBoundary from './ErrorBoundary';
 
 const DynamicGameComponent = ({ gameCode }) => {
   const [error, setError] = useState(null);
@@ -8,11 +9,24 @@ const DynamicGameComponent = ({ gameCode }) => {
   useEffect(() => {
     setError(null);
     try {
+      // Wrap the game code in a try-catch block
+      const wrappedGameCode = `
+        try {
+          ${gameCode}
+        } catch (error) {
+          console.error('Error in game code:', error);
+          return React.createElement('div', null, 
+            React.createElement('h3', null, 'Error in game code:'),
+            React.createElement('pre', null, error.toString())
+          );
+        }
+      `;
+
       // Create a new function that returns a React component
       const ComponentFunction = new Function('React', 'useState', 'useEffect', 'MathJax', `
         return function Game() {
-          ${gameCode}
-          return React.createElement(React.Fragment, null, elements);
+          ${wrappedGameCode}
+          return elements;
         }
       `);
 
@@ -53,39 +67,5 @@ const DynamicGameComponent = ({ gameCode }) => {
     </MathJaxContext>
   );
 };
-
-// Add this ErrorBoundary component
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    this.setState({ error, errorInfo });
-    console.error("Uncaught error:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div>
-          <h3>Something went wrong in the game component.</h3>
-          <details style={{ whiteSpace: 'pre-wrap' }}>
-            {this.state.error && this.state.error.toString()}
-            <br />
-            {this.state.errorInfo && this.state.errorInfo.componentStack}
-          </details>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
 
 export default DynamicGameComponent;
