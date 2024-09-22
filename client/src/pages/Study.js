@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress } from '@mui/material';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -96,6 +96,9 @@ const Study = () => {
   const [chatExpanded, setChatExpanded] = useState(false);
   const [isNarrativeLoading, setIsNarrativeLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState('en');
+  const [originalNarrative, setOriginalNarrative] = useState('');
+  const [translatedNarrative, setTranslatedNarrative] = useState('');
 
   const messagesEndRef = useRef(null);
 
@@ -126,25 +129,45 @@ const Study = () => {
     }
   };
 
-  // Modify fetchNarrative to include chapter content
-  const fetchNarrative = async (chapterId, chapterContent) => {
+  const fetchNarrative = useCallback(async (chapterId, chapterContent) => {
     try {
       setIsNarrativeLoading(true);
       const response = await axios.post(`/generate-narrative/${chapterId}`, {
-        chapter_content: chapterContent
+        chapter_content: chapterContent,
       });
       console.log("Fetched narrative:", response.data);
       
-      setNarrative(response.data.narrative);
+      setOriginalNarrative(response.data.narrative);
       setGameIdea(response.data.game_idea);
       setGameCode(response.data.game_code);
+
+      if (targetLanguage !== 'en') {
+        const translatedText = await translateText(response.data.narrative, targetLanguage);
+        setTranslatedNarrative(translatedText);
+      } else {
+        setTranslatedNarrative(response.data.narrative);
+      }
     } catch (error) {
       console.error('Error fetching narrative:', error);
-      setNarrative('Failed to load narrative. Please try again.');
+      setOriginalNarrative('Failed to load narrative. Please try again.');
+      setTranslatedNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
       setGameCode('');
     } finally {
       setIsNarrativeLoading(false);
+    }
+  }, [targetLanguage]);
+
+  const translateText = async (text, targetLang) => {
+    try {
+      const response = await axios.post('/translate', {
+        text: text,
+        target_language: targetLang
+      });
+      return response.data.translated_text;
+    } catch (error) {
+      console.error('Error translating text:', error);
+      return text; // Return original text if translation fails
     }
   };
 
@@ -236,6 +259,19 @@ const Study = () => {
     Prism.highlightAll();
   }, [narrative]);
 
+  const handleLanguageChange = async (event) => {
+    const newLanguage = event.target.value;
+    setTargetLanguage(newLanguage);
+    if (newLanguage === 'en') {
+      setTranslatedNarrative(originalNarrative);
+    } else {
+      setIsNarrativeLoading(true);
+      const translatedText = await translateText(originalNarrative, newLanguage);
+      setTranslatedNarrative(translatedText);
+      setIsNarrativeLoading(false);
+    }
+  };
+
   return (
     <MathJaxContext>
       <Box display="flex" height="100vh" overflow="hidden">
@@ -249,13 +285,22 @@ const Study = () => {
           transition="margin-left 0.3s ease"
           overflow="auto"
         >
-          <Box display="flex" mb={2}>
+          <Box display="flex" mb={2} alignItems="center">
             <Typography variant="h4" flex={1}>
               {chapter ? `${chapter.title} > ${section?.title || 'Chapter Content'}` : 'Loading...'}
             </Typography>
-            <Typography variant="h4" flex={1}>
-              Summary
-            </Typography>
+            <Select
+              value={targetLanguage}
+              onChange={handleLanguageChange}
+              sx={{ minWidth: 120 }}
+            >
+              <MenuItem value="en">English</MenuItem>
+              <MenuItem value="es">Spanish</MenuItem>
+              <MenuItem value="fr">French</MenuItem>
+              <MenuItem value="de">German</MenuItem>
+              <MenuItem value="zh">Chinese</MenuItem>
+              {/* Add more language options as needed */}
+            </Select>
           </Box>
           <Box display="flex" flexDirection="row" mb={2}>
             {/* Left Pane: Chapter Content */}
@@ -276,10 +321,8 @@ const Study = () => {
                   <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                     <CircularProgress />
                   </Box>
-                ) : narrative ? (
-                  <div className={styles.chapterContent}>
-                    {narrative}
-                  </div>
+                ) : translatedNarrative ? (
+                  <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(translatedNarrative) }} />
                 ) : (
                   <Typography>No summary available.</Typography>
                 )}

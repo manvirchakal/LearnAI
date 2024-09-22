@@ -21,12 +21,16 @@ from server import models
 from pydantic import BaseModel
 import textwrap
 from functools import lru_cache
+from sqlalchemy.exc import IntegrityError
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
     service_name='bedrock-runtime',
     region_name='us-east-1'  # replace with your preferred region
 )
+
+# Add AWS Translate client initialization
+translate = boto3.client('translate')
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -177,8 +181,8 @@ def remove_latex_commands(text: str) -> str:
     
     return text.strip()
 
-def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
-    cleaned_text = remove_latex_commands(text)
+def generate_narrative(system_message: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
+    cleaned_text = remove_latex_commands(system_message)
 
     prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
     1. Define it clearly
@@ -229,14 +233,34 @@ def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, 
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
-    # Delete existing narrative if it exists
-    db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).delete()
+    try:
+        # Check if a narrative already exists for this chapter
+        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
+        
+        if existing_narrative:
+            # Update the existing narrative
+            existing_narrative.content = full_response
+            db.commit()
+        else:
+            # Create a new narrative
+            narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
+            db.add(narrative_model)
+            db.commit()
+    except IntegrityError:
+        db.rollback()
+        # If there's a race condition and another process inserted a narrative, update it
+        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
+        if existing_narrative:
+            existing_narrative.content = full_response
+            db.commit()
+        else:
+            # If we still can't find or update the narrative, raise an exception
+            raise Exception("Failed to save narrative due to database conflict")
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Error saving narrative: {str(e)}")
+        raise
 
-    # Create new narrative
-    narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
-    db.add(narrative_model)
-    db.commit()
-    
     return full_response
 
 def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
@@ -302,36 +326,36 @@ def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, 
     
     return full_response
 
+def translate_text(text, target_language):
+    try:
+        response = translate.translate_text(
+            Text=text,
+            SourceLanguageCode='en',
+            TargetLanguageCode=target_language
+        )
+        return response['TranslatedText']
+    except ClientError as e:
+        logging.error(f"Error translating text: {e}")
+        return None
+
 @app.post("/generate-narrative/{chapter_id}")
 async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     chapter_content = data.get('chapter_content', '')
+    target_language = data.get('target_language', 'en')  # Default to English
     
-    if not chapter_content:
-        raise HTTPException(status_code=400, detail="Chapter content is required")
-    
-    cleaned_chapter_content = remove_latex_commands(chapter_content)
-
-    system_message = (
-        f"Act as an experienced teacher who wants to make complex topics simple and interesting. List out and explain the key concepts from the following chapter with clear analogies and relatable examples. "
-        f"Use varied, real-world scenarios to demonstrate how each concept works in practical situations. Provide detailed explanations that uncover different aspects of the material, and don't hesitate to go deep into each idea. "
-        f"Instead of summarizing, imagine you are guiding the learner through each concept with patience, ensuring they grasp not just the 'what' but also the 'why' behind the material.\n\n"
-        f"Chapter content: {cleaned_chapter_content}\n"
-        f"---\n"
-        f"Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"
-    )
-
     try:
+        system_message = f"You are an AI tutor. Your task is to provide a comprehensive summary and explanation of the following chapter content: {chapter_content}"
         narrative = generate_narrative(system_message, chapter_id, db)
-        
-        # Generate game idea based on chapter content
-        game_idea_prompt = f"Based on the concepts in this chapter about {cleaned_chapter_content[:100]}..., suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
+        game_idea_prompt = f"Based on the following chapter content, suggest a simple interactive game idea that reinforces the key concepts: {chapter_content}"
         game_idea = generate_game_idea(game_idea_prompt, chapter_id, db)
-        
-        # Generate game code
-        game_code_request = GameIdeaRequest(game_idea=game_idea)
-        game_code_response = await generate_game_code(game_code_request)
+        game_code_response = await generate_game_code(GameIdeaRequest(game_idea=game_idea))
         game_code = game_code_response["code"]
+        
+        # Translate narrative and game_idea if target_language is not English
+        if target_language != 'en':
+            narrative = translate_text(narrative, target_language)
+            game_idea = translate_text(game_idea, target_language)
         
         return {
             "narrative": narrative,
@@ -461,7 +485,7 @@ async def generate_game_code(request: GameIdeaRequest):
     The code should be fully functional and not rely on any external functions or variables.
     DO NOT include any usage examples or additional explanations.
     Ensure all values being rendered are strings or numbers, not objects.
-    Do not wrap the code in any markers or code block syntax.
+    Do not wrap the code in any markdown code block syntax.
     The output should be pure JavaScript code that can be directly executed within a React component."""
 
     try:
@@ -599,3 +623,19 @@ def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 50
     except ClientError as e:
         logging.error(f"Error calling Bedrock: {e}")
         return f"Error: {str(e)}"
+
+@app.post("/translate")
+async def translate_text_endpoint(request: Request):
+    data = await request.json()
+    text = data.get('text', '')
+    target_language = data.get('target_language', 'en')
+    
+    if not text:
+        raise HTTPException(status_code=400, detail="Text to translate is required")
+    
+    try:
+        translated_text = translate_text(text, target_language)
+        return {"translated_text": translated_text}
+    except Exception as e:
+        logging.exception("Error in translate_text_endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
