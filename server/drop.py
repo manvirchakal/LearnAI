@@ -1,10 +1,10 @@
 from server.database import Base, engine
-from server.models import Chapter, Textbook
+from server.models import Chapter, Textbook, Section, Narrative, UserProfile
 
-# Drop the 'chapters' and 'textbooks' tables
-Base.metadata.drop_all(bind=engine, tables=[Chapter.__table__, Textbook.__table__])
+# Drop all tables
+Base.metadata.drop_all(bind=engine)
 
-# Recreate the 'chapters' and 'textbooks' tables
+# Recreate all tables
 Base.metadata.create_all(bind=engine)
 
-print("Tables dropped and recreated successfully!")
+print("All tables dropped and recreated successfully!")

@@ -1,6 +1,6 @@
 .chapterContent {
     font-size: 16px;
-    line-height: 1.6;
+    line-height: 1.5;
     color: #333;
     word-spacing: 0.1em;
     font-family: 'Arial', sans-serif;
@@ -221,4 +221,42 @@
 
 .chapterContent p {
     margin-bottom: 1em;
+}
+
+.equation {
+    display: block;
+    margin: 1em 0;
+    text-align: center;
+}
+
+.inline-math {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.chapterContent {
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.chapterContent .MathJax {
+    font-size: 100% !important;
+}
+
+.math-inline {
+    display: inline-block;
+}
+
+.math-display {
+    display: block;
+    margin: 1em 0;
+}
+
+.math {
+    display: inline-block;
+}
+
+.math-display {
+    display: block;
+    margin: 1em 0;
 }

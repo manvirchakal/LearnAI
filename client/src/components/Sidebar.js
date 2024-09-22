@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Drawer, List, ListItem, ListItemText, IconButton, Divider, Collapse, Box } from '@mui/material';
-import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as ExitToAppIcon, ExpandLess, ExpandMore } from '@mui/icons-material';
+import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as LogoutIcon, ExpandLess, ExpandMore } from '@mui/icons-material';
 import MenuIcon from '@mui/icons-material/Menu';
+import { Auth } from 'aws-amplify';
+import { useNavigate } from 'react-router-dom';
 
 const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
   const [open, setOpenState] = useState(false);
   const [bookOpen, setBookOpen] = useState(false);
   const [chapters, setChapters] = useState([]);
   const [textbookTitle, setTextbookTitle] = useState('');
+  const navigate = useNavigate();
 
   const toggleDrawer = () => {
     setOpenState(!open);
@@ -34,6 +37,15 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
 
     fetchTextbookStructure();
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      await Auth.signOut();
+      navigate('/');
+    } catch (error) {
+      console.error('Error signing out: ', error);
+    }
+  };
 
   return (
     <div>
@@ -96,8 +108,8 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
               <PersonIcon sx={{ color: '#FFFFFF' }} />
               {open && <ListItemText primary="Profile" sx={{ marginLeft: '15px', color: '#FFFFFF' }} />}
             </ListItem>
-            <ListItem button sx={{ justifyContent: open ? 'flex-start' : 'center', paddingLeft: open ? '16px' : '8px' }}>
-              <ExitToAppIcon sx={{ color: '#FFFFFF' }} />
+            <ListItem button onClick={handleLogout} sx={{ justifyContent: open ? 'flex-start' : 'center', paddingLeft: open ? '16px' : '8px' }}>
+              <LogoutIcon sx={{ color: '#FFFFFF' }} />
               {open && <ListItemText primary="Logout" sx={{ marginLeft: '15px', color: '#FFFFFF' }} />}
             </ListItem>
           </List>
