@@ -34,6 +34,7 @@ from jose.utils import base64url_decode
 import time
 import tempfile
 
+
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
     service_name='bedrock-runtime',
@@ -499,7 +500,9 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
     target_language = data.get('target_language', 'en')  # Default to English
     
     try:
-        system_message = f"You are an AI tutor. Your task is to provide a comprehensive summary and explanation of the following chapter content: {chapter_content}"
+        cleaned_chapter_content = remove_latex_commands(chapter_content)
+        
+        system_message = f"You are an AI tutor. Your task is to provide a comprehensive summary and explanation of the following chapter content: {cleaned_chapter_content}"
         narrative = generate_narrative(system_message, chapter_id, db)
         
         # Extract Mermaid diagrams

@@ -16,6 +16,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import StopIcon from '@mui/icons-material/Stop';
 import MermaidDiagram from '../components/MermaidDiagram';
+import Webcam from 'react-webcam';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -105,6 +106,8 @@ const Study = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechSynthesis, setSpeechSynthesis] = useState(null);
   const [diagrams, setDiagrams] = useState([]);
+  const [emotion, setEmotion] = useState(null);
+  const webcamRef = useRef(null);
 
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
@@ -231,7 +234,8 @@ const Study = () => {
         chapter_id: chapter?.id,
         chat_history: chatMessages,
         chapter_content: chapter?.content || '',
-        language: chatLanguage
+        language: chatLanguage,
+        emotion: emotion
       });
 
       const aiResponse = response.data.reply;
@@ -387,6 +391,27 @@ const Study = () => {
       console.log("Processed narrative:", preprocessLatex(narrative));
     }
   }, [narrative]);
+
+  const captureAndDetectEmotion = async () => {
+    const imageSrc = webcamRef.current.getScreenshot();
+    const blob = await fetch(imageSrc).then(r => r.blob());
+    const formData = new FormData();
+    formData.append('file', blob, 'emotion.jpg');
+
+    try {
+      const response = await axios.post('/api/detect-emotion', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setEmotion(response.data.emotion);
+    } catch (error) {
+      console.error('Error detecting emotion:', error);
+    }
+  };
+
+  useEffect(() => {
+    const intervalId = setInterval(captureAndDetectEmotion, 5000); // Detect every 5 seconds
+    return () => clearInterval(intervalId);
+  }, []);
 
   return (
     <MathJaxContext>
@@ -561,6 +586,18 @@ const Study = () => {
           )}
         </Box>
         <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} />
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          videoConstraints={{ width: 320, height: 240, facingMode: "user" }}
+          style={{ position: 'absolute', top: 10, right: 10, zIndex: 1000 }}
+        />
+        {emotion && (
+          <Typography variant="body2" sx={{ position: 'absolute', top: 260, right: 10, zIndex: 1000 }}>
+            Detected emotion: {emotion}
+          </Typography>
+        )}
       </Box>
     </MathJaxContext>
   );
