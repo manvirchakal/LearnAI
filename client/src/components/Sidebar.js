@@ -5,6 +5,7 @@ import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp
 import MenuIcon from '@mui/icons-material/Menu';
 import { Auth } from 'aws-amplify';
 import { useNavigate } from 'react-router-dom';
+import logo from '../static/logo.png';
 
 const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
   const [open, setOpenState] = useState(false);
@@ -63,11 +64,15 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
           },
         }}
       >
-        <Box sx={{ padding: '8px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: open ? 'row' : 'column' }}>
-          <IconButton onClick={toggleDrawer} edge="start" sx={{ marginBottom: open ? '0px' : '8px' }}>
-            <MenuIcon />
+        <Box sx={{ padding: '16px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: open ? 'row' : 'column' }}>
+          <IconButton onClick={toggleDrawer} edge="start" sx={{ marginBottom: open ? '0px' : '16px', padding: '12px' }}>
+            <MenuIcon sx={{ fontSize: '32px' }} />
           </IconButton>
-          {open && <Box sx={{ fontWeight: 'bold', fontSize: '1.2em', marginLeft: '10px' }}>{'{Logo} LearnAI'}</Box>}
+          {open && (
+            <Box sx={{ marginLeft: '20px' }}>
+              <img src={logo} alt="Logo" style={{ height: '50px', width: 'auto' }} />
+            </Box>
+          )}
         </Box>
 
         <List>

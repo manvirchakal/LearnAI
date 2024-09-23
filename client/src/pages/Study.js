@@ -15,8 +15,8 @@ import MicIcon from '@mui/icons-material/Mic';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import StopIcon from '@mui/icons-material/Stop';
-import MermaidDiagram from '../components/MermaidDiagram';
 import Webcam from 'react-webcam';
+import MermaidDiagram from '../components/MermaidDiagram';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -107,6 +107,7 @@ const Study = () => {
   const [speechSynthesis, setSpeechSynthesis] = useState(null);
   const [diagrams, setDiagrams] = useState([]);
   const [emotion, setEmotion] = useState(null);
+  const [webcamExpanded, setWebcamExpanded] = useState(false);
   const webcamRef = useRef(null);
 
   const messagesEndRef = useRef(null);
@@ -147,24 +148,32 @@ const Study = () => {
       });
       console.log("Fetched narrative:", response.data);
       
-      setOriginalNarrative(response.data.narrative);
+      let combinedNarrative = response.data.narrative;
+      
+      // Add diagrams to the end of the narrative
+      if (response.data.diagrams && response.data.diagrams.length > 0) {
+        combinedNarrative += '\n\n### Concept Diagrams\n\n';
+        response.data.diagrams.forEach((diagram, index) => {
+          combinedNarrative += `\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`;
+        });
+      }
+
+      setOriginalNarrative(combinedNarrative);
       setGameIdea(response.data.game_idea);
       setGameCode(response.data.game_code);
 
       if (targetLanguage !== 'en') {
-        const translatedText = await translateText(response.data.narrative, targetLanguage);
+        const translatedText = await translateText(combinedNarrative, targetLanguage);
         setTranslatedNarrative(translatedText);
       } else {
-        setTranslatedNarrative(response.data.narrative);
+        setTranslatedNarrative(combinedNarrative);
       }
-      setDiagrams(response.data.diagrams);
     } catch (error) {
       console.error('Error fetching narrative:', error);
       setOriginalNarrative('Failed to load narrative. Please try again.');
       setTranslatedNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
       setGameCode('');
-      setDiagrams([]);
     } finally {
       setIsNarrativeLoading(false);
     }
@@ -393,18 +402,20 @@ const Study = () => {
   }, [narrative]);
 
   const captureAndDetectEmotion = async () => {
-    const imageSrc = webcamRef.current.getScreenshot();
-    const blob = await fetch(imageSrc).then(r => r.blob());
-    const formData = new FormData();
-    formData.append('file', blob, 'emotion.jpg');
+    if (webcamRef.current) {
+      const imageSrc = webcamRef.current.getScreenshot();
+      const blob = await fetch(imageSrc).then(r => r.blob());
+      const formData = new FormData();
+      formData.append('file', blob, 'emotion.jpg');
 
-    try {
-      const response = await axios.post('/api/detect-emotion', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setEmotion(response.data.emotion);
-    } catch (error) {
-      console.error('Error detecting emotion:', error);
+      try {
+        const response = await axios.post('/api/detect-emotion', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        setEmotion(response.data.emotion);
+      } catch (error) {
+        console.error('Error detecting emotion:', error);
+      }
     }
   };
 
@@ -413,10 +424,95 @@ const Study = () => {
     return () => clearInterval(intervalId);
   }, []);
 
+  const toggleWebcam = () => {
+    setWebcamExpanded(!webcamExpanded);
+  };
+
+  const renderContent = (content) => {
+    const paragraphs = content.split('\n');
+    const regularContent = [];
+    const diagramContent = [];
+
+    let inMermaidBlock = false;
+    let currentDiagram = '';
+    let currentList = null;
+
+    paragraphs.forEach((paragraph, index) => {
+      if (paragraph.trim() === '```mermaid') {
+        inMermaidBlock = true;
+        currentDiagram = '';
+      } else if (paragraph.trim() === '```' && inMermaidBlock) {
+        inMermaidBlock = false;
+        diagramContent.push(
+          <MermaidDiagram key={`diagram-${index}`} chart={currentDiagram.trim()} />
+        );
+      } else if (inMermaidBlock) {
+        currentDiagram += paragraph + '\n';
+      } else {
+        // Check for headings and subheadings
+        if (paragraph.startsWith('***')) {
+          regularContent.push(
+            <Typography key={`heading-${index}`} variant="h4" gutterBottom sx={{ mt: 4, mb: 2, color: 'primary.main' }}>
+              {paragraph.replace(/^\*\*\*\s*/, '')}
+            </Typography>
+          );
+          currentList = null;
+        } else if (paragraph.startsWith('**')) {
+          regularContent.push(
+            <Typography key={`subheading-${index}`} variant="h5" gutterBottom sx={{ mt: 3, mb: 1, color: 'secondary.main' }}>
+              {paragraph.replace(/^\*\*\s*/, '')}
+            </Typography>
+          );
+          currentList = null;
+        } else if (paragraph.match(/^\d+\./)) {
+          // Numbered list item
+          if (!currentList) {
+            currentList = [];
+            regularContent.push(
+              <ol key={`list-${index}`} style={{ paddingLeft: '20px' }}>
+                {currentList}
+              </ol>
+            );
+          }
+          currentList.push(
+            <li key={`item-${index}`}>
+              <MathJax>
+                <div dangerouslySetInnerHTML={{ __html: preprocessLatex(paragraph.replace(/^\d+\.\s*/, '')) }} />
+              </MathJax>
+            </li>
+          );
+        } else if (paragraph.startsWith('-')) {
+          // Bullet point
+          regularContent.push(
+            <Box key={`bullet-${index}`} sx={{ display: 'flex', alignItems: 'flex-start', mb: 1 }}>
+              <Typography sx={{ mr: 1 }}>•</Typography>
+              <MathJax>
+                <div dangerouslySetInnerHTML={{ __html: preprocessLatex(paragraph.replace(/^-\s*/, '')) }} />
+              </MathJax>
+            </Box>
+          );
+          currentList = null;
+        } else {
+          // Regular paragraph
+          regularContent.push(
+            <Typography key={`paragraph-${index}`} paragraph>
+              <MathJax>
+                <div dangerouslySetInnerHTML={{ __html: preprocessLatex(paragraph) }} />
+              </MathJax>
+            </Typography>
+          );
+          currentList = null;
+        }
+      }
+    });
+
+    return { regularContent, diagramContent };
+  };
+
   return (
     <MathJaxContext>
       <Box display="flex" height="100vh" overflow="hidden">
-        <Sidebar onChapterSelect={handleChapterSelect} onSectionSelect={handleSectionSelect} setOpen={setSidebarOpen} />
+        <Sidebar onChapterSelect={handleChapterSelect} onSectionSelect={handleSectionSelect} setOpen={setSidebarOpen} isOpen={sidebarOpen} />
         <Box 
           display="flex" 
           flexDirection="column" 
@@ -426,53 +522,59 @@ const Study = () => {
           transition="margin-left 0.3s ease"
           overflow="auto"
         >
-          <Box display="flex" mb={2} alignItems="center">
-            <Typography variant="h4" flex={1}>
-              {chapter ? `${chapter.title} > ${section?.title || 'Chapter Content'}` : 'Loading...'}
-            </Typography>
-            <Select
-              value={targetLanguage}
-              onChange={handleLanguageChange}
-              sx={{ minWidth: 120 }}
-            >
-              <MenuItem value="en">English</MenuItem>
-              <MenuItem value="es">Spanish</MenuItem>
-              <MenuItem value="fr">French</MenuItem>
-              <MenuItem value="de">German</MenuItem>
-              <MenuItem value="zh">Chinese</MenuItem>
-              {/* Add more language options as needed */}
-            </Select>
-          </Box>
+          {/* Top section: Chapter Content and Summary */}
           <Box display="flex" flexDirection="row" mb={2}>
             {/* Left Pane: Chapter Content */}
             <Box display="flex" flexDirection="column" flex={1} marginRight={2}>
+              {/* Chapter name heading */}
+              <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                {chapter ? chapter.title : (section ? `${section.chapter_title}: ${section.title}` : 'No chapter selected')}
+              </Typography>
+              
               <Paper elevation={3} sx={{ p: 2, maxHeight: '60vh', overflowY: 'auto' }}>
-                {(chapter && chapter.content) && (
-                  <MathJax key={narrative}>
+                {chapter && chapter.content ? (
+                  <MathJax>
                     <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
                   </MathJax>
-                )}
-                {(section && section.content && !chapter.content) && (
-                  <MathJax key={narrative}>
+                ) : section && section.content ? (
+                  <MathJax>
                     <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
                   </MathJax>
+                ) : (
+                  <Typography>No content available.</Typography>
                 )}
               </Paper>
             </Box>
-            {/* Right Pane: Summary */}
+            {/* Right Pane: Language Select and Summary */}
             <Box display="flex" flexDirection="column" flex={1}>
-              <Paper elevation={3} sx={{ p: 2, maxHeight: '60vh', overflowY: 'auto' }}>
+              {/* Language selection dropdown */}
+              <Box display="flex" justifyContent="flex-end" mb={2}>
+                <Typography variant="body2" sx={{ mr: 1, alignSelf: 'center' }}>
+                  Language:
+                </Typography>
+                <Select
+                  value={targetLanguage}
+                  onChange={handleLanguageChange}
+                  sx={{ minWidth: 120 }}
+                  size="small"
+                >
+                  <MenuItem value="en">English</MenuItem>
+                  <MenuItem value="es">Spanish</MenuItem>
+                  <MenuItem value="fr">French</MenuItem>
+                  <MenuItem value="de">German</MenuItem>
+                  <MenuItem value="zh">Chinese</MenuItem>
+                </Select>
+              </Box>
+              {/* Summary content */}
+              <Paper elevation={3} sx={{ p: 3, maxHeight: '60vh', overflowY: 'auto' }}>
                 {isNarrativeLoading ? (
                   <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                     <CircularProgress />
                   </Box>
                 ) : translatedNarrative ? (
-                  <div 
-                    className={styles.chapterContent} 
-                    dangerouslySetInnerHTML={{ 
-                      __html: preprocessLatex(translatedNarrative) 
-                    }} 
-                  />
+                  <div className={styles.chapterContent}>
+                    {renderContent(translatedNarrative).regularContent}
+                  </div>
                 ) : (
                   <Typography>No summary available.</Typography>
                 )}
@@ -480,124 +582,174 @@ const Study = () => {
             </Box>
           </Box>
           
-          {/* Interactive Game Component */}
-          {gameCode && (
-            <ErrorBoundary>
-              <Paper elevation={3} sx={{ p: 2, mt: 2, mb: 2 }}>
-                <Typography variant="h6">Interactive Game:</Typography>
-                <DynamicGameComponent gameCode={gameCode} />
-              </Paper>
-            </ErrorBoundary>
-          )}
-        </Box>
-        
-        {/* Chat Section */}
-        <Box 
-          sx={{ 
-            position: 'fixed',
-            bottom: 0,
-            right: 0,
-            width: '300px',
-            height: chatExpanded ? '50%' : '60px',
-            transition: 'height 0.3s ease',
-            bgcolor: 'background.paper',
-            boxShadow: 3,
-            display: 'flex',
-            flexDirection: 'column',
-            zIndex: 1000,
-          }}
-        >
+          {/* Bottom section: Concept Diagrams and Interactive Game */}
+          <Box display="flex" flexDirection="row" mt={2}>
+            {/* Bottom Left: Concept Diagrams */}
+            <Box flex={1} marginRight={2}>
+              {translatedNarrative && renderContent(translatedNarrative).diagramContent.length > 0 && (
+                <Paper elevation={3} sx={{ p: 2, height: '30vh', overflowY: 'auto' }}>
+                  <Typography variant="h6" gutterBottom>Concept Diagrams</Typography>
+                  {renderContent(translatedNarrative).diagramContent}
+                </Paper>
+              )}
+            </Box>
+            {/* Bottom Right: Interactive Game */}
+            <Box flex={1}>
+              {gameCode && (
+                <ErrorBoundary>
+                  <Paper elevation={3} sx={{ p: 2, height: '30vh', overflowY: 'auto' }}>
+                    <Typography variant="h6">Interactive Game:</Typography>
+                    <DynamicGameComponent gameCode={gameCode} />
+                  </Paper>
+                </ErrorBoundary>
+              )}
+            </Box>
+          </Box>
+          
+          {/* Chat Section */}
           <Box 
-            onClick={toggleChat} 
             sx={{ 
-              p: 1, 
-              display: 'flex', 
-              alignItems: 'center', 
-              cursor: 'pointer',
-              bgcolor: 'primary.main',
-              color: 'white'
+              position: 'fixed',
+              bottom: 0,
+              right: 0,
+              width: '300px',
+              height: chatExpanded ? '50%' : '60px',
+              transition: 'height 0.3s ease',
+              bgcolor: 'background.paper',
+              boxShadow: 3,
+              display: 'flex',
+              flexDirection: 'column',
+              zIndex: 1000,
             }}
           >
-            <Typography variant="h6" color="white" flexGrow={1}>Chat</Typography>
-            <IconButton size="small" sx={{ color: 'white' }}>
-              {chatExpanded ? <ExpandMoreIcon /> : <ExpandLessIcon />}
-            </IconButton>
-          </Box>
-          {chatExpanded && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
-              <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
-                {chatMessages.map((msg, index) => (
-                  <Box 
-                    key={index} 
-                    sx={{ 
-                      mb: 2, 
-                      p: 1, 
-                      bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
-                      borderRadius: 1,
-                      width: '90%',
-                      mx: 'auto',
-                      position: 'relative',
-                    }}
-                  >
-                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
-                      {msg.user}:
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
-                      {msg.text}
-                    </Typography>
-                    {msg.user === 'AI' && (
-                      <IconButton 
-                        onClick={() => speakText(msg.text)} 
-                        sx={{ 
-                          color: 'white',
-                          position: 'absolute',
-                          right: 8,
-                          top: 8,
-                          backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                          '&:hover': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.5)',
-                          },
-                        }}
-                      >
-                        {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
-                      </IconButton>
-                    )}
-                  </Box>
-                ))}
-                <div ref={messagesEndRef} />
-              </Box>
-              <Divider />
-              <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
-                <InputBase
-                  sx={{ ml: 1, flex: 1 }}
-                  placeholder="Enter message"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  disabled={isGenerating || isListening}
-                />
-                <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
-                  <MicIcon color={isListening ? "secondary" : "primary"} />
-                </IconButton>
-                <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
-                  {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
-                </IconButton>
-              </Paper>
+            <Box 
+              onClick={toggleChat} 
+              sx={{ 
+                p: 1, 
+                display: 'flex', 
+                alignItems: 'center', 
+                cursor: 'pointer',
+                bgcolor: 'primary.main',
+                color: 'white'
+              }}
+            >
+              <Typography variant="h6" color="white" flexGrow={1}>Chat</Typography>
+              <IconButton size="small" sx={{ color: 'white' }}>
+                {chatExpanded ? <ExpandMoreIcon /> : <ExpandLessIcon />}
+              </IconButton>
             </Box>
-          )}
+            {chatExpanded && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
+                <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
+                  {chatMessages.map((msg, index) => (
+                    <Box 
+                      key={index} 
+                      sx={{ 
+                        mb: 2, 
+                        p: 1, 
+                        bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
+                        borderRadius: 1,
+                        width: '90%',
+                        mx: 'auto',
+                        position: 'relative',
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
+                        {msg.user}:
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
+                        {msg.text}
+                      </Typography>
+                      {msg.user === 'AI' && (
+                        <IconButton 
+                          onClick={() => speakText(msg.text)} 
+                          sx={{ 
+                            color: 'white',
+                            position: 'absolute',
+                            right: 8,
+                            top: 8,
+                            backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                            '&:hover': {
+                              backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                            },
+                          }}
+                        >
+                          {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
+                        </IconButton>
+                      )}
+                    </Box>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </Box>
+                <Divider />
+                <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
+                  <InputBase
+                    sx={{ ml: 1, flex: 1 }}
+                    placeholder="Enter message"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    disabled={isGenerating || isListening}
+                  />
+                  <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
+                    <MicIcon color={isListening ? "secondary" : "primary"} />
+                  </IconButton>
+                  <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
+                    {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
+                  </IconButton>
+                </Paper>
+              </Box>
+            )}
+          </Box>
+          <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} />
+          <Box
+            sx={{
+              position: 'fixed',
+              top: 10,
+              right: 0,
+              width: webcamExpanded ? '320px' : '60px',
+              height: webcamExpanded ? '240px' : '60px',
+              transition: 'all 0.3s ease',
+              bgcolor: 'background.paper',
+              boxShadow: 3,
+              display: 'flex',
+              flexDirection: 'column',
+              zIndex: 1000,
+              overflow: 'hidden',
+            }}
+          >
+            <Box
+              onClick={toggleWebcam}
+              sx={{
+                p: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                bgcolor: 'primary.main',
+                color: 'white',
+                height: '60px',
+              }}
+            >
+              <IconButton size="small" sx={{ color: 'white' }}>
+                {webcamExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              </IconButton>
+            </Box>
+            <Box sx={{ display: webcamExpanded ? 'block' : 'none' }}>
+              <Webcam
+                audio={false}
+                ref={webcamRef}
+                screenshotFormat="image/jpeg"
+                videoConstraints={{ width: 320, height: 240, facingMode: "user" }}
+                style={{ width: '100%', height: '180px' }}
+              />
+              {emotion && (
+                <Typography variant="body2" sx={{ p: 1, textAlign: 'center' }}>
+                  Detected emotion: {emotion}
+                </Typography>
+              )}
+            </Box>
+          </Box>
         </Box>
-        <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} />
-        <Webcam
-          audio={false}
-          ref={webcamRef}
-          screenshotFormat="image/jpeg"
-          videoConstraints={{ width: 320, height: 240, facingMode: "user" }}
-          style={{ position: 'absolute', top: 10, right: 10, zIndex: 1000 }}
-        />
-        {emotion && (
-          <Typography variant="body2" sx={{ position: 'absolute', top: 260, right: 10, zIndex: 1000 }}>
-            Detected emotion: {emotion}
-          </Typography>
-        )}
       </Box>
     </MathJaxContext>
   );

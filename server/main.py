@@ -142,8 +142,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 @app.post("/save-learning-profile")
 async def save_learning_profile(
     profile: dict = Body(...),
-    current_user: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: str = Depends(get_current_user)
 ):
     try:
         print(f"Received answers: {profile}")  # Log the received answers
@@ -151,16 +150,17 @@ async def save_learning_profile(
         # Generate textual description using Claude Haiku
         learning_profile = generate_learning_profile_description(profile['answers'])
         
-        user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user).first()
+        with SessionLocal() as db:
+            user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user).first()
+            
+            if user_profile:
+                user_profile.learning_profile = learning_profile
+            else:
+                user_profile = models.UserProfile(user_id=current_user, learning_profile=learning_profile)
+                db.add(user_profile)
+            
+            db.commit()
         
-        if user_profile:
-            user_profile.learning_profile = learning_profile
-        else:
-            user_profile = models.UserProfile(user_id=current_user, learning_profile=learning_profile)
-            db.add(user_profile)
-        
-        db.commit()
-        db.refresh(user_profile)
         print(f"Saved profile for user {current_user}")  # Log the successful save
         return {"message": "Learning profile saved successfully"}
     except Exception as e:
