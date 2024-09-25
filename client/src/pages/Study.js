@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
@@ -134,13 +134,13 @@ const Study = () => {
       
       setNarrative(response.data.narrative);
       setGameIdea(response.data.game_idea);
-      setGameCode(response.data.game_code);
+      setGameCode(response.data.game_code);  // Make sure this line is present
       setDiagrams(response.data.diagrams);
     } catch (error) {
       console.error('Error fetching narrative:', error);
       setNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
-      setGameCode('');
+      setGameCode('');  // Clear the game code on error
       setDiagrams([]);
     } finally {
       setIsNarrativeLoading(false);

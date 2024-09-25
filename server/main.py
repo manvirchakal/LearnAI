@@ -23,18 +23,28 @@ import textwrap
 from functools import lru_cache
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2AuthorizationCodeBearer
-from jose import JWTError, jwt
-import requests
-from jose import jwk
+from jose import jwt
+from jose.exceptions import JWTError
 from jose.utils import base64url_decode
 from fastapi import Body
 import time
 import tempfile
+from dotenv import load_dotenv
+import ast
+import esprima
+import json
+
+MAX_RETRIES = 1
+
+# Load the .env file
+load_dotenv()
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
     service_name='bedrock-runtime',
-    region_name='us-east-1'  # replace with your preferred region
+    region_name=os.getenv('AWS_DEFAULT_REGION'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
 )
 
 # Create all tables in the database
@@ -480,8 +490,12 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
         
         # Generate game code
         game_code_request = GameIdeaRequest(game_idea=game_idea)
-        game_code_response = await generate_game_code(game_code_request)
-        game_code = game_code_response["code"]
+        try:
+            game_code_response = await generate_game_code(game_code_request)
+            game_code = game_code_response["code"]
+        except HTTPException as e:
+            logging.error(f"Error generating game code: {str(e)}")
+            game_code = f"Error generating game code: {str(e)}"
         
         return {
             "narrative": narrative,
@@ -578,42 +592,82 @@ async def generate_game_code(request: GameIdeaRequest):
 
     {game_idea}
 
-    The component should:
-    1. Use React hooks (useState, useEffect) without any import statements or React. prefix
-    2. Include complete game logic (initialization, gameplay, scoring, game over)
-    3. Use MathJax for rendering mathematical expressions
-    4. Handle all user interactions (input, button clicks)
-    5. Include basic styling using inline styles
-    6. Be completely self-contained and ready to run
+    The component will be rendered within a DynamicGameComponent. Your task is to generate the code that will be passed to this component.
 
-    IMPORTANT: Use ONLY React.createElement to create elements. DO NOT use JSX syntax.
-    For example, instead of:
-    <div style={{ color: 'red' }}>Hello World</div>
-    Use:
-    React.createElement('div', {{ style: {{ color: 'red' }} }}, 'Hello World')
+            ```javascript
+            const DynamicGameComponent = (((this is where the game code will be passed in as an argument))) => {{
+              const [error, setError] = useState(null);
+              const [GameComponent, setGameComponent] = useState(null);
 
-    For MathJax expressions, use:
-    React.createElement(MathJax, {{ style: {{ fontSize: '1.2em' }} }}, '\\(your_math_expression_here\\)')
+              useEffect(() => {{
+                setError(null);
+                if (gameCode.startsWith("Error generating game code:")) {{
+                  setError(gameCode);
+                  return;
+                }}
+                try {{
+                  // Your generated code will be inserted here
+                  const ComponentFunction = new Function('React', 'useState', 'useEffect', 'MathJax', `
+                    return function Game() {{
+                      // Your generated code goes here
+                    }}
+                  `);
 
-    Ensure the component includes:
-    - All necessary state variables defined at the beginning
-    - All required event handlers and helper functions defined before the useEffect hook
-    - A clear return statement that creates and returns all UI elements using React.createElement
-    - Game instructions and chapter relation explanation should be included as part of the UI elements, not as separate text
+                  const CreatedComponent = () => {{
+                    return (
+                      <ErrorBoundary>
+                        {{ComponentFunction(React, React.useState, React.useEffect, MathJax)}}
+                      </ErrorBoundary>
+                    );
+                  }};
+                  setGameComponent(() => CreatedComponent);
+                }} catch (err) {{
+                  console.error('Error creating game component:', err);
+                  setError('Error: (((this is where error output would go))));
+                }}
+              }}, [gameCode]);
 
-    The code should follow this structure:
-    1. State declarations
-    2. Function declarations (including event handlers and helper functions)
-    3. useEffect hooks
-    4. UI element creation (stored in a variable called 'elements')
+              // ... rest of the component
+            }};
+            ```
 
-    CRITICAL: DO NOT include any text, comments, or explanations outside of the actual JavaScript code.
-    DO NOT include any import statements, export statements, or the 'const Game = () => {{' declaration.
-    The code should be fully functional and not rely on any external functions or variables.
-    DO NOT include any usage examples or additional explanations.
-    Ensure all values being rendered are strings or numbers, not objects.
-    Do not wrap the code in any markers or code block syntax.
-    The output should be pure JavaScript code that can be directly executed within a React component."""
+            Your task is to generate the code that will replace the comment "// Your generated code goes here".
+            This code should define a complete React component without any imports or exports.
+
+            Requirements:
+            1. Use React hooks (useState, useEffect, useRef, useCallback) without React. prefix
+            2. Use React.createElement for all element creation (no JSX)
+            3. Return a single root element (usually a div) containing all other elements
+            4. For MathJax:
+            - Use MathJax directly: React.createElement(MathJax, {{ math: `formula` }})
+            - For inline math, use: React.createElement(MathJax, {{ inline: true, math: `formula` }})
+            - For display math, use: React.createElement(MathJax, {{ display: true, math: `formula` }})
+            5. Ensure all variables and functions are properly declared
+            6. Do not use any external libraries or components not provided
+            7. Provide ONLY the JavaScript code, without any explanations or markdown formatting
+            8. Do not include 'return function Game() {{' at the beginning or '}}' at the end
+            9. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
+            10. Do not use 'function' as a variable name, as it is a reserved keyword in JavaScript. Use 'func' or 'mathFunction' instead
+            11. Create instructions for the user on how to play the game in the game component and how it relates to the chapter content
+            12. When evaluating mathematical expressions or functions, use a safe evaluation method instead of 'eval'. For example:
+                - For simple arithmetic, use basic JavaScript operations
+                - For more complex functions, define them explicitly (e.g., Math.sin, Math.cos, etc.)
+            13. Ensure all variables used in calculations are properly defined and initialized
+            14. Use try-catch blocks when performing calculations to handle potential errors gracefully
+            15. For keyboard input:
+                - Use the useEffect hook to add and remove event listeners for keyboard events
+                - In the event listener, call e.preventDefault() to prevent default browser behavior (like scrolling)
+                - Focus on a game element (like the canvas) when the component mounts to ensure it captures keyboard events
+            16. Add a button to start/restart the game, and only capture keyboard input when the game is active
+            17. Ensure that the current equation is always visible and properly rendered using MathJax
+            18. To prevent scrolling when using arrow keys:
+                - Add 'tabIndex={0}' to the game container div to make it focusable
+                - In the useEffect for keyboard events, check if the game container has focus before handling key presses
+            19. Display the current function prominently using MathJax, and update it whenever it changes
+            20. Use requestAnimationFrame for the game loop to ensure smooth animation
+                                    
+            Generate the game code now, remember to not include any explanations or comments, just the code:
+            """
 
     try:
         body = json.dumps({
@@ -622,45 +676,70 @@ async def generate_game_code(request: GameIdeaRequest):
             "messages": [
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": prompt
-                        }
-                    ]
+                    "content": [{"type": "text", "text": prompt}]
                 }
             ],
             "temperature": 0.7,
             "top_p": 0.9,
         })
 
-        response = bedrock.invoke_model(
-            modelId="anthropic.claude-3-haiku-20240307-v1:0",  # or use the latest Claude model available
+        response = bedrock.invoke_model_with_response_stream(
+            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
             body=body
         )
 
-        response_body = json.loads(response.get('body').read())
-        generated_code = response_body['content'][0]['text']
-        # Remove any potential markdown code block syntax and introductory/explanatory text
-        generated_code = generated_code.replace('```jsx', '').replace('```', '').strip()
-        generated_code = re.sub(r'^Here.*?:\n*', '', generated_code, flags=re.DOTALL)
-        generated_code = re.sub(r'\n*This component includes.*$', '', generated_code, flags=re.DOTALL)
-        
-        # Remove the 'javascript' line if it exists
-        generated_code = re.sub(r'^javascript\s*\n', '', generated_code)
-        
-        # Ensure the code doesn't start with 'javascript'
-        if generated_code.startswith('javascript'):
-            generated_code = generated_code[len('javascript'):].lstrip()
-        
-        # Ensure the code is properly indented
-        generated_code = textwrap.dedent(generated_code)
-        
-        print("Generated game code:", generated_code)  # Add this line for debugging
-        return {"code": generated_code}
+        generated_code = ""
+        for event in response['body']:
+            chunk = json.loads(event['chunk']['bytes'])
+            if chunk['type'] == 'content_block_delta':
+                generated_code += chunk['delta'].get('text', '')
+
+        # Log the generated code for debugging
+        logging.debug(f"Generated game code:\n{generated_code}")
+
+        return {"code": generated_code.strip()}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Error generating game code: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating game code: {str(e)}")
+
+def validate_js_syntax(code):
+    try:
+        esprima.parseScript(code)
+        return True
+    except esprima.Error as e:
+        logging.error(f"Syntax error in generated code: {e}")
+        return False
+
+def post_process_game_code(code):
+    # Remove any potential wrapper function or extra brackets
+    code = re.sub(r'^return\s*function\s*\w*\s*\(\)\s*{', '', code)
+    code = re.sub(r'}\s*$', '', code)
     
+    # Remove semicolons after object literals in array definitions
+    code = re.sub(r'({[^}]+});(?=\s*[}\]])', r'\1', code)
+    
+    # Fix arrow function syntax
+    code = re.sub(r'(\w+)\s*=>\s*{', r'\1 => {', code)
+    
+    # Remove semicolons after function/if/else blocks
+    code = re.sub(r'(}\s*);(\s*else|\s*[)\]])', r'\1\2', code)
+    
+    # Ensure all state variables are properly declared
+    state_vars = re.findall(r'const \[(\w+), set\w+\] = useState\((.*?)\);', code)
+    for var, initial_value in state_vars:
+        if initial_value.strip() == '':
+            code = code.replace(f'const [{var}, set{var.capitalize()}] = useState();', 
+                                f'const [{var}, set{var.capitalize()}] = useState(null);')
+    
+    # Fix MathJax.Node syntax if necessary
+    code = code.replace('React.createElement(MathJax.Node,', 'React.createElement(MathJax,')
+    
+    # Remove semicolons inside object literals
+    code = re.sub(r'({[^}]+);\s*}', r'\1 }', code)
+    
+    return code.strip()
+
 def get_stored_narrative(chapter_id: int, db: Session):
     narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
     if narrative:

@@ -1,41 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MathJaxContext, MathJax } from 'better-react-mathjax';
 import ErrorBoundary from './ErrorBoundary';
 
 const DynamicGameComponent = ({ gameCode }) => {
   const [error, setError] = useState(null);
   const [GameComponent, setGameComponent] = useState(null);
+  const gameRef = useRef(null);
 
   useEffect(() => {
+    console.log("DynamicGameComponent received gameCode:", gameCode);
     setError(null);
+    if (!gameCode || gameCode.startsWith("Error generating game code:")) {
+      setError(gameCode || "No game code provided");
+      return;
+    }
     try {
-      // Wrap the game code in a try-catch block
-      const wrappedGameCode = `
-        try {
-          ${gameCode}
-        } catch (error) {
-          console.error('Error in game code:', error);
-          return React.createElement('div', null, 
-            React.createElement('h3', null, 'Error in game code:'),
-            React.createElement('pre', null, error.toString())
-          );
-        }
-      `;
-
-      // Create a new function that returns a React component
-      const ComponentFunction = new Function('React', 'useState', 'useEffect', 'MathJax', `
+      const ComponentFunction = new Function('React', 'useState', 'useEffect', 'useRef', 'useCallback', 'MathJax', `
         return function Game() {
-          ${wrappedGameCode}
-          return elements;
+          ${gameCode}
         }
       `);
 
-      // Create the component
       const CreatedComponent = () => {
-        const Game = ComponentFunction(React, useState, useEffect, MathJax);
+        const GameFunction = ComponentFunction(React, React.useState, React.useEffect, React.useRef, React.useCallback, MathJax);
         return (
           <ErrorBoundary>
-            <Game />
+            <div ref={gameRef}>
+              <GameFunction />
+            </div>
           </ErrorBoundary>
         );
       };
@@ -45,6 +37,14 @@ const DynamicGameComponent = ({ gameCode }) => {
       setError(`Error: ${err.message}\n\nStack: ${err.stack}\n\nGame Code:\n${gameCode}`);
     }
   }, [gameCode]);
+
+  useEffect(() => {
+    if (gameRef.current && window.MathJax) {
+      window.MathJax.typesetPromise([gameRef.current]).catch((err) => {
+        console.error('MathJax typesetting failed:', err);
+      });
+    }
+  }, [GameComponent]);
 
   if (error) {
     return (
