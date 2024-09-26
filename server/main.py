@@ -16,17 +16,20 @@ import tempfile
 import subprocess
 from fastapi.responses import FileResponse
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
 from server import models
 from pydantic import BaseModel
 import textwrap
 from functools import lru_cache
-from fastapi import Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
+import boto3
+from fastapi import UploadFile, File, Depends, HTTPException, status, Body
+from contextlib import closing
+from tempfile import gettempdir
 from fastapi.security import OAuth2AuthorizationCodeBearer
 from jose import jwt
 from jose.exceptions import JWTError
 from jose.utils import base64url_decode
-from fastapi import Body
 import time
 import tempfile
 from dotenv import load_dotenv
@@ -39,12 +42,11 @@ MAX_RETRIES = 1
 # Load the .env file
 load_dotenv()
 
+
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
     service_name='bedrock-runtime',
-    region_name=os.getenv('AWS_DEFAULT_REGION'),
-    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+    region_name='us-east-1'  # replace with your preferred region
 )
 
 # Create all tables in the database
@@ -137,8 +139,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 @app.post("/save-learning-profile")
 async def save_learning_profile(
     profile: dict = Body(...),
-    current_user: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: str = Depends(get_current_user)
 ):
     try:
         print(f"Received answers: {profile}")  # Log the received answers
@@ -146,16 +147,17 @@ async def save_learning_profile(
         # Generate textual description using Claude Haiku
         learning_profile = generate_learning_profile_description(profile['answers'])
         
-        user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user).first()
+        with SessionLocal() as db:
+            user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user).first()
+            
+            if user_profile:
+                user_profile.learning_profile = learning_profile
+            else:
+                user_profile = models.UserProfile(user_id=current_user, learning_profile=learning_profile)
+                db.add(user_profile)
+            
+            db.commit()
         
-        if user_profile:
-            user_profile.learning_profile = learning_profile
-        else:
-            user_profile = models.UserProfile(user_id=current_user, learning_profile=learning_profile)
-            db.add(user_profile)
-        
-        db.commit()
-        db.refresh(user_profile)
         print(f"Saved profile for user {current_user}")  # Log the successful save
         return {"message": "Learning profile saved successfully"}
     except Exception as e:
@@ -325,8 +327,8 @@ def remove_latex_commands(text: str) -> str:
     
     return text.strip()
 
-def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
-    cleaned_text = remove_latex_commands(text)
+def generate_narrative(system_message: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
+    cleaned_text = remove_latex_commands(system_message)
 
     prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
     1. Define it clearly
@@ -383,14 +385,34 @@ def generate_narrative(text: str, chapter_id: int, db: Session, max_attempts=1, 
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
-    # Delete existing narrative if it exists
-    db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).delete()
+    try:
+        # Check if a narrative already exists for this chapter
+        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
+        
+        if existing_narrative:
+            # Update the existing narrative
+            existing_narrative.content = full_response
+            db.commit()
+        else:
+            # Create a new narrative
+            narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
+            db.add(narrative_model)
+            db.commit()
+    except IntegrityError:
+        db.rollback()
+        # If there's a race condition and another process inserted a narrative, update it
+        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
+        if existing_narrative:
+            existing_narrative.content = full_response
+            db.commit()
+        else:
+            # If we still can't find or update the narrative, raise an exception
+            raise Exception("Failed to save narrative due to database conflict")
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Error saving narrative: {str(e)}")
+        raise
 
-    # Create new narrative
-    narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
-    db.add(narrative_model)
-    db.commit()
-    
     return full_response
 
 def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
@@ -456,26 +478,28 @@ def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, 
     
     return full_response
 
+def translate_text(text, target_language):
+    try:
+        response = translate.translate_text(
+            Text=text,
+            SourceLanguageCode='en',
+            TargetLanguageCode=target_language
+        )
+        return response['TranslatedText']
+    except ClientError as e:
+        logging.error(f"Error translating text: {e}")
+        return None
+
 @app.post("/generate-narrative/{chapter_id}")
 async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     chapter_content = data.get('chapter_content', '')
+    target_language = data.get('target_language', 'en')  # Default to English
     
-    if not chapter_content:
-        raise HTTPException(status_code=400, detail="Chapter content is required")
-    
-    cleaned_chapter_content = remove_latex_commands(chapter_content)
-
-    system_message = (
-        f"Act as an experienced teacher who wants to make complex topics simple and interesting. List out and explain the key concepts from the following chapter with clear analogies and relatable examples. "
-        f"Use varied, real-world scenarios to demonstrate how each concept works in practical situations. Provide detailed explanations that uncover different aspects of the material, and don't hesitate to go deep into each idea. "
-        f"Instead of summarizing, imagine you are guiding the learner through each concept with patience, ensuring they grasp not just the 'what' but also the 'why' behind the material.\n\n"
-        f"Chapter content: {cleaned_chapter_content}\n"
-        f"---\n"
-        f"Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies and practical examples:"
-    )
-
     try:
+        cleaned_chapter_content = remove_latex_commands(chapter_content)
+        
+        system_message = f"You are an AI tutor. Your task is to provide a comprehensive summary and explanation of the following chapter content: {cleaned_chapter_content}"
         narrative = generate_narrative(system_message, chapter_id, db)
         
         # Extract Mermaid diagrams
@@ -490,12 +514,13 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
         
         # Generate game code
         game_code_request = GameIdeaRequest(game_idea=game_idea)
-        try:
-            game_code_response = await generate_game_code(game_code_request)
-            game_code = game_code_response["code"]
-        except HTTPException as e:
-            logging.error(f"Error generating game code: {str(e)}")
-            game_code = f"Error generating game code: {str(e)}"
+        game_code_response = await generate_game_code(game_code_request)
+        game_code = game_code_response["code"]
+        
+        # Translate narrative and game_idea if target_language is not English
+        if target_language != 'en':
+            narrative = translate_text(narrative, target_language)
+            game_idea = translate_text(game_idea, target_language)
         
         return {
             "narrative": narrative,
@@ -747,9 +772,14 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         chapter_id = data.get('chapter_id')
         chat_history = data.get('chat_history', [])
         chapter_content = data.get('chapter_content', '')
+        language = data.get('language', 'en')
 
         if not user_message or not chapter_content:
             raise HTTPException(status_code=400, detail="Message and chapter content are required")
+
+        # Translate user message to English if not already in English
+        if language != 'en':
+            user_message = translate_text(user_message, 'en')
 
         context = f"You are an AI tutor assisting a student with their studies. The current chapter is about: {chapter_content[:200]}... Please ensure your responses are relevant to this topic."
 
@@ -764,8 +794,12 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         # Generate AI response using the chat function
         ai_response = generate_chat_response(prompt, chat_history)
 
+        # Translate AI response if not in English
+        if language != 'en':
+            ai_response = translate_text(ai_response, language)
+
         # Update chat history
-        chat_history.append({"user": "You", "text": user_message})
+        chat_history.append({"user": "You", "text": data.get('message')})  # Use original message for history
         chat_history.append({"user": "AI", "text": ai_response})
 
         return {"reply": ai_response, "updated_chat_history": chat_history}
@@ -822,3 +856,95 @@ def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 50
     except ClientError as e:
         logging.error(f"Error calling Bedrock: {e}")
         return f"Error: {str(e)}"
+
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    # Save the uploaded file temporarily
+    temp_file_path = f"/tmp/{uuid.uuid4()}.wav"
+    with open(temp_file_path, "wb") as buffer:
+        buffer.write(await audio.read())
+    
+    job_name = f"transcribe_job_{int(time.time())}"
+    job_uri = f"s3://YOUR_S3_BUCKET/{audio.filename}"
+    
+    # Upload the file to S3 (you need to implement this)
+    # upload_to_s3(temp_file_path, "YOUR_S3_BUCKET", audio.filename)
+    
+    transcribe.start_transcription_job(
+        TranscriptionJobName=job_name,
+        Media={'MediaFileUri': job_uri},
+        MediaFormat='wav',
+        LanguageCode='en-US'
+    )
+    
+    while True:
+        status = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+        if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+            break
+        time.sleep(5)
+    
+    if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+        result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+        transcript_uri = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
+        # Fetch and parse the transcript JSON from the URI
+        # You'll need to implement this part
+        transcript_text = fetch_and_parse_transcript(transcript_uri)
+        return {"transcript": transcript_text}
+    else:
+        return {"error": "Transcription failed"}
+
+@app.post("/api/synthesize-speech")
+async def synthesize_speech(request: Request):
+    data = await request.json()
+    text = data.get('text')
+    language = data.get('language', 'en-US')
+
+    try:
+        # Map language codes to Polly voice IDs
+        voice_map = {
+            'en-US': 'Joanna',
+            'es-ES': 'Conchita',
+            'fr-FR': 'Celine',
+            'de-DE': 'Marlene',
+            # Add more languages and voices as needed
+        }
+
+        response = polly_client.synthesize_speech(
+            Text=text,
+            OutputFormat='mp3',
+            VoiceId=voice_map.get(language, 'Joanna')
+        )
+
+        if "AudioStream" in response:
+            with closing(response["AudioStream"]) as stream:
+                output = os.path.join(gettempdir(), "speech.mp3")
+                try:
+                    with open(output, "wb") as file:
+                        file.write(stream.read())
+                except IOError as error:
+                    print(error)
+                    raise HTTPException(status_code=500, detail="Error writing audio stream to file")
+
+            return FileResponse(output, media_type='audio/mpeg', filename="speech.mp3")
+        else:
+            raise HTTPException(status_code=500, detail="Could not stream audio")
+
+    except (BotoCoreError, ClientError) as error:
+        print(error)
+        raise HTTPException(status_code=500, detail=str(error))
+
+@app.post("/translate")
+async def translate_text_endpoint(request: Request):
+    data = await request.json()
+    text = data.get('text')
+    target_language = data.get('target_language')
+
+    if not text or not target_language:
+        raise HTTPException(status_code=400, detail="Text and target language are required")
+
+    translated_text = translate_text(text, target_language)
+
+    if translated_text is None:
+        raise HTTPException(status_code=500, detail="Translation failed")
+
+    return {"translated_text": translated_text}

@@ -1,33 +1,39 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import mermaid from 'mermaid';
-
-mermaid.initialize({
-  startOnLoad: true,
-  theme: 'default',
-  securityLevel: 'loose',
-});
 
 const MermaidDiagram = ({ chart }) => {
   const ref = useRef(null);
-  const [svg, setSvg] = useState('');
 
   useEffect(() => {
-    if (chart && ref.current) {
-      const renderChart = async () => {
-        try {
-          const { svg } = await mermaid.render('mermaid-svg', chart);
-          setSvg(svg);
-        } catch (error) {
-          console.error('Error rendering Mermaid diagram:', error);
-          setSvg(`<pre>${chart}</pre>`);
-        }
-      };
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'default',
+      securityLevel: 'loose',
+    });
 
-      renderChart();
-    }
+    const renderChart = async () => {
+      if (ref.current) {
+        try {
+          // Ensure the chart starts with a valid diagram type
+          const modifiedChart = chart.trim().startsWith('graph') ? chart : `graph LR\n${chart}`;
+          const { svg } = await mermaid.render('mermaid-diagram', modifiedChart);
+          ref.current.innerHTML = svg;
+        } catch (error) {
+          console.error('Mermaid rendering error:', error);
+          ref.current.innerHTML = `
+            <div style="color: red; border: 1px solid red; padding: 10px;">
+              <p>Error rendering diagram: ${error.message}</p>
+              <pre>${chart}</pre>
+            </div>
+          `;
+        }
+      }
+    };
+
+    renderChart();
   }, [chart]);
 
-  return <div ref={ref} dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div ref={ref} />;
 };
 
 export default MermaidDiagram;
