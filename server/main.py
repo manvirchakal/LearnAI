@@ -631,41 +631,34 @@ async def generate_game_code(request: GameIdeaRequest):
             }};
             ```
 
-            Your task is to generate the code that will replace the comment "// Your generated code goes here".
-            This code should define a complete React component without any imports or exports.
-
             Requirements:
-            1. Use React hooks (useState, useEffect, useRef, useCallback) without React. prefix
-            2. Use React.createElement for all element creation (no JSX)
-            3. Return a single root element (usually a div) containing all other elements
-            4. For MathJax:
-            - Use MathJax directly: React.createElement(MathJax, {{ math: `formula` }})
-            - For inline math, use: React.createElement(MathJax, {{ inline: true, math: `formula` }})
-            - For display math, use: React.createElement(MathJax, {{ display: true, math: `formula` }})
-            5. Ensure all variables and functions are properly declared
-            6. Do not use any external libraries or components not provided
-            7. Provide ONLY the JavaScript code, without any explanations or markdown formatting
-            8. Do not include 'return function Game() {{' at the beginning or '}}' at the end
-            9. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
-            10. Do not use 'function' as a variable name, as it is a reserved keyword in JavaScript. Use 'func' or 'mathFunction' instead
-            11. Create instructions for the user on how to play the game in the game component and how it relates to the chapter content
-            12. When evaluating mathematical expressions or functions, use a safe evaluation method instead of 'eval'. For example:
-                - For simple arithmetic, use basic JavaScript operations
-                - For more complex functions, define them explicitly (e.g., Math.sin, Math.cos, etc.)
-            13. Ensure all variables used in calculations are properly defined and initialized
-            14. Use try-catch blocks when performing calculations to handle potential errors gracefully
-            15. For keyboard input:
-                - Use the useEffect hook to add and remove event listeners for keyboard events
-                - In the event listener, call e.preventDefault() to prevent default browser behavior (like scrolling)
-                - Focus on a game element (like the canvas) when the component mounts to ensure it captures keyboard events
-            16. Add a button to start/restart the game, and only capture keyboard input when the game is active
-            17. Ensure that the current equation is always visible and properly rendered using MathJax
-            18. To prevent scrolling when using arrow keys:
-                - Add 'tabIndex={0}' to the game container div to make it focusable
-                - In the useEffect for keyboard events, check if the game container has focus before handling key presses
-            19. Display the current function prominently using MathJax, and update it whenever it changes
-            20. Use requestAnimationFrame for the game loop to ensure smooth animation
-                                    
+                1. Use React hooks (useState, useEffect, useRef, useCallback) without React. prefix
+                2. Use React.createElement for all element creation (no JSX)
+                3. Return a single root element (usually a div) containing all other elements 
+                5. Ensure all variables and functions are properly declared
+                6. Do not use any external libraries or components not provided
+                7. Provide ONLY the JavaScript code, without any explanations or markdown formatting
+                8. Do not include 'return function Game() {{' at the beginning or '}}' at the end
+                9. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
+                10. Do not use 'function' as a variable name, as it is a reserved keyword in JavaScript. Use 'func' or 'mathFunction' instead
+                11. Create instructions for the user on how to play the game in the game component and how it relates to the chapter content
+                12. When evaluating mathematical expressions or functions, use a safe evaluation method instead of 'eval'. For example:
+                    - For simple arithmetic, use basic JavaScript operations
+                    - For more complex functions, define them explicitly (e.g., Math.sin, Math.cos, etc.)
+                13. Ensure all variables used in calculations are properly defined and initialized
+                14. Use try-catch blocks when performing calculations to handle potential errors gracefully
+                15. For keyboard input:
+                    - Use the useEffect hook to add and remove event listeners for keyboard events
+                    - In the event listener, call e.preventDefault() to prevent default browser behavior (like scrolling)
+                    - Focus on a game element (like the canvas) when the component mounts to ensure it captures keyboard events
+                16. Add a button to start/restart the game, and only capture keyboard input when the game is active
+                17. Ensure that the current equation is always visible and properly rendered using plain text or another method
+                18. To prevent scrolling when using arrow keys:
+                    - Add 'tabIndex={0}' to the game container div to make it focusable
+                    - In the useEffect for keyboard events, check if the game container has focus before handling key presses
+                19. Display the current function prominently using plain text, and update it whenever it changes
+                20. Use requestAnimationFrame for the game loop to ensure smooth animation
+                                                                
             Generate the game code now, remember to not include any explanations or comments, just the code:
             """
 
