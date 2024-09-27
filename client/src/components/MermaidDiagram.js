@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import mermaid from 'mermaid';
 
-const MermaidDiagram = ({ chart }) => {
+const MermaidDiagram = ({ chart, index }) => {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -14,15 +14,18 @@ const MermaidDiagram = ({ chart }) => {
     const renderChart = async () => {
       if (ref.current) {
         try {
-          // Ensure the chart starts with a valid diagram type
-          const modifiedChart = chart.trim().startsWith('graph') ? chart : `graph LR\n${chart}`;
-          const { svg } = await mermaid.render('mermaid-diagram', modifiedChart);
-          ref.current.innerHTML = svg;
+          const id = `mermaid-diagram-${index}`;
+          ref.current.innerHTML = ''; // Clear previous content
+          const newDiv = document.createElement('div');
+          newDiv.id = id;
+          newDiv.textContent = chart;
+          ref.current.appendChild(newDiv);
+          await mermaid.run({ nodes: [newDiv] });
         } catch (error) {
           console.error('Mermaid rendering error:', error);
           ref.current.innerHTML = `
             <div style="color: red; border: 1px solid red; padding: 10px;">
-              <p>Error rendering diagram: ${error.message}</p>
+              <p>Error rendering diagram. Please check the diagram syntax.</p>
               <pre>${chart}</pre>
             </div>
           `;
@@ -31,9 +34,9 @@ const MermaidDiagram = ({ chart }) => {
     };
 
     renderChart();
-  }, [chart]);
+  }, [chart, index]);
 
-  return <div ref={ref} />;
+  return <div ref={ref} style={{ marginBottom: '20px' }} />;
 };
 
 export default MermaidDiagram;

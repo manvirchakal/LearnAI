@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
@@ -143,27 +143,39 @@ const Study = () => {
   const fetchNarrative = useCallback(async (chapterId, chapterContent) => {
     try {
       setIsNarrativeLoading(true);
-      const response = await axios.post(`/generate-narrative/${chapterId}`, {
+      
+      // Fetch narrative and game idea
+      const narrativeResponse = await axios.post(`/generate-narrative/${chapterId}`, {
         chapter_content: chapterContent,
       });
-      console.log("Fetched narrative:", response.data);
       
-      let combinedNarrative = response.data.narrative;
+      console.log("Fetched narrative:", narrativeResponse.data);
       
-      // Add diagrams to the end of the narrative
-      if (response.data.diagrams && response.data.diagrams.length > 0) {
+      const generatedNarrative = narrativeResponse.data.narrative;
+      const gameIdea = narrativeResponse.data.game_idea;
+      const gameCode = narrativeResponse.data.game_code;
+  
+      // Fetch diagrams using both chapter content and generated narrative
+      const diagramsResponse = await axios.post(`/generate-diagrams`, {
+        chapter_content: chapterContent,
+        generated_summary: generatedNarrative,
+      });
+  
+      console.log("Fetched diagrams:", diagramsResponse.data);
+  
+      // Combine narrative and diagrams
+      let combinedNarrative = generatedNarrative;
+      if (diagramsResponse.data.diagrams && diagramsResponse.data.diagrams.length > 0) {
         combinedNarrative += '\n\n### Concept Diagrams\n\n';
-        response.data.diagrams.forEach((diagram, index) => {
+        diagramsResponse.data.diagrams.forEach((diagram, index) => {
           combinedNarrative += `\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`;
         });
       }
-
+  
       setOriginalNarrative(combinedNarrative);
-      setGameIdea(response.data.game_idea);
-      setGameCode(response.data.game_code);  // Make sure this line is present
-      setDiagrams(response.data.diagrams);
-      setGameCode(response.data.game_code);
-
+      setGameIdea(gameIdea);
+      setGameCode(gameCode);
+  
       if (targetLanguage !== 'en') {
         const translatedText = await translateText(combinedNarrative, targetLanguage);
         setTranslatedNarrative(translatedText);
@@ -171,12 +183,10 @@ const Study = () => {
         setTranslatedNarrative(combinedNarrative);
       }
     } catch (error) {
-      console.error('Error fetching narrative:', error);
+      console.error('Error fetching narrative or diagrams:', error);
       setOriginalNarrative('Failed to load narrative. Please try again.');
       setTranslatedNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
-      setGameCode('');  // Clear the game code on error
-      setDiagrams([]);
       setGameCode('');
     } finally {
       setIsNarrativeLoading(false);
@@ -405,27 +415,27 @@ const Study = () => {
     }
   }, [narrative]);
 
-  const captureAndDetectEmotion = async () => {
-    if (webcamRef.current) {
-      const imageSrc = webcamRef.current.getScreenshot();
-      const blob = await fetch(imageSrc).then(r => r.blob());
-      const formData = new FormData();
-      formData.append('file', blob, 'emotion.jpg');
+  // const captureAndDetectEmotion = async () => {
+  //   if (webcamRef.current) {
+  //     const imageSrc = webcamRef.current.getScreenshot();
+  //     const blob = await fetch(imageSrc).then(r => r.blob());
+  //     const formData = new FormData();
+  //     formData.append('file', blob, 'emotion.jpg');
 
-      try {
-        const response = await axios.post('/api/detect-emotion', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        setEmotion(response.data.emotion);
-      } catch (error) {
-        console.error('Error detecting emotion:', error);
-      }
-    }
-  };
+  //     try {
+  //       const response = await axios.post('/api/detect-emotion', formData, {
+  //         headers: { 'Content-Type': 'multipart/form-data' }
+  //       });
+  //       setEmotion(response.data.emotion);
+  //     } catch (error) {
+  //       console.error('Error detecting emotion:', error);
+  //     }
+  //   }
+  // };
 
   useEffect(() => {
-    const intervalId = setInterval(captureAndDetectEmotion, 5000); // Detect every 5 seconds
-    return () => clearInterval(intervalId);
+    //const intervalId = setInterval(captureAndDetectEmotion, 5000); // Detect every 5 seconds
+    //return () => clearInterval(intervalId);
   }, []);
 
   const toggleWebcam = () => {
@@ -440,6 +450,7 @@ const Study = () => {
     let inMermaidBlock = false;
     let currentDiagram = '';
     let currentList = null;
+    let diagramIndex = 0;
 
     paragraphs.forEach((paragraph, index) => {
       if (paragraph.trim() === '```mermaid') {
@@ -450,6 +461,7 @@ const Study = () => {
         diagramContent.push(
           <MermaidDiagram key={`diagram-${index}`} chart={currentDiagram.trim()} />
         );
+        diagramIndex++;
       } else if (inMermaidBlock) {
         currentDiagram += paragraph + '\n';
       } else {
@@ -524,18 +536,16 @@ const Study = () => {
           p={2} 
           ml={sidebarOpen ? '240px' : '60px'} 
           transition="margin-left 0.3s ease"
-          overflow="auto"
+          height="100%"
         >
-          {/* Top section: Chapter Content and Summary */}
-          <Box display="flex" flexDirection="row" mb={2}>
-            {/* Left Pane: Chapter Content */}
-            <Box display="flex" flexDirection="column" flex={1} marginRight={2}>
-              {/* Chapter name heading */}
-              <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                {chapter ? chapter.title : (section ? `${section.chapter_title}: ${section.title}` : 'No chapter selected')}
-              </Typography>
-              
-              <Paper elevation={3} sx={{ p: 2, maxHeight: '60vh', overflowY: 'auto' }}>
+          {/* Top row: Chapter Content and Summary */}
+          <Box display="flex" height="50%" mb={2}>
+            {/* Top Left: Chapter Content */}
+            <Box flex={1} mr={1}>
+              <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
+                <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                  {chapter ? chapter.title : (section ? `${section.chapter_title}: ${section.title}` : 'No chapter selected')}
+                </Typography>
                 {chapter && chapter.content ? (
                   <MathJax>
                     <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
@@ -549,28 +559,29 @@ const Study = () => {
                 )}
               </Paper>
             </Box>
-            {/* Right Pane: Language Select and Summary */}
-            <Box display="flex" flexDirection="column" flex={1}>
-              {/* Language selection dropdown */}
-              <Box display="flex" justifyContent="flex-end" mb={2}>
-                <Typography variant="body2" sx={{ mr: 1, alignSelf: 'center' }}>
-                  Language:
-                </Typography>
-                <Select
-                  value={targetLanguage}
-                  onChange={handleLanguageChange}
-                  sx={{ minWidth: 120 }}
-                  size="small"
-                >
-                  <MenuItem value="en">English</MenuItem>
-                  <MenuItem value="es">Spanish</MenuItem>
-                  <MenuItem value="fr">French</MenuItem>
-                  <MenuItem value="de">German</MenuItem>
-                  <MenuItem value="zh">Chinese</MenuItem>
-                </Select>
-              </Box>
-              {/* Summary content */}
-              <Paper elevation={3} sx={{ p: 3, maxHeight: '60vh', overflowY: 'auto' }}>
+            {/* Top Right: Summary */}
+            <Box flex={1} ml={1}>
+              <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                    Summary
+                  </Typography>
+                  <Box display="flex" alignItems="center">
+                    <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
+                    <Select
+                      value={targetLanguage}
+                      onChange={handleLanguageChange}
+                      sx={{ minWidth: 120 }}
+                      size="small"
+                    >
+                      <MenuItem value="en">English</MenuItem>
+                      <MenuItem value="es">Spanish</MenuItem>
+                      <MenuItem value="fr">French</MenuItem>
+                      <MenuItem value="de">German</MenuItem>
+                      <MenuItem value="zh">Chinese</MenuItem>
+                    </Select>
+                  </Box>
+                </Box>
                 {isNarrativeLoading ? (
                   <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                     <CircularProgress />
@@ -586,31 +597,41 @@ const Study = () => {
             </Box>
           </Box>
           
-          {/* Bottom section: Concept Diagrams and Interactive Game */}
-          <Box display="flex" flexDirection="row" mt={2}>
+          {/* Bottom row: Concept Diagrams and Interactive Game */}
+          <Box display="flex" height="50%">
             {/* Bottom Left: Concept Diagrams */}
-            <Box flex={1} marginRight={2}>
-              {translatedNarrative && renderContent(translatedNarrative).diagramContent.length > 0 && (
-                <Paper elevation={3} sx={{ p: 2, height: '30vh', overflowY: 'auto' }}>
-                  <Typography variant="h6" gutterBottom>Concept Diagrams</Typography>
-                  {renderContent(translatedNarrative).diagramContent}
-                </Paper>
-              )}
+            <Box flex={1} mr={1}>
+              <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
+                <Typography variant="h6" gutterBottom>Concept Diagrams</Typography>
+                {translatedNarrative && renderContent(translatedNarrative).diagramContent.length > 0 ? (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
+                    {renderContent(translatedNarrative).diagramContent}
+                  </Box>
+                ) : (
+                  <Typography>No diagrams available.</Typography>
+                )}
+              </Paper>
             </Box>
             {/* Bottom Right: Interactive Game */}
-            <Box flex={1}>
-              {gameCode && (
-                <ErrorBoundary>
-                  <Paper elevation={3} sx={{ p: 2, height: '30vh', overflowY: 'auto' }}>
-                    <Typography variant="h6">Interactive Game:</Typography>
-                    <DynamicGameComponent gameCode={gameCode} />
-                  </Paper>
-                </ErrorBoundary>
-              )}
+            <Box flex={1} ml={1}>
+              <Paper elevation={3} sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <Typography variant="h6" gutterBottom>Interactive Game</Typography>
+                <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                  {gameCode ? (
+                    <ErrorBoundary>
+                      <DynamicGameComponent gameCode={gameCode} />
+                    </ErrorBoundary>
+                  ) : (
+                    <Typography>No game available for this chapter.</Typography>
+                  )}
+                </Box>
+              </Paper>
             </Box>
           </Box>
-          
-          {/* Chat Section */}
+        </Box>
+
+        
+          {/* Chat Section (unchanged) */}
           <Box 
             sx={{ 
               position: 'fixed',
@@ -754,7 +775,6 @@ const Study = () => {
             </Box>
           </Box>
         </Box>
-      </Box>
     </MathJaxContext>
   );
 };

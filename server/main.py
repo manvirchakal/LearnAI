@@ -46,8 +46,21 @@ load_dotenv()
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
     service_name='bedrock-runtime',
-    region_name='us-east-1'  # replace with your preferred region
+    region_name=os.getenv('AWS_DEFAULT_REGION'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
 )
+
+# Add AWS Translate client initialization
+translate = boto3.client('translate')
+
+# Add this with your other AWS client initializations
+transcribe = boto3.client('transcribe',
+    region_name='us-east-1'
+)
+
+# Initialize Polly client
+polly_client = boto3.client('polly', region_name='us-east-1')
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -327,35 +340,13 @@ def remove_latex_commands(text: str) -> str:
     
     return text.strip()
 
-def generate_narrative(system_message: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
-    cleaned_text = remove_latex_commands(system_message)
-
-    prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
-    1. Define it clearly
-    2. Provide a real-world analogy
-    3. Give at least two practical examples
-    4. Explain how it relates to other concepts in the chapter
-    5. Discuss its importance or applications
-
-    Additionally, for each main concept, provide a Mermaid.js diagram description that illustrates the concept visually. Use the following format for diagram descriptions:
-
-    ```mermaid
-    [Mermaid.js diagram code here]
-    ```
-
-    Use clear, engaging language suitable for a student new to these concepts. 
-    Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
-
-    Chapter content: {cleaned_text}
-
-    Now, give an engaging explanation of the chapter's key concepts, with clear, detailed analogies, practical examples, and Mermaid.js diagram descriptions:"""
-
+def generate_narrative(prompt: str, db: Session, max_attempts=1, max_tokens=4096):
     full_response = ""
-    for i in range(1):
+    for i in range(max_attempts):
         try:
             native_request = {
                 'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': 4096,
+                'max_tokens': max_tokens,
                 'temperature': 0.7,
                 'top_p': 0.9,
                 'messages': [
@@ -378,42 +369,14 @@ def generate_narrative(system_message: str, chapter_id: int, db: Session, max_at
                 if chunk['type'] == 'content_block_delta':
                     full_response += chunk['delta'].get('text', '')
 
-            if full_response.endswith(".") and len(full_response) < 4096 * 0.9:
+            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
                 break
 
         except ClientError as e:
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
-    try:
-        # Check if a narrative already exists for this chapter
-        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
-        
-        if existing_narrative:
-            # Update the existing narrative
-            existing_narrative.content = full_response
-            db.commit()
-        else:
-            # Create a new narrative
-            narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
-            db.add(narrative_model)
-            db.commit()
-    except IntegrityError:
-        db.rollback()
-        # If there's a race condition and another process inserted a narrative, update it
-        existing_narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
-        if existing_narrative:
-            existing_narrative.content = full_response
-            db.commit()
-        else:
-            # If we still can't find or update the narrative, raise an exception
-            raise Exception("Failed to save narrative due to database conflict")
-    except Exception as e:
-        db.rollback()
-        logging.error(f"Error saving narrative: {str(e)}")
-        raise
-
-    return full_response
+    return full_response.strip()
 
 def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
     cleaned_text = remove_latex_commands(text)
@@ -494,42 +457,41 @@ def translate_text(text, target_language):
 async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     chapter_content = data.get('chapter_content', '')
-    target_language = data.get('target_language', 'en')  # Default to English
-    
+
     try:
-        cleaned_chapter_content = remove_latex_commands(chapter_content)
+        cleaned_text = remove_latex_commands(chapter_content)
+        prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
+            1. Define it clearly
+            2. Provide a real-world analogy
+            3. Give at least two practical examples
+            4. Explain how it relates to other concepts in the chapter
+            5. Discuss its importance or applications
+
+            Use clear, engaging language suitable for a student new to these concepts. 
+            Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
+
+            Chapter content: {cleaned_text}
+
+            Now, provide a comprehensive explanation of the key concepts:"""
+
+        narrative = generate_narrative(prompt, db)
         
-        system_message = f"You are an AI tutor. Your task is to provide a comprehensive summary and explanation of the following chapter content: {cleaned_chapter_content}"
-        narrative = generate_narrative(system_message, chapter_id, db)
-        
-        # Extract Mermaid diagrams
-        mermaid_diagrams = re.findall(r'```mermaid\n(.*?)```', narrative, re.DOTALL)
-        
-        # Remove Mermaid diagrams from the narrative
-        narrative = re.sub(r'```mermaid\n.*?```', '', narrative, flags=re.DOTALL)
-        
-        # Generate game idea based on chapter content
-        game_idea_prompt = f"Based on the concepts in this chapter about {cleaned_chapter_content[:100]}..., suggest a simple interactive game idea that could help reinforce the learning. The game should be implementable in JavaScript and suitable for a web browser environment."
-        game_idea = generate_game_idea(game_idea_prompt, chapter_id, db)
+        # Generate game idea and code
+        game_prompt = f"Based on the following chapter content, create an educational game idea:\n\n{cleaned_text}"
+        game_response = generate_game_idea(game_prompt, chapter_id, db)
         
         # Generate game code
-        game_code_request = GameIdeaRequest(game_idea=game_idea)
-        game_code_response = await generate_game_code(game_code_request)
-        game_code = game_code_response["code"]
-        
-        # Translate narrative and game_idea if target_language is not English
-        if target_language != 'en':
-            narrative = translate_text(narrative, target_language)
-            game_idea = translate_text(game_idea, target_language)
-        
+        game_code_response = await generate_game_code(GameIdeaRequest(game_idea=game_response))
+        game_code = game_code_response.get("code", "")
+
         return {
             "narrative": narrative,
-            "game_idea": game_idea,
-            "game_code": game_code,
-            "diagrams": mermaid_diagrams
+            "game_idea": game_response,
+            "game_code": game_code
         }
+
     except Exception as e:
-        logging.exception("Error in generate_narrative")
+        logging.exception("Error in generate_narrative_endpoint")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to get all textbooks
@@ -806,8 +768,7 @@ async def chat(request: Request, db: Session = Depends(get_db)):
 
     except Exception as e:
         logging.exception("Error in chat endpoint")
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        raise HTTPException(status_code=500, detail=str(e))    
 def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 500, max_history_tokens: int = 1000) -> str:
     full_response = ""
     
@@ -948,3 +909,97 @@ async def translate_text_endpoint(request: Request):
         raise HTTPException(status_code=500, detail="Translation failed")
 
     return {"translated_text": translated_text}
+
+@app.post("/generate-diagrams")
+async def generate_diagrams_endpoint(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    chapter_content = data.get('chapter_content', '')
+    generated_summary = data.get('generated_summary', '')
+    
+    try:
+        cleaned_chapter_content = remove_latex_commands(chapter_content)
+        cleaned_summary = remove_latex_commands(generated_summary)
+        
+        prompt = f"""Based on the following chapter content and generated summary, create Mermaid.js diagram descriptions that illustrate the key concepts visually. For each main concept:
+
+        1. Design a simple flowchart diagram that clearly represents the concept
+        2. Use only 'graph TD' (top-down) orientation
+        3. Keep the diagrams simple, with no more than 5-7 nodes
+        4. Provide a brief explanation of what the diagram represents
+
+        Use the following format for diagram descriptions:
+
+        ```mermaid
+        graph TD
+            A[First Concept] --> B[Second Concept]
+            B --> C[Third Concept]
+            C --> D[Fourth Concept]
+            D --> E[Fifth Concept]
+        ```
+
+        Critical guidelines for creating Mermaid diagrams:
+        - Always start with 'graph TD' on its own line
+        - Use single letters for node IDs (A, B, C, etc.)
+        - Use square brackets for node labels: [Label text]
+        - Use only --> for arrows (no labels or other arrow types)
+        - Each node and connection should be on its own line
+        - Indent each line after 'graph TD' with 4 spaces
+        - Use only plain English words in labels, NO mathematical symbols or notation
+        - Avoid special characters, apostrophes, or quotation marks in labels
+        - Use simple, descriptive text for labels
+        - If referring to mathematical concepts, use words instead of symbols (e.g., "First Derivative" instead of "f'(x)")
+        - Ensure all nodes are connected in a logical flow
+
+        Chapter content: {cleaned_chapter_content}
+
+        Generated summary: {cleaned_summary}
+
+        Now, provide 2-3 Mermaid.js diagram descriptions for the key concepts, focusing on the most important ideas from both the chapter content and the generated summary. Ensure each diagram follows the guidelines strictly, using only plain English words without any mathematical notation or special characters:"""
+
+        diagrams = await generate_diagrams(prompt, db)
+        
+        return {"diagrams": diagrams}
+    except Exception as e:
+        logging.exception("Error in generate_diagrams_endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+async def generate_diagrams(prompt: str, db: Session, max_attempts=1, max_tokens=4096):
+    full_response = ""
+    for i in range(max_attempts):
+        try:
+            native_request = {
+                'anthropic_version': 'bedrock-2023-05-31',
+                'max_tokens': max_tokens,
+                'temperature': 0.7,
+                'top_p': 0.9,
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [{'type': 'text', 'text': prompt}],
+                    }
+                ],
+            }
+
+            request = json.dumps(native_request)
+
+            response = bedrock.invoke_model_with_response_stream(
+                modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+                body=request
+            )
+
+            for event in response['body']:
+                chunk = json.loads(event['chunk']['bytes'])
+                if chunk['type'] == 'content_block_delta':
+                    full_response += chunk['delta'].get('text', '')
+
+            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
+                break
+
+        except ClientError as e:
+            logging.error(f"Error calling Bedrock: {e}")
+            return f"Error: {str(e)}"
+
+    # Extract Mermaid diagrams from the response
+    diagrams = re.findall(r'```mermaid\n(.*?)```', full_response, re.DOTALL)
+    
+    return diagrams
