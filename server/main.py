@@ -2,7 +2,7 @@ import chardet
 import os
 import re
 import logging 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
 from server import models, schemas
@@ -36,12 +36,14 @@ from dotenv import load_dotenv
 import ast
 import esprima
 import json
+from botocore.config import Config
 
 MAX_RETRIES = 1
 
 # Load the .env file
 load_dotenv()
 
+router = APIRouter()
 
 # Add AWS Bedrock client initialization
 bedrock = boto3.client(
@@ -49,6 +51,14 @@ bedrock = boto3.client(
     region_name=os.getenv('AWS_DEFAULT_REGION'),
     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+)
+
+bedrock_agent = boto3.client(
+    service_name='bedrock-agent-runtime',
+    region_name=os.getenv('AWS_DEFAULT_REGION'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    config=Config(region_name=os.getenv('AWS_DEFAULT_REGION'))
 )
 
 # Add AWS Translate client initialization
@@ -68,6 +78,9 @@ Base.metadata.create_all(bind=engine)
 # Initialize logging
 logging.basicConfig(level=logging.DEBUG)
 
+logging.getLogger('botocore').setLevel(logging.INFO)
+logging.getLogger('botocore.parsers').setLevel(logging.WARNING)
+
 app = FastAPI()
 
 # Allow your frontend origin
@@ -82,6 +95,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(router)
 
 # Dependency to get DB session
 def get_db():
@@ -176,6 +191,35 @@ async def save_learning_profile(
     except Exception as e:
         print(f"Error saving profile: {str(e)}")  # Log any errors
         raise HTTPException(status_code=500, detail=str(e))
+
+async def query_knowledge_base(query: str, top_k: int = 3):
+    try:
+        logging.info(f"Querying knowledge base with: {query}")
+        response = bedrock_agent.retrieve_and_generate(
+            input={'text': query},
+            retrieveAndGenerateConfiguration={
+                'knowledgeBaseConfiguration': {
+                    'knowledgeBaseId': 'AFEBIGATTP',
+                    'modelArn': 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-instant-v1'
+                },
+                'type': 'KNOWLEDGE_BASE'
+            }
+        )
+        
+        logging.info(f"Knowledge base response: {response}")
+        
+        generated_answer = response.get('output', {}).get('text', '')
+        return generated_answer
+
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logging.error(f"AWS ClientError in query_knowledge_base: {error_code} - {error_message}")
+        logging.error(f"Full error response: {e.response}")
+        return f"Error querying knowledge base: {error_code} - {error_message}"
+    except Exception as e:
+        logging.error(f"Unexpected error in query_knowledge_base: {str(e)}")
+        return f"Unexpected error querying knowledge base: {str(e)}"
 
 def generate_learning_profile_description(answers: dict) -> str:
     prompt = f"""Based on the following questionnaire answers, generate a paragraph-long textual description of the user's learning style. The answers are organized by learning category (Visual, Auditory, ReadingWriting, Kinesthetic) and represent the user's agreement level with each statement (1: Strongly Disagree, 5: Strongly Agree).
@@ -455,29 +499,45 @@ def translate_text(text, target_language):
 
 @app.post("/generate-narrative/{chapter_id}")
 async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Session = Depends(get_db)):
-    data = await request.json()
-    chapter_content = data.get('chapter_content', '')
-
     try:
-        cleaned_text = remove_latex_commands(chapter_content)
-        prompt = f"""Continue the explanation of key concepts from the following chapter content. For each concept:
-            1. Define it clearly
-            2. Provide a real-world analogy
-            3. Give at least two practical examples
-            4. Explain how it relates to other concepts in the chapter
-            5. Discuss its importance or applications
+        data = await request.json()
+        chapter_content = data.get('chapter_content', '')
 
-            Use clear, engaging language suitable for a student new to these concepts. 
-            Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
+        # Query the knowledge base
+        relevant_info = await query_knowledge_base(chapter_content[:1000])  # Use first 1000 chars as query
+        
+        # Check if relevant_info is an error message
+        if relevant_info.startswith("Error") or relevant_info.startswith("Unexpected error"):
+            logging.warning(f"Knowledge base query failed: {relevant_info}")
+            relevant_info = "No additional information available."
 
-            Chapter content: {cleaned_text}
+        # Prepare the prompt for narrative generation
+        narrative_prompt = f"""
+        Generate a comprehensive and engaging narrative summary for the following chapter content, 
+        incorporating the provided relevant information from the knowledge base:
 
-            Now, provide a comprehensive explanation of the key concepts:"""
+        Chapter content: {chapter_content}
 
-        narrative = generate_narrative(prompt, db)
+        Relevant information: {relevant_info}
+
+        Relevant information from knowledge base: {relevant_info}
+
+        Please create an extensive summary that:
+        1. Explains all key concepts in a clear and engaging manner.
+        2. Highlights important connections and insights within the chapter and to broader contexts.
+        3. Uses analogies or examples to illustrate complex ideas.
+        4. Integrates the relevant information from the knowledge base to enrich the explanation.
+        5. Provides a holistic view of the topic, including its significance and applications.
+        6. Addresses potential questions or misconceptions a learner might have.
+
+        The summary should be informative, engaging, and easy to understand. Aim for a length of at least 3 quarters of the chapter content, 
+        ensuring thorough coverage of all important aspects of the chapter content and related knowledge.
+        """
+
+        narrative = generate_narrative(narrative_prompt, db)
         
         # Generate game idea and code
-        game_prompt = f"Based on the following chapter content, create an educational game idea:\n\n{cleaned_text}"
+        game_prompt = f"Based on the following chapter content, create an educational game idea:\n\n{chapter_content}"
         game_response = generate_game_idea(game_prompt, chapter_id, db)
         
         # Generate game code
