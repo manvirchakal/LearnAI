@@ -108,14 +108,14 @@ def get_db():
 
 # Configure the OAuth2 scheme
 oauth2_scheme = OAuth2AuthorizationCodeBearer(
-    authorizationUrl="https://learnai.auth.us-east-1.amazoncognito.com/oauth2/authorize",
-    tokenUrl="https://cognito-idp.us-east-1.amazonaws.com/us-east-1_48IJcanGU/.well-known/jwks.json"
+    authorizationUrl=os.getenv("COGNITO_AUTHORIZATION_URL"),
+    tokenUrl=os.getenv("COGNITO_TOKEN_URL")
 )
 
 # Add this function to fetch and cache the JWKS
 @lru_cache()
 def get_jwks():
-    jwks_url = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_48IJcanGU/.well-known/jwks.json"
+    jwks_url = os.getenv("COGNITO_JWKS_URL")
     response = requests.get(jwks_url)
     return response.json()["keys"]
 
@@ -157,7 +157,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             raise HTTPException(status_code=401, detail="Token is expired")
         
         # And the Audience  (use claims["client_id"] if verifying an access token)
-        if claims["aud"] != "7ri0hp1t0jl1l2cb3vdnok67tu":
+        if claims["aud"] != os.getenv("COGNITO_APP_CLIENT_ID"):
             raise HTTPException(status_code=401, detail="Token was not issued for this audience")
         
         return claims["sub"]
@@ -199,8 +199,8 @@ async def query_knowledge_base(query: str, top_k: int = 3):
             input={'text': query},
             retrieveAndGenerateConfiguration={
                 'knowledgeBaseConfiguration': {
-                    'knowledgeBaseId': 'AFEBIGATTP',
-                    'modelArn': 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-instant-v1'
+                    'knowledgeBaseId': os.getenv('KNOWLEDGE_BASE_ID'),
+                    'modelArn': os.getenv('MODEL_ARN')
                 },
                 'type': 'KNOWLEDGE_BASE'
             }
@@ -384,7 +384,7 @@ def remove_latex_commands(text: str) -> str:
     
     return text.strip()
 
-def generate_narrative(prompt: str, db: Session, max_attempts=1, max_tokens=4096):
+def generate_narrative(prompt: str, db: Session, max_attempts=1, max_tokens=8192):
     full_response = ""
     for i in range(max_attempts):
         try:
@@ -481,8 +481,8 @@ def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, 
     # Create new narrative
     narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
     db.add(narrative_model)
-    db.commit()
-    
+    db.commit()    
+
     return full_response
 
 def translate_text(text, target_language):
@@ -776,7 +776,7 @@ def post_process_game_code(code):
     code = code.replace('React.createElement(MathJax.Node,', 'React.createElement(MathJax,')
     
     # Remove semicolons inside object literals
-    code = re.sub(r'({[^}]+);\s*}', r'\1 }', code)
+    code = re.sub(r'({[^}]+};\s*}', r'\1 }', code)
     
     return code.strip()
 

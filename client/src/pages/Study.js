@@ -154,33 +154,25 @@ const Study = () => {
       const generatedNarrative = narrativeResponse.data.narrative;
       const gameIdea = narrativeResponse.data.game_idea;
       const gameCode = narrativeResponse.data.game_code;
-  
+
       // Fetch diagrams using both chapter content and generated narrative
       const diagramsResponse = await axios.post(`/generate-diagrams`, {
         chapter_content: chapterContent,
         generated_summary: generatedNarrative,
       });
-  
+
       console.log("Fetched diagrams:", diagramsResponse.data);
-  
-      // Combine narrative and diagrams
-      let combinedNarrative = generatedNarrative;
-      if (diagramsResponse.data.diagrams && diagramsResponse.data.diagrams.length > 0) {
-        combinedNarrative += '\n\n### Concept Diagrams\n\n';
-        diagramsResponse.data.diagrams.forEach((diagram, index) => {
-          combinedNarrative += `\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`;
-        });
-      }
-  
-      setOriginalNarrative(combinedNarrative);
+
+      setOriginalNarrative(generatedNarrative);
       setGameIdea(gameIdea);
       setGameCode(gameCode);
-  
+      setDiagrams(diagramsResponse.data.diagrams || []);
+
       if (targetLanguage !== 'en') {
-        const translatedText = await translateText(combinedNarrative, targetLanguage);
+        const translatedText = await translateText(generatedNarrative, targetLanguage);
         setTranslatedNarrative(translatedText);
       } else {
-        setTranslatedNarrative(combinedNarrative);
+        setTranslatedNarrative(generatedNarrative);
       }
     } catch (error) {
       console.error('Error fetching narrative or diagrams:', error);
@@ -188,6 +180,7 @@ const Study = () => {
       setTranslatedNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
       setGameCode('');
+      setDiagrams([]);
     } finally {
       setIsNarrativeLoading(false);
     }
@@ -442,89 +435,6 @@ const Study = () => {
     setWebcamExpanded(!webcamExpanded);
   };
 
-  const renderContent = (content) => {
-    const paragraphs = content.split('\n');
-    const regularContent = [];
-    const diagramContent = [];
-
-    let inMermaidBlock = false;
-    let currentDiagram = '';
-    let currentList = null;
-    let diagramIndex = 0;
-
-    paragraphs.forEach((paragraph, index) => {
-      if (paragraph.trim() === '```mermaid') {
-        inMermaidBlock = true;
-        currentDiagram = '';
-      } else if (paragraph.trim() === '```' && inMermaidBlock) {
-        inMermaidBlock = false;
-        diagramContent.push(
-          <MermaidDiagram key={`diagram-${index}`} chart={currentDiagram.trim()} />
-        );
-        diagramIndex++;
-      } else if (inMermaidBlock) {
-        currentDiagram += paragraph + '\n';
-      } else {
-        // Check for headings and subheadings
-        if (paragraph.startsWith('***')) {
-          regularContent.push(
-            <Typography key={`heading-${index}`} variant="h4" gutterBottom sx={{ mt: 4, mb: 2, color: 'primary.main' }}>
-              {paragraph.replace(/^\*\*\*\s*/, '')}
-            </Typography>
-          );
-          currentList = null;
-        } else if (paragraph.startsWith('**')) {
-          regularContent.push(
-            <Typography key={`subheading-${index}`} variant="h5" gutterBottom sx={{ mt: 3, mb: 1, color: 'secondary.main' }}>
-              {paragraph.replace(/^\*\*\s*/, '')}
-            </Typography>
-          );
-          currentList = null;
-        } else if (paragraph.match(/^\d+\./)) {
-          // Numbered list item
-          if (!currentList) {
-            currentList = [];
-            regularContent.push(
-              <ol key={`list-${index}`} style={{ paddingLeft: '20px' }}>
-                {currentList}
-              </ol>
-            );
-          }
-          currentList.push(
-            <li key={`item-${index}`}>
-              <MathJax>
-                <div dangerouslySetInnerHTML={{ __html: preprocessLatex(paragraph.replace(/^\d+\.\s*/, '')) }} />
-              </MathJax>
-            </li>
-          );
-        } else if (paragraph.startsWith('-')) {
-          // Bullet point
-          regularContent.push(
-            <Box key={`bullet-${index}`} sx={{ display: 'flex', alignItems: 'flex-start', mb: 1 }}>
-              <Typography sx={{ mr: 1 }}>•</Typography>
-              <MathJax>
-                <div dangerouslySetInnerHTML={{ __html: preprocessLatex(paragraph.replace(/^-\s*/, '')) }} />
-              </MathJax>
-            </Box>
-          );
-          currentList = null;
-        } else {
-          // Regular paragraph
-          regularContent.push(
-            <Typography key={`paragraph-${index}`} paragraph>
-              <MathJax>
-                <div dangerouslySetInnerHTML={{ __html: preprocessLatex(paragraph) }} />
-              </MathJax>
-            </Typography>
-          );
-          currentList = null;
-        }
-      }
-    });
-
-    return { regularContent, diagramContent };
-  };
-
   return (
     <MathJaxContext>
       <Box display="flex" height="100vh" overflow="hidden">
@@ -587,9 +497,9 @@ const Study = () => {
                     <CircularProgress />
                   </Box>
                 ) : translatedNarrative ? (
-                  <div className={styles.chapterContent}>
-                    {renderContent(translatedNarrative).regularContent}
-                  </div>
+                  <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+                    {translatedNarrative}
+                  </Typography>
                 ) : (
                   <Typography>No summary available.</Typography>
                 )}
@@ -603,9 +513,11 @@ const Study = () => {
             <Box flex={1} mr={1}>
               <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
                 <Typography variant="h6" gutterBottom>Concept Diagrams</Typography>
-                {translatedNarrative && renderContent(translatedNarrative).diagramContent.length > 0 ? (
+                {diagrams.length > 0 ? (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
-                    {renderContent(translatedNarrative).diagramContent}
+                    {diagrams.map((diagram, index) => (
+                      <MermaidDiagram key={`diagram-${index}`} chart={diagram} />
+                    ))}
                   </Box>
                 ) : (
                   <Typography>No diagrams available.</Typography>

@@ -76,7 +76,7 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen }) => {
         </Box>
 
         <List>
-          <ListItem button sx={{ justifyContent: open ? 'flex-start' : 'center', paddingLeft: open ? '16px' : '8px' }}>
+          <ListItem button onClick={() => navigate('/')} sx={{ justifyContent: open ? 'flex-start' : 'center', paddingLeft: open ? '16px' : '8px' }}>
             <HomeIcon />
             {open && <ListItemText primary="Home" sx={{ marginLeft: '15px' }} />}
           </ListItem>
