@@ -20,3 +20,6 @@ python-jose[cryptography]
 esprima
 python-jose
 cryptography
+PyPDF2
+pikepdf
+mysql-connector-python

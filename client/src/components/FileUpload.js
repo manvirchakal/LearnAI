@@ -5,34 +5,46 @@ import { useNavigate } from 'react-router-dom';
 
 function UploadTextbook() {
     const [file, setFile] = useState(null);
+    const [documentType, setDocumentType] = useState('textbook'); // Changed default to 'textbook'
+    const [tocPages, setTocPages] = useState('');
     const navigate = useNavigate();
 
     const handleFileChange = (event) => {
         setFile(event.target.files[0]);
     };
 
+    const handleDocumentTypeChange = (event) => {
+        setDocumentType(event.target.value);
+    };
+
+    const handleTocPagesChange = (event) => {
+        setTocPages(event.target.value);
+    };
+
     const handleSubmit = async (event) => {
         event.preventDefault();
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('documentType', documentType);
+        if (documentType === 'textbook') {
+            formData.append('tocPages', tocPages);
+        }
 
         try {
             const user = await Auth.currentAuthenticatedUser();
             const token = (await Auth.currentSession()).getIdToken().getJwtToken();
 
-            const response = await axios.post('http://localhost:8000/upload', formData, {
+            const response = await axios.post('http://localhost:8000/upload-pdf', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                     'Authorization': `Bearer ${token}`
                 }
             });
             console.log('File uploaded successfully:', response.data);
-            // Redirect to study page or show success message
             navigate('/study');
         } catch (error) {
             console.error('Error uploading file:', error);
             if (error.response && error.response.status === 401) {
-                // Redirect to login page if unauthorized
                 navigate('/login');
             }
         }
@@ -40,8 +52,20 @@ function UploadTextbook() {
 
     return (
         <form onSubmit={handleSubmit}>
-            <input type="file" accept=".tex" onChange={handleFileChange} />
-            <button type="submit">Upload Textbook</button>
+            <select value={documentType} onChange={handleDocumentTypeChange}>
+                <option value="textbook">Textbook</option>
+                <option value="document">Document</option>
+            </select>
+            <input type="file" accept=".pdf" onChange={handleFileChange} />
+            {documentType === 'textbook' && (
+                <input
+                    type="text"
+                    placeholder="Table of Contents pages (e.g., 1-3)"
+                    value={tocPages}
+                    onChange={handleTocPagesChange}
+                />
+            )}
+            <button type="submit">Upload {documentType === 'textbook' ? 'Textbook' : 'Document'}</button>
         </form>
     );
 }

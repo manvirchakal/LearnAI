@@ -2,10 +2,9 @@ import chardet
 import os
 import re
 import logging 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter, Form
 from sqlalchemy.orm import Session
 from server.database import SessionLocal, engine, Base
-from server import models, schemas
 import threading
 from fastapi.responses import StreamingResponse
 import json
@@ -17,7 +16,6 @@ import subprocess
 from fastapi.responses import FileResponse
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
-from server import models
 from pydantic import BaseModel
 import textwrap
 from functools import lru_cache
@@ -27,7 +25,7 @@ from fastapi import UploadFile, File, Depends, HTTPException, status, Body
 from contextlib import closing
 from tempfile import gettempdir
 from fastapi.security import OAuth2AuthorizationCodeBearer
-from jose import jwt
+from jose import jwt, jwk
 from jose.exceptions import JWTError
 from jose.utils import base64url_decode
 import time
@@ -37,11 +35,21 @@ import ast
 import esprima
 import json
 from botocore.config import Config
+import uuid
+import requests
+from PyPDF2 import PdfReader, PdfWriter
+import io
+import pikepdf
+import mysql.connector
 
 MAX_RETRIES = 1
 
 # Load the .env file
 load_dotenv()
+
+S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
+if not S3_BUCKET_NAME:
+    raise ValueError("TEXTBOOK_S3_BUCKET environment variable is not set")
 
 router = APIRouter()
 
@@ -71,6 +79,16 @@ transcribe = boto3.client('transcribe',
 
 # Initialize Polly client
 polly_client = boto3.client('polly', region_name='us-east-1')
+
+# Initialize S3 client
+s3_client = boto3.client('s3',
+    region_name=os.getenv('AWS_DEFAULT_REGION'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+)
+
+# Initialize AWS Textract client
+textract_client = boto3.client('textract')  # Add this line
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -119,50 +137,40 @@ def get_jwks():
     response = requests.get(jwks_url)
     return response.json()["keys"]
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        # Get the kid from the headers prior to verification
+        jwks = get_jwks()
+        if not jwks:
+            raise HTTPException(status_code=500, detail="Unable to fetch JWKS")
+        
         headers = jwt.get_unverified_headers(token)
         kid = headers["kid"]
+        key_index = next((index for (index, key) in enumerate(jwks) if key["kid"] == kid), None)
+        if key_index is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
         
-        # Search for the kid in the downloaded public keys
-        key_index = -1
-        for i in range(len(get_jwks())):
-            if kid == get_jwks()[i]["kid"]:
-                key_index = i
-                break
-        if key_index == -1:
-            raise HTTPException(status_code=401, detail="Public key not found in jwks.json")
+        public_key = jwk.construct(jwks[key_index])
+        payload = jwt.decode(
+            token,
+            public_key.to_pem().decode("utf-8"),
+            algorithms=["RS256"],
+            audience=os.getenv("COGNITO_APP_CLIENT_ID"),
+            options={"verify_exp": True},
+        )
         
-        # Construct the public key
-        public_key = jwk.construct(get_jwks()[key_index])
+        # Try different possible keys for user identifier
+        user_id = payload.get("username") or payload.get("sub") or payload.get("email")
         
-        # Get the last two sections of the token,
-        # message and signature (encoded in base64)
-        message, encoded_signature = str(token).rsplit(".", 1)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Unable to identify user from token")
         
-        # Decode the signature
-        decoded_signature = base64url_decode(encoded_signature.encode("utf-8"))
-        
-        # Verify the signature
-        if not public_key.verify(message.encode("utf8"), decoded_signature):
-            raise HTTPException(status_code=401, detail="Signature verification failed")
-        
-        # Since we passed the verification, we can now safely
-        # use the unverified claims
-        claims = jwt.get_unverified_claims(token)
-        
-        # Additionally we can verify the token expiration
-        if time.time() > claims["exp"]:
-            raise HTTPException(status_code=401, detail="Token is expired")
-        
-        # And the Audience  (use claims["client_id"] if verifying an access token)
-        if claims["aud"] != os.getenv("COGNITO_APP_CLIENT_ID"):
-            raise HTTPException(status_code=401, detail="Token was not issued for this audience")
-        
-        return claims["sub"]
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+        return user_id
+    except JWTError as e:
+        logging.error(f"JWT Error: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logging.error(f"Unexpected error in get_current_user: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/save-learning-profile")
 async def save_learning_profile(
@@ -170,27 +178,20 @@ async def save_learning_profile(
     current_user: str = Depends(get_current_user)
 ):
     try:
-        print(f"Received answers: {profile}")  # Log the received answers
+        S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
+        profile_key = f"learning_profiles/{current_user}.json"
         
-        # Generate textual description using Claude Haiku
-        learning_profile = generate_learning_profile_description(profile['answers'])
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=profile_key,
+            Body=json.dumps(profile),
+            ContentType='application/json'
+        )
         
-        with SessionLocal() as db:
-            user_profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == current_user).first()
-            
-            if user_profile:
-                user_profile.learning_profile = learning_profile
-            else:
-                user_profile = models.UserProfile(user_id=current_user, learning_profile=learning_profile)
-                db.add(user_profile)
-            
-            db.commit()
-        
-        print(f"Saved profile for user {current_user}")  # Log the successful save
         return {"message": "Learning profile saved successfully"}
     except Exception as e:
-        print(f"Error saving profile: {str(e)}")  # Log any errors
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Failed to save learning profile to S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save learning profile")
 
 async def query_knowledge_base(query: str, top_k: int = 3):
     try:
@@ -305,21 +306,235 @@ def extract_chapters_and_sections_from_tex(tex_content: str):
 
     return result
 
+# Add this function to upload files to S3
+def upload_file_to_s3(file_name, bucket, object_name=None):
+    if object_name is None:
+        object_name = file_name
+    try:
+        s3_client.upload_file(file_name, bucket, object_name)
+    except ClientError as e:
+        logging.error(e)
+        return False
+    return True
+
+class PDFUploadResponse(BaseModel):
+    message: str
+    s3_key: str
+
+@app.post("/upload-pdf")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    documentType: str = Form(...),
+    tocPages: str = Form(None),
+    current_user: str = Depends(get_current_user)
+):
+    logging.info(f"Received PDF upload request. Document type: {documentType}")
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File format not supported. Please upload a PDF file.")
+    
+    # Generate a unique filename
+    unique_filename = f"{uuid.uuid4()}_{file.filename}"
+    s3_key = f"user-uploads/{current_user}/{unique_filename}"
+    
+    # Save the file temporarily
+    temp_file_path = f"/tmp/{unique_filename}"
+    with open(temp_file_path, "wb") as buffer:
+        buffer.write(await file.read())
+    
+    try:
+        # Upload to S3
+        s3_client.upload_file(temp_file_path, S3_BUCKET_NAME, s3_key)
+        logging.info(f"File uploaded to S3: {s3_key}")
+        
+        metadata = {
+            "title": file.filename,
+            "s3_key": s3_key,
+            "user_id": current_user,
+            "document_type": documentType
+        }
+        
+        if documentType == 'textbook' and tocPages:
+            logging.info(f"Processing textbook TOC pages: {tocPages}")
+            file_id = unique_filename.split('_')[0]  # Assuming the first part of unique_filename is the UUID
+            toc_structure = process_toc_pages(S3_BUCKET_NAME, s3_key, tocPages, file_id, file.filename)
+            metadata["toc_structure"] = toc_structure
+            logging.info(f"TOC structure extracted and saved to database: {toc_structure}")
+        
+        # Save metadata in S3
+        metadata_key = f"metadata/{current_user}/{unique_filename}.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=metadata_key,
+            Body=json.dumps(metadata),
+            ContentType='application/json'
+        )
+        logging.info(f"Metadata saved to S3: {metadata_key}")
+        
+        # Clean up the temporary file
+        os.remove(temp_file_path)
+        return {"message": "PDF uploaded successfully", "s3_key": s3_key}
+    except Exception as e:
+        logging.error(f"Failed to upload PDF to S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload PDF")
+
+def process_toc_pages(bucket, document_key, toc_pages, file_id, book_title):
+    logging.info(f"Starting Textract processing for document: {document_key}")
+    logging.info(f"TOC pages to process: {toc_pages}")
+    try:
+        # Download the PDF from S3
+        response = s3_client.get_object(Bucket=bucket, Key=document_key)
+        pdf_content = response['Body'].read()
+
+        # Create a temporary file to store the downloaded PDF
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_input_file:
+            temp_input_file.write(pdf_content)
+            temp_input_path = temp_input_file.name
+
+        # Parse the toc_pages string
+        start, end = map(int, toc_pages.split('-'))
+        page_to_extract = start  # Assuming we're only processing one page
+
+        # Create a temporary file for the output
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_output_file:
+            temp_output_path = temp_output_file.name
+
+        # Extract and compress the page
+        with pikepdf.Pdf.open(temp_input_path) as pdf:
+            if page_to_extract < 1 or page_to_extract > len(pdf.pages):
+                logging.error(f"Invalid page number. PDF has {len(pdf.pages)} pages.")
+                return []
+
+            new_pdf = pikepdf.Pdf.new()
+            new_pdf.pages.append(pdf.pages[page_to_extract - 1])
+            new_pdf.save(temp_output_path, compress_streams=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
+
+        # Process the compressed PDF with Textract
+        with open(temp_output_path, 'rb') as file:
+            file_bytes = file.read()
+            logging.info(f"Compressed PDF size: {len(file_bytes)} bytes")
+            response = textract_client.analyze_document(
+                Document={'Bytes': file_bytes},
+                FeatureTypes=['FORMS']
+            )
+
+        # Extract chapters and sections
+        toc_structure = extract_chapters_from_textract(response, start)
+
+        # Save TOC to database
+        save_toc_to_database(file_id, toc_structure)
+
+        logging.info(f"TOC structure extracted and saved to database: {toc_structure}")
+        return toc_structure
+
+    except Exception as e:
+        logging.error(f"Error processing TOC pages with Textract: {str(e)}")
+        logging.error(f"Error type: {type(e).__name__}")
+        logging.error(f"Error args: {e.args}")
+        return []
+
+def extract_chapters_from_textract(textract_response, start_page):
+    chapters = []
+    current_chapter = None
+    
+    for block in textract_response['Blocks']:
+        if block['BlockType'] == 'LINE':
+            text = block['Text'].strip()
+            logging.debug(f"Processing line: {text}")
+            
+            if text.startswith('Chapter'):
+                logging.info(f"Found new chapter: {text}")
+                if current_chapter:
+                    chapters.append(current_chapter)
+                chapter_parts = text.split(':', 1)
+                current_chapter = {
+                    'number': chapter_parts[0].strip(),
+                    'title': chapter_parts[1].strip() if len(chapter_parts) > 1 else '',
+                    'sections': []
+                }
+            elif current_chapter and re.match(r'^\d+\.\d+', text):
+                logging.info(f"Found potential section: {text}")
+                section_parts = text.rsplit(' ', 1)
+                if len(section_parts) == 2 and section_parts[1].isdigit():
+                    section = {
+                        'title': section_parts[0].strip(),
+                        'page': int(section_parts[1])
+                    }
+                    current_chapter['sections'].append(section)
+                    logging.info(f"Added section: {section} to chapter {current_chapter['number']}")
+    
+    if current_chapter:
+        chapters.append(current_chapter)
+    
+    # Detailed logging of the final structure
+    logging.info("Final chapter structure:")
+    for chapter in chapters:
+        logging.info(f"Chapter {chapter['number']}: {chapter['title']}")
+        logging.info(f"  Sections: {chapter['sections']}")
+    
+    total_sections = sum(len(ch['sections']) for ch in chapters)
+    logging.info(f"Extracted {len(chapters)} chapters with a total of {total_sections} sections")
+    return chapters
+
+def get_text_from_block(textract_response, block):
+    if 'Text' in block:
+        return block['Text']
+    elif 'Relationships' in block:
+        child_blocks = [b for b in textract_response['Blocks'] if b['Id'] in block['Relationships'][0]['Ids']]
+        return ' '.join([get_text_from_block(textract_response, child) for child in child_blocks])
+    return ''
+
+@app.get("/user-books")
+async def get_user_books(current_user: str = Depends(get_current_user)):
+    S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
+    try:
+        # List objects in the user's metadata folder
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=f"metadata/{current_user}/"
+        )
+        
+        books = []
+        for obj in response.get('Contents', []):
+            metadata = json.loads(s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=obj['Key'])['Body'].read())
+            books.append({"title": metadata['title'], "s3_key": metadata['s3_key']})
+        
+        return books
+    except Exception as e:
+        logging.error(f"Failed to retrieve user books from S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve user books")
+
+@app.get("/download-book/{s3_key}")
+async def download_book(s3_key: str, current_user: str = Depends(get_current_user)):
+    S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
+    try:
+        # Verify that the book belongs to the current user
+        if not s3_key.startswith(f"user-uploads/{current_user}/"):
+            raise HTTPException(status_code=403, detail="You don't have permission to access this book")
+        
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        return StreamingResponse(
+            response['Body'].iter_chunks(),
+            media_type='application/pdf',
+            headers={"Content-Disposition": f"attachment; filename={s3_key.split('/')[-1]}"}
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(status_code=404, detail="Book not found")
+        logging.error(f"Failed to download PDF from S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to download PDF")
+
+# Keep the existing /upload endpoint for .tex files as it is
 @app.post("/upload")
 async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # Check if the file has a .tex extension
     if not file.filename.endswith('.tex'):
         raise HTTPException(status_code=400, detail="File format not supported. Please upload a TeX file.")
     
     content = await file.read()
-    
     # Debug: log file size
     logging.debug(f"Uploaded file: {file.filename}, size: {len(content)} bytes")
-
     # Detect file encoding using chardet
     result = chardet.detect(content)
     encoding = result['encoding']
-
     try:
         content_str = content.decode(encoding)
         # Debug: log successful decoding
@@ -327,19 +542,16 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
     except UnicodeDecodeError:
         logging.error("File encoding not supported.")
         raise HTTPException(status_code=400, detail="File encoding not supported.")
-
+    
     # Extract chapters and sections
     chapters = extract_chapters_and_sections_from_tex(content_str)
-
     # Save the textbook
     textbook = models.Textbook(title="Some Title", description="Description of the textbook")
     db.add(textbook)
     db.commit()
     db.refresh(textbook)
-
     # Debug: log chapters being saved
     logging.debug(f"Saving textbook with {len(chapters)} chapters.")
-
     for chapter_data in chapters:
         chapter = models.Chapter(title=chapter_data['title'], content=chapter_data['content'], textbook_id=textbook.id)
         db.add(chapter)
@@ -350,7 +562,6 @@ async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get
         for section_data in chapter_data['sections']:
             section = models.Section(title=section_data['title'], content=section_data['content'], chapter_id=chapter.id)
             db.add(section)
-
     db.commit()
     logging.debug("Textbook and chapters with sections uploaded successfully.")
     return {"message": "Textbook and chapters with sections uploaded successfully"}
@@ -584,49 +795,56 @@ async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
     }
 
 @app.get("/textbooks/{textbook_id}/structure/")
-async def get_textbook_structure(textbook_id: int, db: Session = Depends(get_db)):
-    textbook = db.query(models.Textbook).filter(models.Textbook.id == textbook_id).first()
-    
-    if not textbook:
-        raise HTTPException(status_code=404, detail="Textbook not found")
-    
-    chapters = db.query(models.Chapter).filter(models.Chapter.textbook_id == textbook_id).all()
-    
-    textbook_structure = []
-    
-    for chapter in chapters:
-        sections = db.query(models.Section).filter(models.Section.chapter_id == chapter.id).all()
-        section_data = [{"title": section.title, "id": section.id} for section in sections]
-        
-        chapter_data = {
-            "id": chapter.id,
-            "title": chapter.title,
-            "sections": section_data
+async def get_textbook_structure(textbook_id: str, current_user: str = Depends(get_current_user)):
+    S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
+    try:
+        # Fetch the textbook metadata from S3
+        metadata_key = f"metadata/{current_user}/{textbook_id}.json"
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=metadata_key)
+        textbook_metadata = json.loads(response['Body'].read().decode('utf-8'))
+
+        # Fetch the textbook content from S3
+        content_key = textbook_metadata['s3_key']
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=content_key)
+        textbook_content = response['Body'].read().decode('utf-8')
+
+        # Parse the content to extract chapters and sections
+        # This is a placeholder - you'll need to implement the actual parsing logic
+        chapters = parse_textbook_content(textbook_content)
+
+        return {
+            "id": textbook_id,
+            "title": textbook_metadata['title'],
+            "chapters": chapters
         }
-        textbook_structure.append(chapter_data)
-    
-    return {
-        "textbook_title": textbook.title,
-        "chapters": textbook_structure
-    }
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(status_code=404, detail="Textbook not found")
+        logging.error(f"Error fetching textbook structure from S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch textbook structure")
 
-@app.get("/check-chapters")
-async def check_chapters(db: Session = Depends(get_db)):
-    chapters = db.query(models.Chapter).all()
-    return {"total_chapters": len(chapters), "chapters": [{"id": c.id, "title": c.title} for c in chapters]}
-
-@app.get("/sections/{section_id}")
-async def get_section(section_id: int, db: Session = Depends(get_db)):
-    section = db.query(models.Section).filter(models.Section.id == section_id).first()
-    if not section:
-        raise HTTPException(status_code=404, detail="Section not found")
-
-    return {
-        "id": section.id,
-        "title": section.title,
-        "content": section.content,
-        "chapter_id": section.chapter_id
-    }
+def parse_textbook_content(content):
+    # Implement your logic to parse the textbook content and extract chapters/sections
+    # This is just a placeholder implementation
+    chapters = [
+        {
+            "id": 1,
+            "title": "Chapter 1",
+            "sections": [
+                {"id": 1, "title": "Section 1.1"},
+                {"id": 2, "title": "Section 1.2"},
+            ]
+        },
+        {
+            "id": 2,
+            "title": "Chapter 2",
+            "sections": [
+                {"id": 3, "title": "Section 2.1"},
+                {"id": 4, "title": "Section 2.2"},
+            ]
+        }
+    ]
+    return chapters
 
 class GameIdeaRequest(BaseModel):
     game_idea: str
@@ -1063,3 +1281,145 @@ async def generate_diagrams(prompt: str, db: Session, max_attempts=1, max_tokens
     diagrams = re.findall(r'```mermaid\n(.*?)```', full_response, re.DOTALL)
     
     return diagrams
+
+def get_db_connection():
+    try:
+        conn = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            port=int(os.getenv('DB_PORT', '3306')),
+            database=os.getenv('DB_NAME')
+        )
+        logging.info("Successfully connected to the database")
+        return conn
+    except mysql.connector.Error as e:
+        logging.error(f"Error connecting to the database: {e}")
+        raise
+
+def save_toc_to_database(book_id, toc_structure):
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        for chapter in toc_structure:
+            # Insert chapter
+            cursor.execute("""
+                INSERT INTO chapters (book_id, number, title)
+                VALUES (%s, %s, %s)
+            """, (book_id, chapter['number'], chapter['title']))
+            chapter_id = cursor.lastrowid
+
+            # Insert sections
+            for section in chapter.get('sections', []):
+                cursor.execute("""
+                    INSERT INTO sections (chapter_id, title, page_number)
+                    VALUES (%s, %s, %s)
+                """, (chapter_id, section['title'], section.get('page_number', 0)))
+
+        connection.commit()
+    except mysql.connector.Error as e:
+        logging.error(f"Error saving TOC structure to database: {str(e)}")
+        connection.rollback()
+    finally:
+        cursor.close()
+        connection.close()
+
+def get_toc_from_database(file_id):
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        # Get book information
+        cursor.execute("SELECT * FROM books WHERE id = %s", (file_id,))
+        book = cursor.fetchone()
+
+        if not book:
+            return None
+
+        # Get chapters
+        cursor.execute("SELECT * FROM chapters WHERE book_id = %s ORDER BY id", (file_id,))
+        chapters = cursor.fetchall()
+
+        # Get sections for each chapter
+        for chapter in chapters:
+            cursor.execute("SELECT * FROM sections WHERE chapter_id = %s ORDER BY id", (chapter['id'],))
+            chapter['sections'] = cursor.fetchall()
+
+        # Return the complete structure including sections
+        return {"book": book, "chapters": chapters}
+    except mysql.connector.Error as e:
+        logging.error(f"Error retrieving TOC structure from database: {str(e)}")
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+@app.get("/get-toc/{file_id}")
+async def get_toc(file_id: str):
+    toc_structure = get_toc_from_database(file_id)
+    if toc_structure is None:
+        raise HTTPException(status_code=404, detail="TOC not found for the given file ID")
+    return toc_structure
+
+def initialize_database():
+    try:
+        # First, connect without specifying a database
+        conn = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            port=int(os.getenv('DB_PORT', '3306'))
+        )
+        cursor = conn.cursor()
+
+        # Create the database if it doesn't exist
+        db_name = os.getenv('DB_NAME')
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
+        cursor.execute(f"USE {db_name}")
+
+        # Create books table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS books (
+            id VARCHAR(36) PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            s3_key VARCHAR(255) NOT NULL
+        )
+        """)
+
+        # Create chapters table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chapters (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            book_id VARCHAR(36),
+            number VARCHAR(50) NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            FOREIGN KEY (book_id) REFERENCES books(id)
+        )
+        """)
+
+        # Create sections table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sections (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            chapter_id INT,
+            title VARCHAR(255) NOT NULL,
+            page_number INT NOT NULL,
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        )
+        """)
+
+        conn.commit()
+        logging.info("Database and tables created successfully")
+    except mysql.connector.Error as e:
+        logging.error(f"Error initializing database: {str(e)}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.on_event("startup")
+async def startup_event():
+    initialize_database()
