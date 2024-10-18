@@ -41,7 +41,7 @@ function UploadTextbook() {
                 }
             });
             console.log('File uploaded successfully:', response.data);
-            navigate('/study');
+            navigate('/select-textbook');
         } catch (error) {
             console.error('Error uploading file:', error);
             if (error.response && error.response.status === 401) {

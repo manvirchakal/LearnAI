@@ -3,8 +3,6 @@ import os
 import re
 import logging 
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter, Form
-from sqlalchemy.orm import Session
-from server.database import SessionLocal, engine, Base
 import threading
 from fastapi.responses import StreamingResponse
 import json
@@ -19,7 +17,6 @@ from botocore.exceptions import ClientError, BotoCoreError
 from pydantic import BaseModel
 import textwrap
 from functools import lru_cache
-from sqlalchemy.exc import IntegrityError
 import boto3
 from fastapi import UploadFile, File, Depends, HTTPException, status, Body
 from contextlib import closing
@@ -90,9 +87,6 @@ s3_client = boto3.client('s3',
 # Initialize AWS Textract client
 textract_client = boto3.client('textract')  # Add this line
 
-# Create all tables in the database
-Base.metadata.create_all(bind=engine)
-
 # Initialize logging
 logging.basicConfig(level=logging.DEBUG)
 
@@ -115,14 +109,6 @@ app.add_middleware(
 )
 
 app.include_router(router)
-
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # Configure the OAuth2 scheme
 oauth2_scheme = OAuth2AuthorizationCodeBearer(
@@ -264,47 +250,6 @@ Please provide a comprehensive description of the user's learning style, highlig
     except Exception as e:
         logging.error(f"Error generating learning profile description: {str(e)}")
         return "Error generating learning profile description"
-    
-
-def extract_chapters_and_sections_from_tex(tex_content: str):
-    # Updated Chapter pattern with more flexibility
-    chapter_pattern = re.compile(r'\\Chapter(\[.*?\])?\s*\n*\{([IVXLCDM]+)\}\s*\{(.+?)\}\n*', re.MULTILINE)
-
-    # Section pattern remains the same but with added flexibility for spacing
-    section_pattern = re.compile(r'\\Section(\[.*?\])?\s*\{(.+?)\}', re.MULTILINE)
-
-    # Debug: log content length and first 500 chars to ensure content is being processed
-    logging.debug(f"Processing TeX content of length {len(tex_content)}. First 500 chars:\n{tex_content[:500]}")
-    
-    # Split chapters
-    chapters = re.split(chapter_pattern, tex_content)
-    
-    result = []
-    
-    logging.debug(f"Number of chapters found: {len(chapters)//3}")
-    
-    for i in range(1, len(chapters), 4):
-        title = chapters[i + 2].strip()  # Chapter title
-        content = chapters[i + 3].strip()  # Chapter content
-        
-        logging.debug(f"Processing Chapter: {title}. Content length: {len(content)}")
-
-        # Find sections within each chapter
-        sections = re.split(section_pattern, content)
-        chapter_data = {"title": title, "content": sections[0].strip(), "sections": []}
-
-        logging.debug(f"Number of sections found: {len(sections)//3}")
-
-        for j in range(1, len(sections), 3):
-            section_title = sections[j + 1].strip()  # Section title
-            section_content = sections[j + 2].strip()  # Section content
-            chapter_data["sections"].append({"title": section_title, "content": section_content})
-            
-            logging.debug(f"Added Section: {section_title}. Content length: {len(section_content)}")
-
-        result.append(chapter_data)
-
-    return result
 
 # Add this function to upload files to S3
 def upload_file_to_s3(file_name, bucket, object_name=None):
@@ -421,7 +366,7 @@ def process_toc_pages(bucket, document_key, toc_pages, file_id, book_title):
         toc_structure = extract_chapters_from_textract(response, start)
 
         # Save TOC to database
-        save_toc_to_database(file_id, toc_structure)
+        update_s3_metadata(file_id, toc_structure)
 
         logging.info(f"TOC structure extracted and saved to database: {toc_structure}")
         return toc_structure
@@ -431,10 +376,34 @@ def process_toc_pages(bucket, document_key, toc_pages, file_id, book_title):
         logging.error(f"Error type: {type(e).__name__}")
         logging.error(f"Error args: {e.args}")
         return []
+    
+def update_s3_metadata(file_id, toc_structure):
+    try:
+        # Construct the S3 key for the metadata file
+        metadata_key = f"metadata/{file_id}.json"
+
+        # Create the metadata JSON
+        metadata = {
+            "toc_structure": toc_structure
+        }
+
+        # Upload the metadata to S3
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=metadata_key,
+            Body=json.dumps(metadata),
+            ContentType='application/json'
+        )
+
+        logging.info(f"Metadata saved to S3: {metadata_key}")
+    except Exception as e:
+        logging.error(f"Error updating S3 metadata: {str(e)}")
+        raise
 
 def extract_chapters_from_textract(textract_response, start_page):
     chapters = []
     current_chapter = None
+    current_section = None
     
     for block in textract_response['Blocks']:
         if block['BlockType'] == 'LINE':
@@ -453,14 +422,17 @@ def extract_chapters_from_textract(textract_response, start_page):
                 }
             elif current_chapter and re.match(r'^\d+\.\d+', text):
                 logging.info(f"Found potential section: {text}")
-                section_parts = text.rsplit(' ', 1)
-                if len(section_parts) == 2 and section_parts[1].isdigit():
-                    section = {
-                        'title': section_parts[0].strip(),
-                        'page': int(section_parts[1])
-                    }
-                    current_chapter['sections'].append(section)
-                    logging.info(f"Added section: {section} to chapter {current_chapter['number']}")
+                current_section = {
+                    'title': text,
+                    'page': None
+                }
+            elif current_section and text.isdigit():
+                current_section['page'] = int(text)
+                logging.debug(f"Created section: {current_section}")
+                if current_section['title'] and current_section['page']:
+                    current_chapter['sections'].append(current_section)
+                    logging.info(f"Added section: {current_section} to chapter {current_chapter['number']}")
+                current_section = None
     
     if current_chapter:
         chapters.append(current_chapter)
@@ -523,118 +495,8 @@ async def download_book(s3_key: str, current_user: str = Depends(get_current_use
         logging.error(f"Failed to download PDF from S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to download PDF")
 
-# Keep the existing /upload endpoint for .tex files as it is
-@app.post("/upload")
-async def upload_texbook(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename.endswith('.tex'):
-        raise HTTPException(status_code=400, detail="File format not supported. Please upload a TeX file.")
-    
-    content = await file.read()
-    # Debug: log file size
-    logging.debug(f"Uploaded file: {file.filename}, size: {len(content)} bytes")
-    # Detect file encoding using chardet
-    result = chardet.detect(content)
-    encoding = result['encoding']
-    try:
-        content_str = content.decode(encoding)
-        # Debug: log successful decoding
-        logging.debug(f"File decoded successfully using {encoding} encoding.")
-    except UnicodeDecodeError:
-        logging.error("File encoding not supported.")
-        raise HTTPException(status_code=400, detail="File encoding not supported.")
-    
-    # Extract chapters and sections
-    chapters = extract_chapters_and_sections_from_tex(content_str)
-    # Save the textbook
-    textbook = models.Textbook(title="Some Title", description="Description of the textbook")
-    db.add(textbook)
-    db.commit()
-    db.refresh(textbook)
-    # Debug: log chapters being saved
-    logging.debug(f"Saving textbook with {len(chapters)} chapters.")
-    for chapter_data in chapters:
-        chapter = models.Chapter(title=chapter_data['title'], content=chapter_data['content'], textbook_id=textbook.id)
-        db.add(chapter)
-        db.commit()
-        db.refresh(chapter)
-
-        # Save sections for each chapter
-        for section_data in chapter_data['sections']:
-            section = models.Section(title=section_data['title'], content=section_data['content'], chapter_id=chapter.id)
-            db.add(section)
-    db.commit()
-    logging.debug("Textbook and chapters with sections uploaded successfully.")
-    return {"message": "Textbook and chapters with sections uploaded successfully"}
-
-def remove_latex_commands(text: str) -> str:
-    """
-    Prepare LaTeX commands for rendering in the browser.
-    """
-    # Replace display math environments
-    text = re.sub(r'\\begin\{equation\}(.*?)\\end\{equation\}', r'$$\1$$', text, flags=re.DOTALL)
-    text = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
-    
-    # Replace inline math environments
-    text = re.sub(r'\\\((.*?)\\\)', r'$\1$', text)
-    text = re.sub(r'\$\$(.*?)\$\$', r'$$\1$$', text)
-    
-    # Replace \efrac with \frac
-    text = re.sub(r'\\efrac', r'\\frac', text)
-    
-    # Replace \DPtypo{wrong}{right} with right
-    text = re.sub(r'\\DPtypo\{.*?\}\{(.*?)\}', r'\1', text)
-    
-    # Remove other LaTeX commands that MathJax doesn't need
-    text = re.sub(r'\\(chapter|section|subsection|paragraph)\*?(\[.*?\])?\{(.*?)\}', r'\3', text)
-    
-    # Replace \Pagelabel, \DPPageSep, etc. with nothing
-    text = re.sub(r'\\(Pagelabel|DPPageSep|Pageref|BindMath)(\{.*?\})+', '', text)
-    
-    # Replace \emph{text} with *text*
-    text = re.sub(r'\\emph\{(.*?)\}', r'*\1*', text)
-    
-    return text.strip()
-
-def generate_narrative(prompt: str, db: Session, max_attempts=1, max_tokens=8192):
-    full_response = ""
-    for i in range(max_attempts):
-        try:
-            native_request = {
-                'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': max_tokens,
-                'temperature': 0.7,
-                'top_p': 0.9,
-                'messages': [
-                    {
-                        'role': 'user',
-                        'content': [{'type': 'text', 'text': prompt}],
-                    }
-                ],
-            }
-
-            request = json.dumps(native_request)
-
-            response = bedrock.invoke_model_with_response_stream(
-                modelId="anthropic.claude-3-haiku-20240307-v1:0",
-                body=request
-            )
-
-            for event in response['body']:
-                chunk = json.loads(event['chunk']['bytes'])
-                if chunk['type'] == 'content_block_delta':
-                    full_response += chunk['delta'].get('text', '')
-
-            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
-                break
-
-        except ClientError as e:
-            logging.error(f"Error calling Bedrock: {e}")
-            return f"Error: {str(e)}"
-
-    return full_response.strip()
-
-def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, max_tokens=4096):
-    cleaned_text = remove_latex_commands(text)
+def generate_game_idea(text: str, chapter_id: int, max_attempts=1, max_tokens=4096):
+    cleaned_text = text
 
     prompt = f"""Based on the following chapter content, suggest a simple interactive game idea that reinforces the key concepts. The game should:
     1. Be implementable in JavaScript
@@ -686,14 +548,6 @@ def generate_game_idea(text: str, chapter_id: int, db: Session, max_attempts=1, 
             logging.error(f"Error calling Bedrock: {e}")
             return f"Error: {str(e)}"
 
-    # Delete existing narrative if it exists
-    db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).delete()
-
-    # Create new narrative
-    narrative_model = models.Narrative(chapter_id=chapter_id, content=full_response)
-    db.add(narrative_model)
-    db.commit()    
-
     return full_response
 
 def translate_text(text, target_language):
@@ -709,7 +563,7 @@ def translate_text(text, target_language):
         return None
 
 @app.post("/generate-narrative/{chapter_id}")
-async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Session = Depends(get_db)):
+async def generate_narrative_endpoint(chapter_id: int, request: Request):
     try:
         data = await request.json()
         chapter_content = data.get('chapter_content', '')
@@ -745,7 +599,7 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
         ensuring thorough coverage of all important aspects of the chapter content and related knowledge.
         """
 
-        narrative = generate_narrative(narrative_prompt, db)
+        narrative = generate_narrative(narrative_prompt)
         
         # Generate game idea and code
         game_prompt = f"Based on the following chapter content, create an educational game idea:\n\n{chapter_content}"
@@ -764,87 +618,6 @@ async def generate_narrative_endpoint(chapter_id: int, request: Request, db: Ses
     except Exception as e:
         logging.exception("Error in generate_narrative_endpoint")
         raise HTTPException(status_code=500, detail=str(e))
-
-# Endpoint to get all textbooks
-@app.get("/textbooks/")
-async def get_textbooks(db: Session = Depends(get_db)):
-    textbooks = db.query(models.Textbook).all()
-    return textbooks
-
-# Endpoint to get chapters of a specific textbook by textbook ID
-@app.get("/textbooks/{textbook_id}/chapters/")
-async def get_chapters(textbook_id: int, db: Session = Depends(get_db)):
-    chapters = db.query(models.Chapter).filter(models.Chapter.textbook_id == textbook_id).all()
-    
-    if not chapters:
-        raise HTTPException(status_code=404, detail="No chapters found for this textbook.")
-    
-    return chapters
-
-@app.get("/chapters/{chapter_id}")
-async def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-
-    return {
-        "id": chapter.id,
-        "title": chapter.title,
-        "content": chapter.content,
-        "sections": [{"id": section.id, "title": section.title} for section in chapter.sections]
-    }
-
-@app.get("/textbooks/{textbook_id}/structure/")
-async def get_textbook_structure(textbook_id: str, current_user: str = Depends(get_current_user)):
-    S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
-    try:
-        # Fetch the textbook metadata from S3
-        metadata_key = f"metadata/{current_user}/{textbook_id}.json"
-        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=metadata_key)
-        textbook_metadata = json.loads(response['Body'].read().decode('utf-8'))
-
-        # Fetch the textbook content from S3
-        content_key = textbook_metadata['s3_key']
-        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=content_key)
-        textbook_content = response['Body'].read().decode('utf-8')
-
-        # Parse the content to extract chapters and sections
-        # This is a placeholder - you'll need to implement the actual parsing logic
-        chapters = parse_textbook_content(textbook_content)
-
-        return {
-            "id": textbook_id,
-            "title": textbook_metadata['title'],
-            "chapters": chapters
-        }
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchKey':
-            raise HTTPException(status_code=404, detail="Textbook not found")
-        logging.error(f"Error fetching textbook structure from S3: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch textbook structure")
-
-def parse_textbook_content(content):
-    # Implement your logic to parse the textbook content and extract chapters/sections
-    # This is just a placeholder implementation
-    chapters = [
-        {
-            "id": 1,
-            "title": "Chapter 1",
-            "sections": [
-                {"id": 1, "title": "Section 1.1"},
-                {"id": 2, "title": "Section 1.2"},
-            ]
-        },
-        {
-            "id": 2,
-            "title": "Chapter 2",
-            "sections": [
-                {"id": 3, "title": "Section 2.1"},
-                {"id": 4, "title": "Section 2.2"},
-            ]
-        }
-    ]
-    return chapters
 
 class GameIdeaRequest(BaseModel):
     game_idea: str
@@ -998,14 +771,8 @@ def post_process_game_code(code):
     
     return code.strip()
 
-def get_stored_narrative(chapter_id: int, db: Session):
-    narrative = db.query(models.Narrative).filter(models.Narrative.chapter_id == chapter_id).first()
-    if narrative:
-        return narrative.content
-    return None
-
 @app.post("/api/chat")
-async def chat(request: Request, db: Session = Depends(get_db)):
+async def chat(request: Request):
     try:
         data = await request.json()
         user_message = data.get('message')
@@ -1047,6 +814,7 @@ async def chat(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         logging.exception("Error in chat endpoint")
         raise HTTPException(status_code=500, detail=str(e))    
+    
 def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 500, max_history_tokens: int = 1000) -> str:
     full_response = ""
     
@@ -1189,14 +957,14 @@ async def translate_text_endpoint(request: Request):
     return {"translated_text": translated_text}
 
 @app.post("/generate-diagrams")
-async def generate_diagrams_endpoint(request: Request, db: Session = Depends(get_db)):
+async def generate_diagrams_endpoint(request: Request):
     data = await request.json()
     chapter_content = data.get('chapter_content', '')
     generated_summary = data.get('generated_summary', '')
     
     try:
-        cleaned_chapter_content = remove_latex_commands(chapter_content)
-        cleaned_summary = remove_latex_commands(generated_summary)
+        cleaned_chapter_content = chapter_content
+        cleaned_summary = generated_summary
         
         prompt = f"""Based on the following chapter content and generated summary, create Mermaid.js diagram descriptions that illustrate the key concepts visually. For each main concept:
 
@@ -1241,7 +1009,7 @@ async def generate_diagrams_endpoint(request: Request, db: Session = Depends(get
         logging.exception("Error in generate_diagrams_endpoint")
         raise HTTPException(status_code=500, detail=str(e))
     
-async def generate_diagrams(prompt: str, db: Session, max_attempts=1, max_tokens=4096):
+async def generate_diagrams(prompt: str, max_attempts=1, max_tokens=4096):
     full_response = ""
     for i in range(max_attempts):
         try:
@@ -1282,144 +1050,26 @@ async def generate_diagrams(prompt: str, db: Session, max_attempts=1, max_tokens
     
     return diagrams
 
-def get_db_connection():
+@app.get("api/user-textbooks")
+async def get_user_textbooks(current_user: str = Depends(get_current_user)):
     try:
-        conn = mysql.connector.connect(
-            host=os.getenv('DB_HOST'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            port=int(os.getenv('DB_PORT', '3306')),
-            database=os.getenv('DB_NAME')
+        # List objects in the user's metadata folder
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=f"metadata/{current_user}/"
         )
-        logging.info("Successfully connected to the database")
-        return conn
-    except mysql.connector.Error as e:
-        logging.error(f"Error connecting to the database: {e}")
-        raise
-
-def save_toc_to_database(book_id, toc_structure):
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-
-        for chapter in toc_structure:
-            # Insert chapter
-            cursor.execute("""
-                INSERT INTO chapters (book_id, number, title)
-                VALUES (%s, %s, %s)
-            """, (book_id, chapter['number'], chapter['title']))
-            chapter_id = cursor.lastrowid
-
-            # Insert sections
-            for section in chapter.get('sections', []):
-                cursor.execute("""
-                    INSERT INTO sections (chapter_id, title, page_number)
-                    VALUES (%s, %s, %s)
-                """, (chapter_id, section['title'], section.get('page_number', 0)))
-
-        connection.commit()
-    except mysql.connector.Error as e:
-        logging.error(f"Error saving TOC structure to database: {str(e)}")
-        connection.rollback()
-    finally:
-        cursor.close()
-        connection.close()
-
-def get_toc_from_database(file_id):
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        # Get book information
-        cursor.execute("SELECT * FROM books WHERE id = %s", (file_id,))
-        book = cursor.fetchone()
-
-        if not book:
-            return None
-
-        # Get chapters
-        cursor.execute("SELECT * FROM chapters WHERE book_id = %s ORDER BY id", (file_id,))
-        chapters = cursor.fetchall()
-
-        # Get sections for each chapter
-        for chapter in chapters:
-            cursor.execute("SELECT * FROM sections WHERE chapter_id = %s ORDER BY id", (chapter['id'],))
-            chapter['sections'] = cursor.fetchall()
-
-        # Return the complete structure including sections
-        return {"book": book, "chapters": chapters}
-    except mysql.connector.Error as e:
-        logging.error(f"Error retrieving TOC structure from database: {str(e)}")
-        raise
-    finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
-
-@app.get("/get-toc/{file_id}")
-async def get_toc(file_id: str):
-    toc_structure = get_toc_from_database(file_id)
-    if toc_structure is None:
-        raise HTTPException(status_code=404, detail="TOC not found for the given file ID")
-    return toc_structure
-
-def initialize_database():
-    try:
-        # First, connect without specifying a database
-        conn = mysql.connector.connect(
-            host=os.getenv('DB_HOST'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            port=int(os.getenv('DB_PORT', '3306'))
-        )
-        cursor = conn.cursor()
-
-        # Create the database if it doesn't exist
-        db_name = os.getenv('DB_NAME')
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
-        cursor.execute(f"USE {db_name}")
-
-        # Create books table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS books (
-            id VARCHAR(36) PRIMARY KEY,
-            title VARCHAR(255) NOT NULL,
-            s3_key VARCHAR(255) NOT NULL
-        )
-        """)
-
-        # Create chapters table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chapters (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            book_id VARCHAR(36),
-            number VARCHAR(50) NOT NULL,
-            title VARCHAR(255) NOT NULL,
-            FOREIGN KEY (book_id) REFERENCES books(id)
-        )
-        """)
-
-        # Create sections table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sections (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            chapter_id INT,
-            title VARCHAR(255) NOT NULL,
-            page_number INT NOT NULL,
-            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
-        )
-        """)
-
-        conn.commit()
-        logging.info("Database and tables created successfully")
-    except mysql.connector.Error as e:
-        logging.error(f"Error initializing database: {str(e)}")
-        raise
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.on_event("startup")
-async def startup_event():
-    initialize_database()
+        
+        textbooks = []
+        for obj in response.get('Contents', []):
+            metadata = json.loads(s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=obj['Key'])['Body'].read())
+            if metadata.get('document_type') == 'textbook':
+                textbooks.append({
+                    "title": metadata['title'],
+                    "s3_key": metadata['s3_key'],
+                    "upload_date": obj['LastModified'].strftime("%Y-%m-%d %H:%M:%S")
+                })
+        
+        return textbooks
+    except Exception as e:
+        logging.error(f"Failed to retrieve user textbooks from S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve user textbooks")

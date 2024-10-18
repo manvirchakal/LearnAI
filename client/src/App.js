@@ -6,6 +6,7 @@ import Home from './pages/Home';
 import Study from './pages/Study';
 import Questionnaire from './pages/Questionnaire';
 import Upload from './pages/Upload';
+import SelectTextbook from './pages/SelectTextbook';
 import { RequireAuth } from './components/Auth';
 import './latex-styles.css';
 import { MathJaxContext } from 'better-react-mathjax';
@@ -42,6 +43,7 @@ function App() {
             <Route path="/study" element={<RequireAuth><Study /></RequireAuth>} />
             <Route path="/questionnaire" element={<RequireAuth><Questionnaire /></RequireAuth>} />
             <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
+            <Route path="/select-textbook" element={<RequireAuth><SelectTextbook /></RequireAuth>} />
           </Routes>
         </Router>
       </Authenticator.Provider>

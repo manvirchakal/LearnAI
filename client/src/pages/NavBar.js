@@ -1,8 +1,7 @@
-// src/pages/NavBar.js
 import React from 'react';
 import { Link } from 'react-router-dom';
 import './NavBar.css';
-import { FaFileUpload } from 'react-icons/fa'; // Import the upload icon from Font Awesome
+import { FaFileUpload, FaBook } from 'react-icons/fa'; // Import FaBook icon
 import logo from '../static/logo.png'; // Adjust the path to your actual logo file
 
 const NavBar = () => {
@@ -20,6 +19,11 @@ const NavBar = () => {
           <li>
             <Link to="/upload">
               Textbook upload <FaFileUpload style={{ marginLeft: '5px' }} />
+            </Link>
+          </li>
+          <li>
+            <Link to="/select-textbook">
+              Textbooks <FaBook style={{ marginLeft: '5px' }} />
             </Link>
           </li>
           <li><Link to="/questionnaire">Questionnaire</Link></li>
