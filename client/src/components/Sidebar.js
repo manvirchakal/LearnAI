@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
-import { Drawer, List, ListItem, ListItemText, IconButton, Divider, Collapse, Box, Typography } from '@mui/material';
-import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as LogoutIcon, ExpandLess, ExpandMore } from '@mui/icons-material';
-import MenuIcon from '@mui/icons-material/Menu';
+import { Drawer, List, ListItem, ListItemIcon, ListItemText, IconButton, Box, Collapse } from '@mui/material';
+import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as LogoutIcon, ExpandLess, ExpandMore, Menu as MenuIcon } from '@mui/icons-material';
 import { Auth } from 'aws-amplify';
 import { useNavigate } from 'react-router-dom';
 import logo from '../static/logo.png';
 
-const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStructure, bookTitle, file_id, filename, userId }) => {
+const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStructure, bookTitle, currentSection }) => {
   const [expandedChapter, setExpandedChapter] = useState(null);
   const navigate = useNavigate();
+  const collapsedWidth = 60; // Width of the collapsed sidebar
 
   const toggleDrawer = () => {
     setOpen(!isOpen);
@@ -36,49 +36,63 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
     <Drawer
       variant="permanent"
       sx={{
-        width: isOpen ? 240 : 60,
+        width: isOpen ? 240 : collapsedWidth,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
-          width: isOpen ? 240 : 60,
+          width: isOpen ? 240 : collapsedWidth,
           boxSizing: 'border-box',
           transition: 'width 0.3s ease',
           overflowX: 'hidden',
+          bgcolor: 'background.paper',
         },
       }}
       open={isOpen}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', padding: 2 }}>
-        {isOpen && <img src={logo} alt="Logo" style={{ width: 40, height: 40, marginRight: 10 }} />}
-        <IconButton onClick={toggleDrawer}>
+      <Box sx={{ display: 'flex', alignItems: 'center', padding: 2, bgcolor: 'background.paper' }}>
+        <IconButton onClick={toggleDrawer} sx={{ mr: 1 }}>
           <MenuIcon />
         </IconButton>
+        <img src={logo} alt="LearnAI Logo" style={{ height: '40px' }} />
       </Box>
-      <Divider />
       <List>
-        <ListItem button onClick={() => navigate('/')} sx={{ justifyContent: isOpen ? 'flex-start' : 'center' }}>
-          <HomeIcon />
-          {isOpen && <ListItemText primary="Home" sx={{ marginLeft: 2 }} />}
+        <ListItem button onClick={() => navigate('/')} sx={{ bgcolor: 'primary.main', color: 'white' }}>
+          <ListItemIcon sx={{ color: 'white', minWidth: collapsedWidth }}>
+            <HomeIcon />
+          </ListItemIcon>
+          {isOpen && <ListItemText primary="Home" />}
         </ListItem>
-        <ListItem button onClick={() => navigate('/select-textbook')} sx={{ justifyContent: isOpen ? 'flex-start' : 'center' }}>
-          <BookIcon />
-          {isOpen && <ListItemText primary={bookTitle} sx={{ marginLeft: 2 }} />}
+        <ListItem button onClick={() => navigate('/select-textbook')} sx={{ bgcolor: 'background.paper' }}>
+          <ListItemIcon sx={{ minWidth: collapsedWidth }}>
+            <BookIcon />
+          </ListItemIcon>
+          {isOpen && <ListItemText primary={bookTitle || "Book Name"} />}
         </ListItem>
       </List>
-      <Divider />
       <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
         <List>
           {bookStructure && bookStructure.chapters && bookStructure.chapters.map((chapter) => (
             <React.Fragment key={chapter.id}>
-              <ListItem button onClick={() => handleChapterClick(chapter.id)}>
+              <ListItem 
+                button 
+                onClick={() => handleChapterClick(chapter.id)} 
+                sx={{ 
+                  bgcolor: 'grey.100',
+                  pl: `${collapsedWidth}px`,
+                  display: isOpen ? 'flex' : 'none'
+                }}
+              >
                 <ListItemText primary={chapter.title} />
                 {expandedChapter === chapter.id ? <ExpandLess /> : <ExpandMore />}
               </ListItem>
-              <Collapse in={expandedChapter === chapter.id} timeout="auto" unmountOnExit>
+              <Collapse in={isOpen && expandedChapter === chapter.id} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                   {chapter.sections.map((section) => (
                     <ListItem 
                       button 
-                      sx={{ pl: 4 }} 
+                      sx={{ 
+                        pl: `${collapsedWidth + 16}px`,
+                        bgcolor: currentSection === section.id ? 'primary.light' : 'background.paper',
+                      }} 
                       key={section.id} 
                       onClick={() => handleSectionClick(section.id)}
                     >
@@ -91,15 +105,18 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
           ))}
         </List>
       </Box>
-      <Divider />
-      <List>
-        <ListItem button sx={{ justifyContent: isOpen ? 'flex-start' : 'center' }}>
-          <PersonIcon />
-          {isOpen && <ListItemText primary="Profile" sx={{ marginLeft: 2 }} />}
+      <List sx={{ bgcolor: 'primary.main', color: 'white' }}>
+        <ListItem button>
+          <ListItemIcon sx={{ color: 'white', minWidth: collapsedWidth }}>
+            <PersonIcon />
+          </ListItemIcon>
+          {isOpen && <ListItemText primary="Profile" />}
         </ListItem>
-        <ListItem button onClick={handleLogout} sx={{ justifyContent: isOpen ? 'flex-start' : 'center' }}>
-          <LogoutIcon />
-          {isOpen && <ListItemText primary="Logout" sx={{ marginLeft: 2 }} />}
+        <ListItem button onClick={handleLogout}>
+          <ListItemIcon sx={{ color: 'white', minWidth: collapsedWidth }}>
+            <LogoutIcon />
+          </ListItemIcon>
+          {isOpen && <ListItemText primary="Logout" />}
         </ListItem>
       </List>
     </Drawer>
