@@ -2,7 +2,7 @@ import chardet
 import os
 import re
 import logging 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter, Form
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter, Form, Path
 import threading
 from fastapi.responses import StreamingResponse
 import json
@@ -38,6 +38,8 @@ from PyPDF2 import PdfReader, PdfWriter
 import io
 import pikepdf
 import mysql.connector
+import PyPDF2
+import atexit
 
 MAX_RETRIES = 1
 
@@ -125,11 +127,13 @@ def get_jwks():
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
+        logging.debug(f"Received token: {token}")
         jwks = get_jwks()
         if not jwks:
             raise HTTPException(status_code=500, detail="Unable to fetch JWKS")
         
         headers = jwt.get_unverified_headers(token)
+        logging.debug(f"Token headers: {headers}")
         kid = headers["kid"]
         key_index = next((index for (index, key) in enumerate(jwks) if key["kid"] == kid), None)
         if key_index is None:
@@ -295,15 +299,17 @@ async def upload_pdf(
             "title": file.filename,
             "s3_key": s3_key,
             "user_id": current_user,
-            "document_type": documentType
+            "document_type": documentType,
+            "table_of_contents": []  # Initialize with an empty list
         }
         
         if documentType == 'textbook' and tocPages:
             logging.info(f"Processing textbook TOC pages: {tocPages}")
-            file_id = unique_filename.split('_')[0]  # Assuming the first part of unique_filename is the UUID
-            toc_structure = process_toc_pages(S3_BUCKET_NAME, s3_key, tocPages, file_id, file.filename)
-            metadata["toc_structure"] = toc_structure
-            logging.info(f"TOC structure extracted and saved to database: {toc_structure}")
+            file_id = unique_filename.split('_')[0]
+            start_page, end_page = map(int, tocPages.split('-'))
+            toc_structure = process_toc_pages(S3_BUCKET_NAME, s3_key, start_page, end_page, file_id, file.filename, current_user, unique_filename)
+            metadata["table_of_contents"] = toc_structure
+            logging.info(f"TOC structure extracted: {toc_structure}")
         
         # Save metadata in S3
         metadata_key = f"metadata/{current_user}/{unique_filename}.json"
@@ -322,53 +328,51 @@ async def upload_pdf(
         logging.error(f"Failed to upload PDF to S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to upload PDF")
 
-def process_toc_pages(bucket, document_key, toc_pages, file_id, book_title):
+def process_toc_pages(bucket, document_key, start_page, end_page, file_id, book_title, current_user, unique_filename):
     logging.info(f"Starting Textract processing for document: {document_key}")
-    logging.info(f"TOC pages to process: {toc_pages}")
+    logging.info(f"TOC pages to process: {start_page}-{end_page}")
+    
+    all_blocks = []
+    
     try:
         # Download the PDF from S3
         response = s3_client.get_object(Bucket=bucket, Key=document_key)
         pdf_content = response['Body'].read()
 
         # Create a temporary file to store the downloaded PDF
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_input_file:
-            temp_input_file.write(pdf_content)
-            temp_input_path = temp_input_file.name
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
+            temp_file.write(pdf_content)
+            temp_path = temp_file.name
 
-        # Parse the toc_pages string
-        start, end = map(int, toc_pages.split('-'))
-        page_to_extract = start  # Assuming we're only processing one page
+        # Process each page individually
+        for page_num in range(start_page, end_page + 1):
+            logging.info(f"Processing page {page_num}")
+            
+            # Extract and compress the single page
+            with pikepdf.Pdf.open(temp_path) as pdf:
+                new_pdf = pikepdf.Pdf.new()
+                new_pdf.pages.append(pdf.pages[page_num - 1])
+                
+                # Save the compressed page to a BytesIO object
+                output = io.BytesIO()
+                new_pdf.save(output, compress_streams=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
+                output.seek(0)
+                file_bytes = output.getvalue()
 
-        # Create a temporary file for the output
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_output_file:
-            temp_output_path = temp_output_file.name
-
-        # Extract and compress the page
-        with pikepdf.Pdf.open(temp_input_path) as pdf:
-            if page_to_extract < 1 or page_to_extract > len(pdf.pages):
-                logging.error(f"Invalid page number. PDF has {len(pdf.pages)} pages.")
-                return []
-
-            new_pdf = pikepdf.Pdf.new()
-            new_pdf.pages.append(pdf.pages[page_to_extract - 1])
-            new_pdf.save(temp_output_path, compress_streams=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
-
-        # Process the compressed PDF with Textract
-        with open(temp_output_path, 'rb') as file:
-            file_bytes = file.read()
-            logging.info(f"Compressed PDF size: {len(file_bytes)} bytes")
+            logging.info(f"Compressed PDF size for page {page_num}: {len(file_bytes)} bytes")
+            
+            # Process with Textract
             response = textract_client.analyze_document(
                 Document={'Bytes': file_bytes},
-                FeatureTypes=['FORMS']
+                FeatureTypes=['TABLES', 'FORMS']
             )
+            
+            all_blocks.extend(response['Blocks'])
 
-        # Extract chapters and sections
-        toc_structure = extract_chapters_from_textract(response, start)
+        # Extract chapters and sections with adjusted page numbers
+        toc_structure = extract_chapters_from_textract({'Blocks': all_blocks}, end_page + 1)
 
-        # Save TOC to database
-        update_s3_metadata(file_id, toc_structure)
-
-        logging.info(f"TOC structure extracted and saved to database: {toc_structure}")
+        logging.info(f"TOC structure extracted: {toc_structure}")
         return toc_structure
 
     except Exception as e:
@@ -376,31 +380,13 @@ def process_toc_pages(bucket, document_key, toc_pages, file_id, book_title):
         logging.error(f"Error type: {type(e).__name__}")
         logging.error(f"Error args: {e.args}")
         return []
-    
-def update_s3_metadata(file_id, toc_structure):
-    try:
-        # Construct the S3 key for the metadata file
-        metadata_key = f"metadata/{file_id}.json"
 
-        # Create the metadata JSON
-        metadata = {
-            "toc_structure": toc_structure
-        }
+    finally:
+        # Clean up the temporary file
+        if 'temp_path' in locals():
+            os.unlink(temp_path)
 
-        # Upload the metadata to S3
-        s3_client.put_object(
-            Bucket=S3_BUCKET_NAME,
-            Key=metadata_key,
-            Body=json.dumps(metadata),
-            ContentType='application/json'
-        )
-
-        logging.info(f"Metadata saved to S3: {metadata_key}")
-    except Exception as e:
-        logging.error(f"Error updating S3 metadata: {str(e)}")
-        raise
-
-def extract_chapters_from_textract(textract_response, start_page):
+def extract_chapters_from_textract(textract_response, content_start_page):
     chapters = []
     current_chapter = None
     current_section = None
@@ -427,7 +413,9 @@ def extract_chapters_from_textract(textract_response, start_page):
                     'page': None
                 }
             elif current_section and text.isdigit():
-                current_section['page'] = int(text)
+                # Adjust the page number by adding the content_start_page
+                adjusted_page = int(text) + content_start_page - 1
+                current_section['page'] = adjusted_page
                 logging.debug(f"Created section: {current_section}")
                 if current_section['title'] and current_section['page']:
                     current_chapter['sections'].append(current_section)
@@ -813,7 +801,7 @@ async def chat(request: Request):
 
     except Exception as e:
         logging.exception("Error in chat endpoint")
-        raise HTTPException(status_code=500, detail=str(e))    
+        raise HTTPException(status_code=500, detail=str(e))
     
 def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 500, max_history_tokens: int = 1000) -> str:
     full_response = ""
@@ -1050,7 +1038,7 @@ async def generate_diagrams(prompt: str, max_attempts=1, max_tokens=4096):
     
     return diagrams
 
-@app.get("api/user-textbooks")
+@app.get("/user-textbooks")
 async def get_user_textbooks(current_user: str = Depends(get_current_user)):
     try:
         # List objects in the user's metadata folder
@@ -1073,3 +1061,180 @@ async def get_user_textbooks(current_user: str = Depends(get_current_user)):
     except Exception as e:
         logging.error(f"Failed to retrieve user textbooks from S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve user textbooks")
+
+@app.get("/textbook-structure/{user_id}/{file_id}/{filename}")
+async def get_textbook_structure(
+    user_id: str = Path(...),
+    file_id: str = Path(...),
+    filename: str = Path(...),
+    current_user: str = Depends(get_current_user)
+):
+    if user_id != current_user:
+        raise HTTPException(status_code=403, detail="You don't have permission to access this file")
+
+    metadata_key = f"metadata/{user_id}/{file_id}_{filename}.json"
+    print(f"Constructed metadata key: {metadata_key}")
+
+    try:
+        # Fetch the metadata file from S3
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=metadata_key)
+        metadata = json.loads(response['Body'].read().decode('utf-8'))
+        print(f"Metadata content: {json.dumps(metadata, indent=2)}")
+        print(f"Successfully fetched metadata for key: {metadata_key}")
+
+        # Download and save the PDF
+        temp_path = download_and_save_pdf(user_id, file_id, filename)
+
+        # Extract the table of contents from the metadata
+        toc = metadata.get('table_of_contents', [])
+        print(f"Extracted table of contents: {toc}")
+
+        # Transform the table of contents into the required structure
+        book_structure = {
+            "chapters": []
+        }
+
+        for chapter in toc:
+            chapter_structure = {
+                "id": chapter['number'],
+                "title": f"{chapter['number']}: {chapter['title']}",
+                "sections": []
+            }
+            for section in chapter.get('sections', []):
+                chapter_structure['sections'].append({
+                    "id": section['title'].split()[0],
+                    "title": section['title']
+                })
+            book_structure['chapters'].append(chapter_structure)
+
+        print(f"Transformed book structure: {book_structure}")
+        return book_structure
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            print(f"Metadata file not found. Key: {metadata_key}")
+            raise HTTPException(status_code=404, detail="Textbook structure not found")
+        print(f"Error fetching metadata from S3: {str(e)}")
+        raise
+    except Exception as e:
+        print(f"Unexpected error in get_textbook_structure: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
+
+@app.get("/list-metadata/{user_id}")
+async def list_metadata(user_id: str, current_user: str = Depends(get_current_user)):
+    if user_id != current_user:
+        raise HTTPException(status_code=403, detail="You don't have permission to access this data")
+    
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=f"metadata/{user_id}/"
+        )
+        
+        files = [obj['Key'] for obj in response.get('Contents', [])]
+        return {"metadata_files": files}
+    except Exception as e:
+        logging.error(f"Error listing metadata files: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list metadata files")
+
+@app.get("/get-section-pdf/{user_id}/{file_id}/{filename}/{section_id}")
+async def get_section_pdf(user_id: str, file_id: str, filename: str, section_id: str, current_user: str = Depends(get_current_user)):
+    logging.info(f"Fetching section PDF for file_id: {file_id}, filename: {filename}, section_id: {section_id}")
+    
+    # Fetch metadata
+    metadata_key = f"metadata/{user_id}/{file_id}_{filename}.json"
+    logging.info(f"Constructed metadata key: {metadata_key}")
+    
+    try:
+        metadata_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=metadata_key)
+        metadata = json.loads(metadata_obj['Body'].read().decode('utf-8'))
+        logging.info("Successfully fetched metadata from S3")
+        logging.info(f"Metadata content: {json.dumps(metadata, indent=2)}")
+    except Exception as e:
+        logging.error(f"Error fetching metadata: {str(e)}")
+        raise HTTPException(status_code=404, detail="Metadata not found")
+
+    # Find the section in the table of contents
+    toc = metadata.get('table_of_contents', [])
+    section = None
+    next_section = None
+    for chapter in toc:
+        for i, s in enumerate(chapter['sections']):
+            if s['title'].startswith(section_id):
+                section = s
+                if i + 1 < len(chapter['sections']):
+                    next_section = chapter['sections'][i + 1]
+                break
+        if section:
+            break
+
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    logging.info(f"Found section: {json.dumps(section, indent=2)}")
+
+    # Determine the end page
+    if next_section:
+        end_page = next_section['page'] - 1
+    else:
+        # If it's the last section, use the start page of the next chapter or the end of the book
+        chapter_index = toc.index(chapter)
+        if chapter_index + 1 < len(toc):
+            end_page = toc[chapter_index + 1]['sections'][0]['page'] - 1
+        else:
+            # If it's the last chapter, you might want to set a maximum page number or use the total pages in the PDF
+            end_page = section['page'] + 50  # Arbitrary number, adjust as needed
+
+    logging.info(f"Extracting pages {section['page']} to {end_page}")
+
+    # Download the PDF from S3
+    s3_key = metadata['s3_key']
+    response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+    pdf_content = response['Body'].read()
+
+    # Extract the section pages
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
+    pdf_writer = PyPDF2.PdfWriter()
+
+    for page_num in range(section['page'] - 1, min(end_page, len(pdf_reader.pages))):
+        pdf_writer.add_page(pdf_reader.pages[page_num])
+
+    # Save the extracted pages to a new PDF
+    output_pdf = io.BytesIO()
+    pdf_writer.write(output_pdf)
+    output_pdf.seek(0)
+
+    logging.info("Successfully extracted and prepared PDF section")
+
+    return StreamingResponse(output_pdf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={section_id}.pdf"})
+
+# Global dictionary to store temporary file paths
+temp_pdfs = {}
+
+def download_and_save_pdf(user_id, file_id, filename):
+    s3_key = f"user-uploads/{user_id}/{file_id}_{filename}"
+    temp_dir = tempfile.gettempdir()
+    temp_path = os.path.join(temp_dir, f"{file_id}_{filename}")
+    
+    try:
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        with open(temp_path, 'wb') as f:
+            f.write(response['Body'].read())
+        temp_pdfs[f"{user_id}_{file_id}_{filename}"] = temp_path
+        logging.info(f"PDF downloaded and saved temporarily: {temp_path}")
+        return temp_path
+    except Exception as e:
+        logging.error(f"Error downloading PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to download PDF")
+
+# Function to clean up temporary files
+def cleanup_temp_files():
+    for temp_path in temp_pdfs.values():
+        try:
+            os.remove(temp_path)
+            logging.info(f"Temporary file removed: {temp_path}")
+        except Exception as e:
+            logging.error(f"Error removing temporary file {temp_path}: {str(e)}")
+
+# Register the cleanup function to run when the server shuts down
+atexit.register(cleanup_temp_files)

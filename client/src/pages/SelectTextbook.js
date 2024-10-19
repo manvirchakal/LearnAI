@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { Auth } from 'aws-amplify';
+import { Box, Typography, List, ListItem, ListItemText, Button, CircularProgress } from '@mui/material';
 
 const SelectTextbook = () => {
   const [textbooks, setTextbooks] = useState([]);
@@ -14,40 +16,87 @@ const SelectTextbook = () => {
 
   const fetchTextbooks = async () => {
     try {
-      const response = await axios.get('/api/user-textbooks');
+      const session = await Auth.currentSession();
+      const token = session.getIdToken().getJwtToken();
+      const response = await axios.get('/user-textbooks', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       setTextbooks(response.data);
       setLoading(false);
     } catch (err) {
+      console.error('Error fetching textbooks:', err);
       setError('Failed to fetch textbooks');
       setLoading(false);
     }
   };
 
-  const handleSelectTextbook = (s3Key) => {
-    // Navigate to the textbook viewer or set the selected textbook in state
-    navigate(`/textbook/${encodeURIComponent(s3Key)}`);
+  const handleSelectTextbook = async (s3Key, title) => {
+    try {
+      console.log("Selected textbook S3 key:", s3Key);
+      const session = await Auth.currentSession();
+      const token = session.getIdToken().getJwtToken();
+      const userId = session.getIdToken().payload.sub; // Get the user ID from the token
+
+      // Split the S3 key into its components
+      const [, , fileIdAndName] = s3Key.split('/');
+      const [fileId, ...fileNameParts] = fileIdAndName.split('_');
+      const fileName = fileNameParts.join('_');
+
+      const response = await axios.get(`/textbook-structure/${userId}/${fileId}/${encodeURIComponent(fileName)}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      console.log("Textbook structure:", response.data);
+      
+      navigate('/study', { 
+        state: { 
+          bookStructure: response.data,
+          s3Key: s3Key,
+          title: title,
+          file_id: fileId,
+          filename: fileName,
+          userId: userId
+        } 
+      });
+    } catch (error) {
+      console.error("Error fetching textbook structure:", error);
+      // Handle the error appropriately
+    }
   };
 
-  if (loading) return <div>Loading textbooks...</div>;
-  if (error) return <div>{error}</div>;
+  if (loading) return <CircularProgress />;
+  if (error) return <Typography color="error">{error}</Typography>;
 
   return (
-    <div className="select-textbook">
-      <h2>Select a Textbook</h2>
+    <Box sx={{ maxWidth: 600, margin: 'auto', mt: 4 }}>
+      <Typography variant="h4" gutterBottom>Select a Textbook</Typography>
       {textbooks.length === 0 ? (
-        <p>No textbooks found. Please upload a textbook first.</p>
+        <Typography>No textbooks found. Please upload a textbook first.</Typography>
       ) : (
-        <ul>
+        <List>
           {textbooks.map((textbook, index) => (
-            <li key={index} onClick={() => handleSelectTextbook(textbook.s3_key)}>
-              <h3>{textbook.title}</h3>
-              <p>Uploaded on: {textbook.upload_date}</p>
-            </li>
+            <ListItem 
+              key={index} 
+              button 
+              onClick={() => handleSelectTextbook(textbook.s3_key, textbook.title)}
+              sx={{ border: '1px solid #ddd', borderRadius: 1, mb: 1 }}
+            >
+              <ListItemText 
+                primary={textbook.title} 
+                secondary={`Uploaded on: ${textbook.upload_date}`} 
+              />
+            </ListItem>
           ))}
-        </ul>
+        </List>
       )}
-      <button onClick={() => navigate('/upload')}>Upload New Textbook</button>
-    </div>
+      <Button variant="contained" onClick={() => navigate('/upload')} sx={{ mt: 2 }}>
+        Upload New Textbook
+      </Button>
+    </Box>
   );
 };
 

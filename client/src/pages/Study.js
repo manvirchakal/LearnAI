@@ -17,6 +17,8 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import StopIcon from '@mui/icons-material/Stop';
 import Webcam from 'react-webcam';
 import MermaidDiagram from '../components/MermaidDiagram';
+import { useLocation } from 'react-router-dom';
+import { Auth } from 'aws-amplify';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -86,6 +88,11 @@ const formatSummary = (content) => {
 };
 
 const Study = () => {
+  const location = useLocation();
+  const { bookStructure, s3Key, title, file_id, filename, userId } = location.state || {};
+
+  console.log("Study component state:", { bookStructure, s3Key, title, file_id, filename, userId });
+
   const [chapter, setChapter] = useState(null);
   const [section, setSection] = useState(null);
   const [message, setMessage] = useState('');
@@ -109,6 +116,8 @@ const Study = () => {
   const [emotion, setEmotion] = useState(null);
   const [webcamExpanded, setWebcamExpanded] = useState(false);
   const webcamRef = useRef(null);
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [numPages, setNumPages] = useState(null);
 
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
@@ -230,8 +239,28 @@ const Study = () => {
   };
 
   // Handle section selection from the sidebar
-  const handleSectionSelect = (sectionId) => {
-    fetchSection(sectionId);
+  const handleSectionSelect = async (sectionId) => {
+    try {
+      if (!file_id || !filename || !userId) {
+        console.error('File ID, filename, or user ID is not available');
+        return;
+      }
+      const token = await Auth.currentSession().then(session => session.getIdToken().getJwtToken());
+      const response = await axios.get(`/get-section-pdf/${userId}/${file_id}/${encodeURIComponent(filename)}/${encodeURIComponent(sectionId)}`, {
+        responseType: 'blob',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const pdfBlob = new Blob([response.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(pdfBlob);
+      setPdfUrl(url);
+      setSection({ id: sectionId });
+      // You might want to call fetchSection here as well
+      fetchSection(sectionId);
+    } catch (error) {
+      console.error('Error fetching section PDF:', error);
+    }
   };
 
   // Modify handleSendMessage to include chapter content in the chat request
@@ -435,10 +464,46 @@ const Study = () => {
     setWebcamExpanded(!webcamExpanded);
   };
 
+  useEffect(() => {
+    if (bookStructure && bookStructure.chapters) {
+      console.log("Book structure received:", bookStructure);
+      // Set initial chapter and section if available
+      if (bookStructure.chapters.length > 0) {
+        setChapter(bookStructure.chapters[0]);
+        if (bookStructure.chapters[0].sections && bookStructure.chapters[0].sections.length > 0) {
+          setSection(bookStructure.chapters[0].sections[0]);
+        }
+      }
+    } else {
+      console.log("No book structure or chapters available");
+    }
+  }, [bookStructure]);
+
+  const onDocumentLoadSuccess = ({ numPages }) => {
+    setNumPages(numPages);
+  };
+
+  useEffect(() => {
+    console.log("file_id in useEffect:", file_id);
+    if (!file_id) {
+      console.error("file_id is not available in the component state");
+    }
+  }, [file_id]);
+
   return (
     <MathJaxContext>
       <Box display="flex" height="100vh" overflow="hidden">
-        <Sidebar onChapterSelect={handleChapterSelect} onSectionSelect={handleSectionSelect} setOpen={setSidebarOpen} isOpen={sidebarOpen} />
+        <Sidebar 
+          onChapterSelect={handleChapterSelect} 
+          onSectionSelect={handleSectionSelect} 
+          setOpen={setSidebarOpen} 
+          isOpen={sidebarOpen}
+          bookStructure={bookStructure || { chapters: [] }}
+          bookTitle={title}
+          file_id={file_id}
+          filename={filename}
+          userId={userId}
+        />
         <Box 
           display="flex" 
           flexDirection="column" 
@@ -456,16 +521,26 @@ const Study = () => {
                 <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
                   {chapter ? chapter.title : (section ? `${section.chapter_title}: ${section.title}` : 'No chapter selected')}
                 </Typography>
-                {chapter && chapter.content ? (
-                  <MathJax>
-                    <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
-                  </MathJax>
-                ) : section && section.content ? (
-                  <MathJax>
-                    <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
-                  </MathJax>
+                {pdfUrl ? (
+                  <iframe
+                    src={pdfUrl}
+                    width="100%"
+                    height="100%"
+                    style={{ border: 'none' }}
+                    title="PDF Viewer"
+                  />
                 ) : (
-                  <Typography>No content available.</Typography>
+                  chapter && chapter.content ? (
+                    <MathJax>
+                      <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
+                    </MathJax>
+                  ) : section && section.content ? (
+                    <MathJax>
+                      <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
+                    </MathJax>
+                  ) : (
+                    <Typography>No content available.</Typography>
+                  )
                 )}
               </Paper>
             </Box>
