@@ -40,6 +40,13 @@ import pikepdf
 import mysql.connector
 import PyPDF2
 import atexit
+import fitz  # PyMuPDF
+import io
+from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+import logging
+import json
+from cachetools import TTLCache
 
 MAX_RETRIES = 1
 
@@ -1137,24 +1144,31 @@ async def list_metadata(user_id: str, current_user: str = Depends(get_current_us
         logging.error(f"Error listing metadata files: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to list metadata files")
 
+# Create a cache with a maximum of 100 items and a 1-hour TTL
+section_cache = TTLCache(maxsize=100, ttl=3600)
+
 @app.get("/get-section-pdf/{user_id}/{file_id}/{filename}/{section_id}")
 async def get_section_pdf(user_id: str, file_id: str, filename: str, section_id: str, current_user: str = Depends(get_current_user)):
+    cache_key = f"{user_id}_{file_id}_{filename}_{section_id}"
+    
+    # Check if the section is in the cache
+    if cache_key in section_cache:
+        logging.info(f"Returning cached section for {cache_key}")
+        return StreamingResponse(io.BytesIO(section_cache[cache_key]), media_type="application/pdf", 
+                                 headers={"Content-Disposition": f"attachment; filename={section_id}.pdf"})
+
     logging.info(f"Fetching section PDF for file_id: {file_id}, filename: {filename}, section_id: {section_id}")
     
-    # Fetch metadata
+    # Fetch metadata (same as before)
     metadata_key = f"metadata/{user_id}/{file_id}_{filename}.json"
-    logging.info(f"Constructed metadata key: {metadata_key}")
-    
     try:
         metadata_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=metadata_key)
         metadata = json.loads(metadata_obj['Body'].read().decode('utf-8'))
-        logging.info("Successfully fetched metadata from S3")
-        logging.info(f"Metadata content: {json.dumps(metadata, indent=2)}")
     except Exception as e:
         logging.error(f"Error fetching metadata: {str(e)}")
         raise HTTPException(status_code=404, detail="Metadata not found")
 
-    # Find the section in the table of contents
+    # Find the section in the table of contents (same as before)
     toc = metadata.get('table_of_contents', [])
     section = None
     next_section = None
@@ -1171,47 +1185,55 @@ async def get_section_pdf(user_id: str, file_id: str, filename: str, section_id:
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    logging.info(f"Found section: {json.dumps(section, indent=2)}")
-
-    # Determine the end page
+    # Determine the end page (same as before)
     if next_section:
         end_page = next_section['page'] - 1
     else:
-        # If it's the last section, use the start page of the next chapter or the end of the book
         chapter_index = toc.index(chapter)
         if chapter_index + 1 < len(toc):
             end_page = toc[chapter_index + 1]['sections'][0]['page'] - 1
         else:
-            # If it's the last chapter, you might want to set a maximum page number or use the total pages in the PDF
             end_page = section['page'] + 50  # Arbitrary number, adjust as needed
 
     logging.info(f"Extracting pages {section['page']} to {end_page}")
 
-    # Download the PDF from S3
-    s3_key = metadata['s3_key']
-    response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
-    pdf_content = response['Body'].read()
+    # Use the existing temporary file
+    temp_key = f"{user_id}_{file_id}_{filename}"
+    if temp_key not in temp_pdfs:
+        # If the temporary file doesn't exist, download it
+        temp_path = download_and_save_pdf(user_id, file_id, filename)
+    else:
+        temp_path = temp_pdfs[temp_key]
 
-    # Extract the section pages
-    pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
-    pdf_writer = PyPDF2.PdfWriter()
+    # Extract the section pages using PyMuPDF
+    pdf_document = fitz.open(temp_path)
+    output_pdf = fitz.open()
 
-    for page_num in range(section['page'] - 1, min(end_page, len(pdf_reader.pages))):
-        pdf_writer.add_page(pdf_reader.pages[page_num])
+    for page_num in range(section['page'] - 1, min(end_page, len(pdf_document))):
+        output_pdf.insert_pdf(pdf_document, from_page=page_num, to_page=page_num)
 
     # Save the extracted pages to a new PDF
-    output_pdf = io.BytesIO()
-    pdf_writer.write(output_pdf)
-    output_pdf.seek(0)
+    output_buffer = io.BytesIO()
+    output_pdf.save(output_buffer)
+    output_buffer.seek(0)
+
+    # Cache the extracted section
+    section_cache[cache_key] = output_buffer.getvalue()
 
     logging.info("Successfully extracted and prepared PDF section")
 
-    return StreamingResponse(output_pdf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={section_id}.pdf"})
+    return StreamingResponse(output_buffer, media_type="application/pdf", 
+                             headers={"Content-Disposition": f"attachment; filename={section_id}.pdf"})
 
 # Global dictionary to store temporary file paths
 temp_pdfs = {}
 
 def download_and_save_pdf(user_id, file_id, filename):
+    temp_key = f"{user_id}_{file_id}_{filename}"
+    if temp_key in temp_pdfs:
+        logging.info(f"Using existing temporary PDF: {temp_pdfs[temp_key]}")
+        return temp_pdfs[temp_key]
+
     s3_key = f"user-uploads/{user_id}/{file_id}_{filename}"
     temp_dir = tempfile.gettempdir()
     temp_path = os.path.join(temp_dir, f"{file_id}_{filename}")
@@ -1220,7 +1242,7 @@ def download_and_save_pdf(user_id, file_id, filename):
         response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
         with open(temp_path, 'wb') as f:
             f.write(response['Body'].read())
-        temp_pdfs[f"{user_id}_{file_id}_{filename}"] = temp_path
+        temp_pdfs[temp_key] = temp_path
         logging.info(f"PDF downloaded and saved temporarily: {temp_path}")
         return temp_path
     except Exception as e:
