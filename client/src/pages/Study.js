@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem } from '@mui/material';
+import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem, Button } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -17,11 +17,26 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import StopIcon from '@mui/icons-material/Stop';
 import Webcam from 'react-webcam';
 import MermaidDiagram from '../components/MermaidDiagram';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Auth } from 'aws-amplify';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
+
+// Add a request interceptor
+axios.interceptors.request.use(
+  config => {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return config;
+  },
+  error => {
+    return Promise.reject(error);
+  }
+);
 
 // Add this function inside your component file, but outside of the component function
 const preprocessLatex = (content) => {
@@ -89,10 +104,10 @@ const formatSummary = (content) => {
 
 const Study = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { bookStructure, s3Key, title, file_id, filename, userId } = location.state || {};
 
-  console.log("Study component state:", { bookStructure, s3Key, title, file_id, filename, userId });
-
+  const [currentSection, setCurrentSection] = useState(null);
   const [chapter, setChapter] = useState(null);
   const [section, setSection] = useState(null);
   const [message, setMessage] = useState('');
@@ -239,67 +254,189 @@ const Study = () => {
   };
 
   // Handle section selection from the sidebar
-  const handleSectionSelect = async (sectionId) => {
-    try {
-      if (!file_id || !filename || !userId) {
-        console.error('File ID, filename, or user ID is not available');
-        return;
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [narrativeStatus, setNarrativeStatus] = useState('');
+
+  const findSectionInBookStructure = (sectionId) => {
+    for (const chapter of bookStructure.chapters) {
+      for (const section of chapter.sections) {
+        if (section.id === sectionId) {
+          return { ...section, chapterTitle: chapter.title, chapterId: chapter.id };
+        }
       }
-      const token = await Auth.currentSession().then(session => session.getIdToken().getJwtToken());
-      const response = await axios.get(`/get-section-pdf/${userId}/${file_id}/${encodeURIComponent(filename)}/${encodeURIComponent(sectionId)}`, {
+    }
+    return null;
+  };
+
+  const fetchAndSetPDF = async (sectionId) => {
+    try {
+      console.log('Fetching PDF:', { userId, file_id, filename, sectionId });
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      const response = await axios.get(`/get-section-pdf/${userId}/${file_id}/${filename}/${sectionId}`, {
         responseType: 'blob',
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
       const pdfBlob = new Blob([response.data], { type: 'application/pdf' });
-      const url = URL.createObjectURL(pdfBlob);
-      setPdfUrl(url);
-      setSection({ id: sectionId });
-      // You might want to call fetchSection here as well
-      fetchSection(sectionId);
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      setPdfUrl(pdfUrl);
     } catch (error) {
-      console.error('Error fetching section PDF:', error);
+      console.error('Error fetching PDF:', error);
+      setError('Failed to load PDF. Please try again.');
     }
   };
 
-  // Modify handleSendMessage to include chapter content in the chat request
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (message.trim() === '' || isGenerating) return;
+  const processPDFSection = async (userId, fileId, filename, sectionName) => {
+    console.log('processPDFSection called with:', { userId, fileId, filename, sectionName });
+    
+    if (!userId || !fileId || !filename || !sectionName) {
+      console.error('Missing required parameters:', { userId, fileId, filename, sectionName });
+      throw new Error('Missing required parameters for processing PDF section');
+    }
 
-    setIsGenerating(true);
-    const newMessage = { user: 'You', text: message };
-    setChatMessages(prevMessages => [...prevMessages, newMessage]);
-    setMessage('');
+    const formData = new FormData();
+    formData.append('user_id', userId);
+    formData.append('file_id', fileId);
+    formData.append('filename', filename);
+    formData.append('section_name', sectionName);
 
     try {
-      const response = await axios.post('/api/chat', {
-        message: message,
-        chapter_id: chapter?.id,
-        chat_history: chatMessages,
-        chapter_content: chapter?.content || '',
-        language: chatLanguage,
-        emotion: emotion
+      const response = await axios.post('/process-pdf-section', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
-
-      const aiResponse = response.data.reply;
-      setChatMessages(prevMessages => [
-        ...prevMessages,
-        { user: 'AI', text: aiResponse }
-      ]);
-
-      // Speak the AI's response
-      speakText(aiResponse);
-
+      return response.data.extracted_text;
     } catch (error) {
-      console.error('Error sending message:', error);
-      setChatMessages(prevMessages => [
-        ...prevMessages,
-        { user: 'AI', text: 'Sorry, there was an error processing your request.' }
-      ]);
+      console.error('Error in processPDFSection:', error);
+      throw error;
+    }
+  };
+
+  const generateNarrative = async (extractedText, userId, fileId, startPage, endPage, forceRegenerate) => {
+    const response = await axios.post('/generate-narrative', {
+      chapter_content: extractedText,
+      user_id: userId,
+      file_id: fileId,
+      section_id: `${startPage}_${endPage}`,
+      force_regenerate: forceRegenerate
+    });
+
+    return {
+      narrative: response.data.narrative,
+      gameIdea: response.data.game_idea,
+      gameCode: response.data.game_code
+    };
+  };
+
+  const generateDiagrams = async (extractedText, narrative) => {
+    const response = await axios.post('/generate-diagrams', {
+      chapter_content: extractedText,
+      generated_summary: narrative,
+    });
+
+    return response.data.diagrams || [];
+  };
+
+  useEffect(() => {
+    if (!userId || !file_id || !filename) {
+      console.error('Missing required information');
+      // Handle this error, maybe redirect to SelectTextbook page
+      return;
+    }
+
+    console.log('Study component initialized with:', { userId, file_id, filename, title });
+    
+    // You can now use these values in your component
+  }, [userId, file_id, filename, title]);
+
+  const handleSectionSelect = async (sectionId) => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      console.log('Handling section select:', { sectionId, userId, file_id, filename });
+
+      if (!userId || !file_id || !filename) {
+        console.error('Missing required information');
+        setError('Missing required information to load section. Please try again.');
+        return;
+      }
+
+      const foundSection = findSectionInBookStructure(sectionId);
+      if (foundSection) {
+        setCurrentSection(foundSection);
+        
+        await fetchAndSetPDF(sectionId);
+
+        await processAndGenerateNarrative(
+          userId, 
+          file_id, 
+          filename, 
+          foundSection.title,
+          false // forceRegenerate
+        );
+      } else {
+        console.error('Section not found in book structure');
+        setError('Failed to load section. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error in handleSectionSelect:', error);
+      setError('An error occurred while loading the section. Please try again.');
     } finally {
-      setIsGenerating(false);
+      setIsLoading(false);
+    }
+  };
+
+  const processAndGenerateNarrative = async (userId, fileId, filename, sectionName, forceRegenerate = false) => {
+    console.log('processAndGenerateNarrative called with:', { userId, fileId, filename, sectionName, forceRegenerate });
+    
+    try {
+      setIsNarrativeLoading(true);
+      setNarrativeStatus('Processing PDF...');
+      console.log('Starting narrative generation process');
+
+      // Step 1: Process PDF section
+      console.log('Processing PDF section');
+      const extractedText = await processPDFSection(userId, fileId, filename, sectionName);
+      console.log('PDF section processed');
+
+      setNarrativeStatus('Generating summary...');
+      // Step 2: Generate narrative
+      console.log('Generating narrative');
+      const { narrative, gameIdea, gameCode } = await generateNarrative(extractedText, userId, fileId, sectionName, forceRegenerate);
+      console.log('Narrative generated');
+
+      setOriginalNarrative(narrative);
+      setGameIdea(gameIdea);
+      setGameCode(gameCode);
+
+      if (targetLanguage !== 'en') {
+        setNarrativeStatus('Translating summary...');
+        console.log('Translating narrative');
+        const translatedText = await translateText(narrative, targetLanguage);
+        setTranslatedNarrative(translatedText);
+        console.log('Narrative translated');
+      } else {
+        setTranslatedNarrative(narrative);
+      }
+
+      setNarrativeStatus('Generating diagrams...');
+      console.log('Generating diagrams');
+      // Fetch diagrams
+      const diagrams = await generateDiagrams(extractedText, narrative);
+      setDiagrams(diagrams);
+      console.log('Diagrams generated');
+
+      setNarrativeStatus('');
+    } catch (error) {
+      console.error('Error in processAndGenerateNarrative:', error);
+      setError('An error occurred while generating the narrative. Please try again.');
+    } finally {
+      setIsNarrativeLoading(false);
     }
   };
 
@@ -490,6 +627,107 @@ const Study = () => {
     }
   }, [file_id]);
 
+  // Add this state variable
+  const [isRegeneratingNarrative, setIsRegeneratingNarrative] = useState(false);
+
+  // Add this function to handle narrative regeneration
+  const handleRegenerateNarrative = async () => {
+    if (!currentSection || !userId || !file_id || !filename) {
+      console.error('Missing required information for regenerating narrative');
+      setError('Missing required information to regenerate narrative. Please try again.');
+      return;
+    }
+
+    try {
+      await processAndGenerateNarrative(
+        userId,
+        file_id,
+        filename,
+        currentSection.title,
+        true // forceRegenerate
+      );
+    } catch (error) {
+      console.error('Error in handleRegenerateNarrative:', error);
+      setError('An error occurred while regenerating the narrative. Please try again.');
+    }
+  };
+
+  const handleSendMessage = async (event) => {
+    event.preventDefault();
+    if (!message.trim()) return;
+
+    setIsGenerating(true);
+    const userMessage = { user: 'You', text: message };
+    setChatMessages(prevMessages => [...prevMessages, userMessage]);
+    setMessage('');
+
+    try {
+      const response = await axios.post('/api/chat', {
+        message: message,
+        userId: userId,
+        fileId: file_id,
+        language: chatLanguage
+      });
+
+      const aiMessage = { user: 'AI', text: response.data.reply };
+      setChatMessages(prevMessages => [...prevMessages, aiMessage]);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setChatMessages(prevMessages => [
+        ...prevMessages,
+        { user: 'AI', text: 'Sorry, I encountered an error. Please try again.' }
+      ]);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    const updateContent = async () => {
+      if (currentSection && userId && file_id && filename) {
+        try {
+          setIsLoading(true);
+          setError(null);
+
+          // Fetch the PDF for the selected section
+          await fetchAndSetPDF(currentSection.id);
+
+          console.log('Triggering narrative generation');
+          // Generate narrative for the selected section
+          await processAndGenerateNarrative(userId, file_id, filename, currentSection.title, false);
+
+          // Update the chapter and section information
+          setChapter(currentSection.chapter);
+          setSection(currentSection);
+
+          // Scroll to the top of the content
+          window.scrollTo(0, 0);
+        } catch (error) {
+          console.error('Error updating content:', error);
+          setError('An error occurred while loading the section content. Please try again.');
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        console.log('Missing required information to update content');
+      }
+    };
+
+    updateContent();
+  }, [currentSection, userId, file_id, filename]);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        await Auth.currentAuthenticatedUser();
+      } catch (error) {
+        console.error('User not authenticated', error);
+        navigate('/login');
+      }
+    };
+    checkAuth();
+  }, []);
+
   return (
     <MathJaxContext>
       <Box display="flex" height="100vh" overflow="hidden">
@@ -500,9 +738,7 @@ const Study = () => {
           isOpen={sidebarOpen}
           bookStructure={bookStructure || { chapters: [] }}
           bookTitle={title}
-          file_id={file_id}
-          filename={filename}
-          userId={userId}
+          currentSection={currentSection?.id}
         />
         <Box 
           display="flex" 
@@ -517,16 +753,20 @@ const Study = () => {
           <Box display="flex" height="50%" mb={2}>
             {/* Top Left: Chapter Content */}
             <Box flex={1} mr={1}>
-              <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
+              <Paper elevation={3} sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                  {chapter ? chapter.title : (section ? `${section.chapter_title}: ${section.title}` : 'No chapter selected')}
+                  {section && chapter 
+                    ? `${chapter.title} - ${section.title}`
+                    : chapter 
+                      ? chapter.title
+                      : 'No chapter selected'}
                 </Typography>
                 {pdfUrl ? (
                   <iframe
                     src={pdfUrl}
                     width="100%"
                     height="100%"
-                    style={{ border: 'none' }}
+                    style={{ border: 'none', flexGrow: 1 }}
                     title="PDF Viewer"
                   />
                 ) : (
@@ -552,6 +792,14 @@ const Study = () => {
                     Summary
                   </Typography>
                   <Box display="flex" alignItems="center">
+                    <Button
+                      onClick={handleRegenerateNarrative}
+                      disabled={isRegeneratingNarrative || isNarrativeLoading}
+                      startIcon={<RefreshIcon />}
+                      sx={{ mr: 2 }}
+                    >
+                      Reload Summary
+                    </Button>
                     <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
                     <Select
                       value={targetLanguage}
@@ -567,7 +815,7 @@ const Study = () => {
                     </Select>
                   </Box>
                 </Box>
-                {isNarrativeLoading ? (
+                {isNarrativeLoading || isRegeneratingNarrative ? (
                   <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                     <CircularProgress />
                   </Box>

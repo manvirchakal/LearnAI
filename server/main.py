@@ -169,6 +169,37 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         logging.error(f"Unexpected error in get_current_user: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+learningCategories = {
+    "Visual": [
+        "I find it easier to understand new information when it is presented in diagrams, charts, or graphs.",
+        "I prefer learning new concepts by observing demonstrations.",
+        "I often visualize concepts or problems in my mind to help me solve them.",
+        "I use colors, symbols, or drawings when taking notes to help me organize my thoughts.",
+        "I remember information better when I see it written down or displayed on a screen",
+    ],
+    "Auditory": [
+        "I learn better when I listen to explanations rather than read them.",
+        "I prefer to learn by listening to audio lectures or podcasts.",
+        "I remember information better when I hear it spoken aloud.",
+        "I use mnemonics or chants to help me memorize information.",
+        "I learn best by discussing concepts with others.",
+    ],
+    "ReadingWriting": [
+        "I understand new ideas best when I write them down.",
+        "I learn best by reading textbooks or articles.",
+        "I use flashcards or mind maps to help me memorize information.",
+        "I prefer to learn by reading and writing rather than listening or watching.",
+        "I use diagrams or charts to help me understand and remember information.",
+    ],
+    "Kinesthetic": [
+        "I enjoy working with physical models or doing hands-on activities to learn.",
+        "I learn best by doing experiments or practical activities.",
+        "I use role-playing or simulations to help me understand and apply new concepts.",
+        "I prefer to learn by solving real-world problems or puzzles.",
+        "I use physical models or manipulatives to help me visualize and understand information.",
+    ]
+}
+
 @app.post("/save-learning-profile")
 async def save_learning_profile(
     profile: dict = Body(...),
@@ -176,51 +207,35 @@ async def save_learning_profile(
 ):
     try:
         S3_BUCKET_NAME = os.getenv('TEXTBOOK_S3_BUCKET')
+        
+        # Generate the text-based learning profile description
+        learning_profile_description = generate_learning_profile_description(profile['answers'], learningCategories)
+        
+        # Create a dictionary with both the original answers and the generated description
+        full_profile = {
+            "answers": profile['answers'],
+            "description": learning_profile_description
+        }
+        
         profile_key = f"learning_profiles/{current_user}.json"
         
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=profile_key,
-            Body=json.dumps(profile),
+            Body=json.dumps(full_profile),
             ContentType='application/json'
         )
         
-        return {"message": "Learning profile saved successfully"}
+        return {"message": "Learning profile saved successfully", "description": learning_profile_description}
     except Exception as e:
         logging.error(f"Failed to save learning profile to S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to save learning profile")
 
-async def query_knowledge_base(query: str, top_k: int = 3):
-    try:
-        logging.info(f"Querying knowledge base with: {query}")
-        response = bedrock_agent.retrieve_and_generate(
-            input={'text': query},
-            retrieveAndGenerateConfiguration={
-                'knowledgeBaseConfiguration': {
-                    'knowledgeBaseId': os.getenv('KNOWLEDGE_BASE_ID'),
-                    'modelArn': os.getenv('MODEL_ARN')
-                },
-                'type': 'KNOWLEDGE_BASE'
-            }
-        )
-        
-        logging.info(f"Knowledge base response: {response}")
-        
-        generated_answer = response.get('output', {}).get('text', '')
-        return generated_answer
-
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        logging.error(f"AWS ClientError in query_knowledge_base: {error_code} - {error_message}")
-        logging.error(f"Full error response: {e.response}")
-        return f"Error querying knowledge base: {error_code} - {error_message}"
-    except Exception as e:
-        logging.error(f"Unexpected error in query_knowledge_base: {str(e)}")
-        return f"Unexpected error querying knowledge base: {str(e)}"
-
-def generate_learning_profile_description(answers: dict) -> str:
+def generate_learning_profile_description(answers: dict, questionnaire: dict) -> str:
     prompt = f"""Based on the following questionnaire answers, generate a paragraph-long textual description of the user's learning style. The answers are organized by learning category (Visual, Auditory, ReadingWriting, Kinesthetic) and represent the user's agreement level with each statement (1: Strongly Disagree, 5: Strongly Agree).
+
+Questionnaire:
+{json.dumps(questionnaire, indent=2)}
 
 Questionnaire answers:
 {json.dumps(answers, indent=2)}
@@ -261,6 +276,35 @@ Please provide a comprehensive description of the user's learning style, highlig
     except Exception as e:
         logging.error(f"Error generating learning profile description: {str(e)}")
         return "Error generating learning profile description"
+
+async def query_knowledge_base(query: str, top_k: int = 3):
+    try:
+        logging.info(f"Querying knowledge base with: {query}")
+        response = bedrock_agent.retrieve_and_generate(
+            input={'text': query},
+            retrieveAndGenerateConfiguration={
+                'knowledgeBaseConfiguration': {
+                    'knowledgeBaseId': os.getenv('KNOWLEDGE_BASE_ID'),
+                    'modelArn': os.getenv('MODEL_ARN')
+                },
+                'type': 'KNOWLEDGE_BASE'
+            }
+        )
+        
+        logging.info(f"Knowledge base response: {response}")
+        
+        generated_answer = response.get('output', {}).get('text', '')
+        return generated_answer
+
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logging.error(f"AWS ClientError in query_knowledge_base: {error_code} - {error_message}")
+        logging.error(f"Full error response: {e.response}")
+        return f"Error querying knowledge base: {error_code} - {error_message}"
+    except Exception as e:
+        logging.error(f"Unexpected error in query_knowledge_base: {str(e)}")
+        return f"Unexpected error querying knowledge base: {str(e)}"
 
 # Add this function to upload files to S3
 def upload_file_to_s3(file_name, bucket, object_name=None):
@@ -490,30 +534,31 @@ async def download_book(s3_key: str, current_user: str = Depends(get_current_use
         logging.error(f"Failed to download PDF from S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to download PDF")
 
-def generate_game_idea(text: str, chapter_id: int, max_attempts=1, max_tokens=4096):
-    cleaned_text = text
-
-    prompt = f"""Based on the following chapter content, suggest a simple interactive game idea that reinforces the key concepts. The game should:
+def generate_game_idea(text: str, learning_profile: str, max_attempts=1, max_tokens=4096):
+    prompt = f"""Based on the following chapter content and the user's learning profile, suggest a simple interactive game idea that reinforces the key concepts. The game should:
     1. Be implementable in JavaScript
     2. Reinforce one or more key concepts from the chapter
     3. Be engaging and educational for students
     4. Be described in 2-3 sentences
+    5. Be tailored to the user's learning style as described in their profile
 
     Additionally, provide a brief summary of the chapter's main concepts (2-3 sentences).
 
     Use clear, engaging language suitable for a student new to these concepts. 
     Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
-    Chapter content: {cleaned_text}
+    Chapter content: {text}
 
-    Now, provide a brief summary of the chapter's key concepts, followed by an engaging game idea:"""
+    User's learning profile: {learning_profile}
+
+    Now, provide a brief summary of the chapter's key concepts, followed by an engaging game idea tailored to the user's learning style:"""
 
     full_response = ""
-    for i in range(1):
+    for i in range(max_attempts):
         try:
             native_request = {
                 'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': 4096,
+                'max_tokens': max_tokens,
                 'temperature': 0.7,
                 'top_p': 0.9,
                 'messages': [
@@ -536,7 +581,7 @@ def generate_game_idea(text: str, chapter_id: int, max_attempts=1, max_tokens=40
                 if chunk['type'] == 'content_block_delta':
                     full_response += chunk['delta'].get('text', '')
 
-            if full_response.endswith(".") and len(full_response) < 4096 * 0.9:
+            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
                 break
 
         except ClientError as e:
@@ -557,62 +602,191 @@ def translate_text(text, target_language):
         logging.error(f"Error translating text: {e}")
         return None
 
-@app.post("/generate-narrative/{chapter_id}")
-async def generate_narrative_endpoint(chapter_id: int, request: Request):
+@app.post("/generate-narrative")
+async def generate_narrative_endpoint(request: Request):
     try:
         data = await request.json()
         chapter_content = data.get('chapter_content', '')
+        user_id = data.get('user_id', '')
+        file_id = data.get('file_id', '')
+        section_id = data.get('section_id', '')
+        force_regenerate = data.get('force_regenerate', False)
+
+        narrative_key = f"narratives/{user_id}/{file_id}/{section_id}.json"
+        game_idea_key = f"game_ideas/{user_id}/{file_id}/{section_id}.json"
+
+        if not force_regenerate:
+            try:
+                existing_narrative = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=narrative_key)
+                existing_game_idea = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=game_idea_key)
+                narrative_data = json.loads(existing_narrative['Body'].read().decode('utf-8'))
+                game_idea_data = json.loads(existing_game_idea['Body'].read().decode('utf-8'))
+                return {**narrative_data, **game_idea_data}
+            except s3_client.exceptions.NoSuchKey:
+                # If either file doesn't exist, proceed with generation
+                pass
+
+        # Fetch the user's learning profile
+        learning_profile = get_learning_profile(user_id)
 
         # Query the knowledge base
-        relevant_info = await query_knowledge_base(chapter_content[:1000])  # Use first 1000 chars as query
-        
+        relevant_info = await query_knowledge_base(chapter_content[:1000])
+
         # Check if relevant_info is an error message
         if relevant_info.startswith("Error") or relevant_info.startswith("Unexpected error"):
             logging.warning(f"Knowledge base query failed: {relevant_info}")
             relevant_info = "No additional information available."
 
-        # Prepare the prompt for narrative generation
+        # Generate narrative
         narrative_prompt = f"""
-        Generate a comprehensive and engaging narrative summary for the following chapter content, 
-        incorporating the provided relevant information from the knowledge base:
+        Generate an extensive, in-depth narrative summary for the following chapter content, 
+        incorporating the provided relevant information from the knowledge base and tailoring it to the user's learning profile:
 
         Chapter content: {chapter_content}
 
-        Relevant information: {relevant_info}
-
         Relevant information from knowledge base: {relevant_info}
 
-        Please create an extensive summary that:
-        1. Explains all key concepts in a clear and engaging manner.
-        2. Highlights important connections and insights within the chapter and to broader contexts.
-        3. Uses analogies or examples to illustrate complex ideas.
-        4. Integrates the relevant information from the knowledge base to enrich the explanation.
-        5. Provides a holistic view of the topic, including its significance and applications.
-        6. Addresses potential questions or misconceptions a learner might have.
+        Learning profile: {learning_profile}
 
-        The summary should be informative, engaging, and easy to understand. Aim for a length of at least 3 quarters of the chapter content, 
-        ensuring thorough coverage of all important aspects of the chapter content and related knowledge.
+        Please create a comprehensive, detailed summary that:
+
+        1. Thoroughly explains all key concepts, formulas, and theorems presented in the chapter, providing step-by-step derivations where applicable.
+        2. Elaborates on each subtopic within the chapter, ensuring no important detail is omitted.
+        3. Provides multiple examples for each concept, ranging from simple to complex, to illustrate the application of the ideas.
+        4. Draws connections between different concepts within the chapter and to broader contexts in the field of study.
+        5. Uses rich, vivid analogies and real-world examples to make complex ideas more accessible and relatable.
+        6. Integrates the relevant information from the knowledge base to provide additional context, historical background, or advanced applications of the concepts.
+        7. Discusses the significance and practical applications of the topic in various fields (e.g., physics, engineering, economics, etc., as appropriate for the subject matter).
+        8. Addresses common misconceptions, potential areas of confusion, and frequently asked questions related to the topic.
+        9. Includes thought-provoking questions and prompts throughout the narrative to encourage active engagement with the material.
+        10. Incorporates elements that cater to the user's learning profile, such as visual aids for visual learners, auditory cues for auditory learners, or hands-on activities for kinesthetic learners.
+        11. Provides a detailed explanation of any graphs, charts, or diagrams mentioned in the chapter, describing their features and significance.
+        12. Discusses any historical context or the development of the concepts over time, if relevant.
+        13. Explains the implications and importance of the concepts for future topics in the subject.
+        14. Includes practice problems or exercises with detailed solutions to reinforce understanding.
+        15. Summarizes key points at the end of each major section to aid in retention and review.
+
+        The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content, using at least 75% of the available 8192 token limit. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into manageable parts.
         """
 
         narrative = generate_narrative(narrative_prompt)
         
-        # Generate game idea and code
-        game_prompt = f"Based on the following chapter content, create an educational game idea:\n\n{chapter_content}"
-        game_response = generate_game_idea(game_prompt, chapter_id, db)
+        # Generate game idea
+        game_response = generate_game_idea(chapter_content, learning_profile)
         
         # Generate game code
         game_code_response = await generate_game_code(GameIdeaRequest(game_idea=game_response))
         game_code = game_code_response.get("code", "")
 
-        return {
-            "narrative": narrative,
+        narrative_result = {
+            "narrative": narrative
+        }
+
+        game_result = {
             "game_idea": game_response,
             "game_code": game_code
         }
 
+        # Save the generated narrative to S3
+        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=narrative_key, Body=json.dumps(narrative_result))
+        
+        # Save the generated game idea and code to S3
+        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=game_idea_key, Body=json.dumps(game_result))
+
+        return {**narrative_result, **game_result}
+
     except Exception as e:
         logging.exception("Error in generate_narrative_endpoint")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    try:
+        # Save the uploaded file temporarily
+        temp_file_path = f"/tmp/{uuid.uuid4()}.wav"
+        with open(temp_file_path, "wb") as buffer:
+            buffer.write(await audio.read())
+        
+        job_name = f"transcribe_job_{int(time.time())}"
+        job_uri = f"s3://YOUR_S3_BUCKET/{audio.filename}"
+        
+        # Upload the file to S3 (you need to implement this)
+        # upload_to_s3(temp_file_path, "YOUR_S3_BUCKET", audio.filename)
+        
+        transcribe.start_transcription_job(
+            TranscriptionJobName=job_name,
+            Media={'MediaFileUri': job_uri},
+            MediaFormat='wav',
+            LanguageCode='en-US'
+        )
+        
+        while True:
+            status = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+            if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+                break
+            time.sleep(5)
+        
+        if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+            result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+            transcript_uri = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
+            # Fetch and parse the transcript JSON from the URI
+            # You'll need to implement this part
+            transcript_text = fetch_and_parse_transcript(transcript_uri)
+            return {"transcript": transcript_text}
+        else:
+            return {"error": "Transcription failed"}
+
+    except Exception as e:
+        logging.exception("Error in transcribe_audio")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_learning_profile(user_id):
+    try:
+        profile_key = f"learning_profiles/{user_id}.json"
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=profile_key)
+        profile_data = json.loads(response['Body'].read().decode('utf-8'))
+        return profile_data.get('description', 'Learning profile not available.')
+    except Exception as e:
+        logging.error(f"Error fetching learning profile: {str(e)}")
+        return "Learning profile not available."
+    
+def generate_narrative(prompt: str, max_attempts=1, max_tokens=8192):
+    full_response = ""
+    for i in range(max_attempts):
+        try:
+            native_request = {
+                'anthropic_version': 'bedrock-2023-05-31',
+                'max_tokens': max_tokens,
+                'temperature': 0.7,
+                'top_p': 0.9,
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [{'type': 'text', 'text': prompt}],
+                    }
+                ],
+            }
+
+            request = json.dumps(native_request)
+
+            response = bedrock.invoke_model_with_response_stream(
+                modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                body=request
+            )
+
+            for event in response['body']:
+                chunk = json.loads(event['chunk']['bytes'])
+                if chunk['type'] == 'content_block_delta':
+                    full_response += chunk['delta'].get('text', '')
+
+            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
+                break
+
+        except ClientError as e:
+            logging.error(f"Error calling Bedrock: {e}")
+            return f"Error: {str(e)}"
+
+    return full_response.strip()
 
 class GameIdeaRequest(BaseModel):
     game_idea: str
@@ -953,23 +1127,26 @@ async def translate_text_endpoint(request: Request):
 
 @app.post("/generate-diagrams")
 async def generate_diagrams_endpoint(request: Request):
-    data = await request.json()
-    chapter_content = data.get('chapter_content', '')
-    generated_summary = data.get('generated_summary', '')
-    
     try:
-        cleaned_chapter_content = chapter_content
-        cleaned_summary = generated_summary
+        data = await request.json()
+        chapter_content = data.get('chapter_content', '')
+        generated_summary = data.get('generated_summary', '')
+        user_id = data.get('user_id', '')
         
-        prompt = f"""Based on the following chapter content and generated summary, create Mermaid.js diagram descriptions that illustrate the key concepts visually. For each main concept:
+        # Fetch the user's learning profile
+        learning_profile = get_learning_profile(user_id)
 
-        1. Design a simple flowchart diagram that clearly represents the concept
-        2. Use only 'graph TD' (top-down) orientation
-        3. Keep the diagrams simple, with no more than 5-7 nodes
-        4. Provide a brief explanation of what the diagram represents
+        # Construct the prompt
+        prompt = f"""
+        Based on the following chapter content, generated summary, and the user's learning profile, create a set of diagrams that illustrate the key concepts:
 
-        Use the following format for diagram descriptions:
+        Chapter content: {chapter_content}
 
+        Generated summary: {generated_summary}
+
+        User's learning profile: {learning_profile}
+
+        Here's a template for the diagrams:
         ```mermaid
         graph TD
             A[First Concept] --> B[Second Concept]
@@ -978,7 +1155,13 @@ async def generate_diagrams_endpoint(request: Request):
             D --> E[Fifth Concept]
         ```
 
-        Critical guidelines for creating Mermaid diagrams:
+        Please create diagrams that:
+        1. Illustrate the main concepts and their relationships
+        2. Are clear and easy to understand
+        3. Are tailored to the user's learning style as described in their profile
+        4. Use appropriate visual representations (e.g., flowcharts, mind maps, etc.)
+
+        Some extra guidelines:
         - Always start with 'graph TD' on its own line
         - Use single letters for node IDs (A, B, C, etc.)
         - Use square brackets for node labels: [Label text]
@@ -991,26 +1174,24 @@ async def generate_diagrams_endpoint(request: Request):
         - If referring to mathematical concepts, use words instead of symbols (e.g., "First Derivative" instead of "f'(x)")
         - Ensure all nodes are connected in a logical flow
 
-        Chapter content: {cleaned_chapter_content}
+        Provide the diagrams in Mermaid syntax.
+        """
 
-        Generated summary: {cleaned_summary}
+        # Generate diagrams
+        diagrams = await generate_diagrams(prompt)
 
-        Now, provide 2-3 Mermaid.js diagram descriptions for the key concepts, focusing on the most important ideas from both the chapter content and the generated summary. Ensure each diagram follows the guidelines strictly, using only plain English words without any mathematical notation or special characters:"""
-
-        diagrams = await generate_diagrams(prompt, db)
-        
         return {"diagrams": diagrams}
+
     except Exception as e:
-        logging.exception("Error in generate_diagrams_endpoint")
+        logging.error(f"Error in generate_diagrams_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     
-async def generate_diagrams(prompt: str, max_attempts=1, max_tokens=4096):
-    full_response = ""
-    for i in range(max_attempts):
+async def generate_diagrams(prompt: str, max_attempts=3):
+    for attempt in range(max_attempts):
         try:
             native_request = {
                 'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': max_tokens,
+                'max_tokens': 4096,
                 'temperature': 0.7,
                 'top_p': 0.9,
                 'messages': [
@@ -1028,22 +1209,26 @@ async def generate_diagrams(prompt: str, max_attempts=1, max_tokens=4096):
                 body=request
             )
 
+            full_response = ""
             for event in response['body']:
                 chunk = json.loads(event['chunk']['bytes'])
                 if chunk['type'] == 'content_block_delta':
                     full_response += chunk['delta'].get('text', '')
 
-            if full_response.endswith(".") and len(full_response) < max_tokens * 0.9:
-                break
+            # Extract Mermaid diagrams from the response
+            diagrams = re.findall(r'```mermaid\n(.*?)\n```', full_response, re.DOTALL)
+            
+            if diagrams:
+                return diagrams
+            else:
+                logging.warning(f"No diagrams found in the response. Attempt {attempt + 1}/{max_attempts}")
 
-        except ClientError as e:
-            logging.error(f"Error calling Bedrock: {e}")
-            return f"Error: {str(e)}"
+        except Exception as e:
+            logging.error(f"Error generating diagrams: {str(e)}")
+            if attempt == max_attempts - 1:
+                raise
 
-    # Extract Mermaid diagrams from the response
-    diagrams = re.findall(r'```mermaid\n(.*?)```', full_response, re.DOTALL)
-    
-    return diagrams
+    return []
 
 @app.get("/user-textbooks")
 async def get_user_textbooks(current_user: str = Depends(get_current_user)):
@@ -1185,6 +1370,11 @@ async def get_section_pdf(user_id: str, file_id: str, filename: str, section_id:
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
 
+    # Create a sanitized filename from the section title
+    sanitized_title = "".join(c for c in section['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+    pdf_filename = f"{sanitized_title}.pdf"
+    print(f"Sanitized title: {sanitized_title}, PDF filename: {pdf_filename}")
+
     # Determine the end page (same as before)
     if next_section:
         end_page = next_section['page'] - 1
@@ -1223,7 +1413,7 @@ async def get_section_pdf(user_id: str, file_id: str, filename: str, section_id:
     logging.info("Successfully extracted and prepared PDF section")
 
     return StreamingResponse(output_buffer, media_type="application/pdf", 
-                             headers={"Content-Disposition": f"attachment; filename={section_id}.pdf"})
+                             headers={"Content-Disposition": f"attachment; filename={pdf_filename}"})
 
 # Global dictionary to store temporary file paths
 temp_pdfs = {}
@@ -1260,3 +1450,146 @@ def cleanup_temp_files():
 
 # Register the cleanup function to run when the server shuts down
 atexit.register(cleanup_temp_files)
+
+@app.post("/process-pdf-section")
+async def process_pdf_section(
+    user_id: str = Form(...),
+    file_id: str = Form(...),
+    filename: str = Form(...),
+    section_name: str = Form(...),
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        logging.info(f"Received request for process_pdf_section:")
+        logging.info(f"user_id: {user_id}")
+        logging.info(f"file_id: {file_id}")
+        logging.info(f"filename: {filename}")
+        logging.info(f"section_name: {section_name}")
+        logging.info(f"current_user: {current_user}")
+
+        if user_id != current_user:
+            logging.warning(f"Permission denied: user_id ({user_id}) does not match current_user ({current_user})")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You don't have permission to access this file")
+
+        # Fetch metadata
+        metadata_key = f"metadata/{user_id}/{file_id}_{filename}.json"
+        try:
+            metadata_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=metadata_key)
+            metadata = json.loads(metadata_obj['Body'].read().decode('utf-8'))
+        except Exception as e:
+            logging.error(f"Error fetching metadata: {str(e)}")
+            raise HTTPException(status_code=404, detail="Metadata not found")
+
+        # Find the section in the table of contents
+        toc = metadata.get('table_of_contents', [])
+        section = None
+        next_section = None
+        for chapter in toc:
+            for i, s in enumerate(chapter['sections']):
+                if s['title'] == section_name:
+                    section = s
+                    if i + 1 < len(chapter['sections']):
+                        next_section = chapter['sections'][i + 1]
+                    break
+            if section:
+                break
+
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+
+        start_page = section['page']
+        if next_section:
+            end_page = next_section['page'] - 1
+        else:
+            chapter_index = toc.index(chapter)
+            if chapter_index + 1 < len(toc):
+                end_page = toc[chapter_index + 1]['sections'][0]['page'] - 1
+            else:
+                end_page = start_page + 50  # Arbitrary number, adjust as needed
+
+        logging.info(f"Processing section '{section_name}' from page {start_page} to {end_page}")
+
+        try:
+            s3_key = f"user-uploads/{user_id}/{file_id}_{filename}"
+            extracted_text_key = f"extracted-text/{user_id}/{file_id}/section_{start_page}_{end_page}.txt"
+
+            # Check if extracted text already exists in S3
+            try:
+                existing_text = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=extracted_text_key)
+                return {"extracted_text": existing_text['Body'].read().decode('utf-8')}
+            except s3_client.exceptions.NoSuchKey:
+                # If the file doesn't exist, proceed with extraction
+                pass
+
+            extracted_text = ""
+
+            # Download the PDF from S3
+            response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+            pdf_content = response['Body'].read()
+
+            # Create a temporary file to store the downloaded PDF
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
+                temp_file.write(pdf_content)
+                temp_path = temp_file.name
+
+            # Process each page individually
+            for page_num in range(start_page, end_page + 1):
+                logging.info(f"Processing page {page_num}")
+                
+                # Extract and compress the single page
+                with pikepdf.Pdf.open(temp_path) as pdf:
+                    new_pdf = pikepdf.Pdf.new()
+                    new_pdf.pages.append(pdf.pages[page_num - 1])
+                    
+                    # Save the compressed page to a BytesIO object
+                    output = io.BytesIO()
+                    new_pdf.save(output, compress_streams=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
+                    output.seek(0)
+                    file_bytes = output.getvalue()
+
+                logging.info(f"Compressed PDF size for page {page_num}: {len(file_bytes)} bytes")
+                
+                # Process with Textract
+                response = textract_client.analyze_document(
+                    Document={'Bytes': file_bytes},
+                    FeatureTypes=['TABLES', 'FORMS']
+                )
+                
+                # Extract text and table data
+                page_text = extract_text_and_tables(response)
+                extracted_text += f"Page {page_num}:\n{page_text}\n\n"
+
+            # Save the extracted text to S3
+            s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=extracted_text_key, Body=extracted_text)
+
+            return {"extracted_text": extracted_text}
+
+        except Exception as e:
+            logging.error(f"Error processing PDF section: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error processing PDF section")
+        finally:
+            # Clean up the temporary file
+            if 'temp_path' in locals():
+                os.unlink(temp_path)
+
+    except ValueError as ve:
+        logging.error(f"ValueError in process_pdf_section: {str(ve)}")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(ve))
+    except Exception as e:
+        logging.error(f"Unexpected error in process_pdf_section: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
+
+def extract_text_and_tables(textract_response):
+    extracted_content = ""
+    for item in textract_response['Blocks']:
+        if item['BlockType'] == 'LINE':
+            extracted_content += item['Text'] + "\n"
+        elif item['BlockType'] == 'TABLE':
+            extracted_content += "Table:\n"
+            for cell in item['Relationships'][0]['Ids']:
+                cell_block = next(block for block in textract_response['Blocks'] if block['Id'] == cell)
+                if 'Text' in cell_block:
+                    extracted_content += cell_block['Text'] + "\t"
+                extracted_content += "\n"
+            extracted_content += "\n"
+    return extracted_content

@@ -1,14 +1,31 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Authenticator, useAuthenticator, View } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
 import './Login.css';
 import logo from '../static/logo.png';
 import NavBar from './NavBar';
 import { useNavigate } from 'react-router-dom';
+import { Auth } from 'aws-amplify';
 
 const Home = () => {
   const navigate = useNavigate();
   const { authStatus, user, signOut } = useAuthenticator((context) => [context.authStatus, context.user]);
+
+  useEffect(() => {
+    const setAuthToken = async () => {
+      try {
+        const session = await Auth.currentSession();
+        const token = session.getIdToken().getJwtToken();
+        localStorage.setItem('authToken', token);
+      } catch (error) {
+        console.error('Error setting auth token:', error);
+      }
+    };
+
+    if (authStatus === 'authenticated') {
+      setAuthToken();
+    }
+  }, [authStatus]);
 
   return (
     <View className="auth-wrapper">

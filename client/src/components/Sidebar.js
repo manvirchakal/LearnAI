@@ -91,12 +91,23 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
                       button 
                       sx={{ 
                         pl: `${collapsedWidth + 16}px`,
-                        bgcolor: currentSection === section.id ? 'primary.light' : 'background.paper',
+                        bgcolor: currentSection === section.id ? 'rgba(25, 118, 210, 0.15)' : 'background.paper', // Lower opacity blue
+                        color: currentSection === section.id ? 'primary.main' : 'inherit', // Blue text for current section
+                        '&:hover': {
+                          bgcolor: currentSection === section.id ? 'rgba(25, 118, 210, 0.25)' : 'action.hover', // Slightly darker on hover
+                        },
                       }} 
                       key={section.id} 
                       onClick={() => handleSectionClick(section.id)}
                     >
-                      <ListItemText primary={section.title} />
+                      <ListItemText 
+                        primary={section.title} 
+                        primaryTypographyProps={{
+                          style: {
+                            fontWeight: currentSection === section.id ? 'bold' : 'normal',
+                          }
+                        }}
+                      />
                     </ListItem>
                   ))}
                 </List>

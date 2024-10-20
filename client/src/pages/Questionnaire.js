@@ -69,6 +69,9 @@ const Questionnaire = () => {
 
       if (response.status === 200) {
         console.log('Learning profile saved successfully');
+        console.log('Generated description:', response.data.description);
+        // You can store the description in local storage or state if needed
+        localStorage.setItem('learningProfileDescription', response.data.description);
         navigate('/study');
       } else {
         console.error('Error saving learning profile:', response);
