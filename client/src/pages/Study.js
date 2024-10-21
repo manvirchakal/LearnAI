@@ -105,8 +105,9 @@ const formatSummary = (content) => {
 const Study = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { bookStructure, s3Key, title, file_id, filename, userId } = location.state || {};
+  const { bookStructure, s3Key, title, file_id, filename } = location.state || {};
 
+  const [userId, setUserId] = useState(location.state?.userId || null);
   const [currentSection, setCurrentSection] = useState(null);
   const [chapter, setChapter] = useState(null);
   const [section, setSection] = useState(null);
@@ -317,6 +318,7 @@ const Study = () => {
   };
 
   const generateNarrative = async (extractedText, userId, fileId, startPage, endPage, forceRegenerate) => {
+    console.log('Sending data to generate-narrative:', { userId, fileId, startPage, endPage, forceRegenerate });
     const response = await axios.post('/generate-narrative', {
       chapter_content: extractedText,
       user_id: userId,
@@ -333,12 +335,22 @@ const Study = () => {
   };
 
   const generateDiagrams = async (extractedText, narrative) => {
-    const response = await axios.post('/generate-diagrams', {
-      chapter_content: extractedText,
-      generated_summary: narrative,
-    });
+    try {
+      const token = await Auth.currentSession().then(session => session.getIdToken().getJwtToken());
+      const response = await axios.post('/generate-diagrams', {
+        chapter_content: extractedText,
+        generated_summary: narrative,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-    return response.data.diagrams || [];
+      return response.data.diagrams || [];
+    } catch (error) {
+      console.error('Error generating diagrams:', error);
+      return [];
+    }
   };
 
   useEffect(() => {
@@ -372,6 +384,8 @@ const Study = () => {
         
         await fetchAndSetPDF(sectionId);
 
+        console.log('Current user ID:', userId);
+
         await processAndGenerateNarrative(
           userId, 
           file_id, 
@@ -394,6 +408,12 @@ const Study = () => {
   const processAndGenerateNarrative = async (userId, fileId, filename, sectionName, forceRegenerate = false) => {
     console.log('processAndGenerateNarrative called with:', { userId, fileId, filename, sectionName, forceRegenerate });
     
+    if (!userId) {
+      console.error('userId is missing in processAndGenerateNarrative');
+      setError('User ID is missing. Please try logging in again.');
+      return;
+    }
+
     try {
       setIsNarrativeLoading(true);
       setNarrativeStatus('Processing PDF...');
@@ -639,6 +659,7 @@ const Study = () => {
     }
 
     try {
+      setIsRegeneratingNarrative(true);
       await processAndGenerateNarrative(
         userId,
         file_id,
@@ -649,6 +670,8 @@ const Study = () => {
     } catch (error) {
       console.error('Error in handleRegenerateNarrative:', error);
       setError('An error occurred while regenerating the narrative. Please try again.');
+    } finally {
+      setIsRegeneratingNarrative(false);
     }
   };
 
@@ -666,7 +689,9 @@ const Study = () => {
         message: message,
         userId: userId,
         fileId: file_id,
-        language: chatLanguage
+        sectionName: currentSection.title,
+        language: chatLanguage,
+        forceRegenerate: isRegeneratingNarrative.toString() // Convert boolean to string
       });
 
       const aiMessage = { user: 'AI', text: response.data.reply };
@@ -727,6 +752,23 @@ const Study = () => {
     };
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!userId) {
+        try {
+          const user = await Auth.currentAuthenticatedUser();
+          const currentUserId = user.attributes.sub; // or however you get the user ID from Cognito
+          setUserId(currentUserId);
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          navigate('/login');
+        }
+      }
+    };
+
+    fetchUserData();
+  }, [userId, navigate]);
 
   return (
     <MathJaxContext>
@@ -794,11 +836,11 @@ const Study = () => {
                   <Box display="flex" alignItems="center">
                     <Button
                       onClick={handleRegenerateNarrative}
-                      disabled={isRegeneratingNarrative || isNarrativeLoading}
+                      disabled={isRegeneratingNarrative}
                       startIcon={<RefreshIcon />}
                       sx={{ mr: 2 }}
                     >
-                      Reload Summary
+                      Regenerate Narrative
                     </Button>
                     <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
                     <Select

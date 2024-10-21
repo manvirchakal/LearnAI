@@ -47,6 +47,9 @@ from fastapi.responses import StreamingResponse
 import logging
 import json
 from cachetools import TTLCache
+from jose import jwt, JWTError
+from fastapi import HTTPException, Security, Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 MAX_RETRIES = 1
 
@@ -132,42 +135,71 @@ def get_jwks():
     response = requests.get(jwks_url)
     return response.json()["keys"]
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+# Cognito configuration
+REGION = os.getenv('AWS_DEFAULT_REGION')
+USER_POOL_ID = os.getenv('COGNITO_USER_POOL_ID')
+APP_CLIENT_ID = os.getenv('COGNITO_APP_CLIENT_ID')
+JWKS_URL = os.getenv('COGNITO_JWKS_URL')
+
+# Fetch the JWKS from Cognito
+jwks = requests.get(JWKS_URL).json()['keys']
+
+security = HTTPBearer()
+
+def decode_token(token: str):
     try:
-        logging.debug(f"Received token: {token}")
-        jwks = get_jwks()
-        if not jwks:
-            raise HTTPException(status_code=500, detail="Unable to fetch JWKS")
-        
+        # Get the kid from the headers prior to verification
         headers = jwt.get_unverified_headers(token)
-        logging.debug(f"Token headers: {headers}")
-        kid = headers["kid"]
-        key_index = next((index for (index, key) in enumerate(jwks) if key["kid"] == kid), None)
-        if key_index is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
+        kid = headers['kid']
         
+        # Search for the kid in the downloaded public keys
+        key_index = -1
+        for i in range(len(jwks)):
+            if kid == jwks[i]['kid']:
+                key_index = i
+                break
+        if key_index == -1:
+            raise HTTPException(status_code=401, detail='Public key not found in jwks.json')
+        
+        # Construct the public key
         public_key = jwk.construct(jwks[key_index])
-        payload = jwt.decode(
-            token,
-            public_key.to_pem().decode("utf-8"),
-            algorithms=["RS256"],
-            audience=os.getenv("COGNITO_APP_CLIENT_ID"),
-            options={"verify_exp": True},
-        )
         
-        # Try different possible keys for user identifier
-        user_id = payload.get("username") or payload.get("sub") or payload.get("email")
+        # Get the last two sections of the token,
+        # message and signature (encoded in base64)
+        message, encoded_signature = str(token).rsplit('.', 1)
         
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Unable to identify user from token")
+        # Decode the signature
+        decoded_signature = base64url_decode(encoded_signature.encode('utf-8'))
         
-        return user_id
-    except JWTError as e:
-        logging.error(f"JWT Error: {str(e)}")
-        raise HTTPException(status_code=401, detail="Invalid token")
+        # Verify the signature
+        if not public_key.verify(message.encode("utf8"), decoded_signature):
+            raise HTTPException(status_code=401, detail='Signature verification failed')
+        
+        # Since we passed the verification, we can now safely
+        # use the unverified claims
+        claims = jwt.get_unverified_claims(token)
+        
+        # Additionally we can verify the token expiration
+        if time.time() > claims['exp']:
+            raise HTTPException(status_code=401, detail='Token is expired')
+        
+        # And the Audience  (use claims['client_id'] if verifying an access token)
+        if claims['aud'] != APP_CLIENT_ID:
+            raise HTTPException(status_code=401, detail='Token was not issued for this audience')
+        
+        # Now we can use the claims
+        return claims['sub']  # This is the user ID
+    except JWTError:
+        raise HTTPException(status_code=401, detail='Invalid token')
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
+    try:
+        token = credentials.credentials
+        return decode_token(token)
+    except AttributeError:
+        raise HTTPException(status_code=401, detail="Invalid authorization credentials")
     except Exception as e:
-        logging.error(f"Unexpected error in get_current_user: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=401, detail=str(e))
 
 learningCategories = {
     "Visual": [
@@ -279,7 +311,6 @@ Please provide a comprehensive description of the user's learning style, highlig
 
 async def query_knowledge_base(query: str, top_k: int = 3):
     try:
-        logging.info(f"Querying knowledge base with: {query}")
         response = bedrock_agent.retrieve_and_generate(
             input={'text': query},
             retrieveAndGenerateConfiguration={
@@ -290,8 +321,6 @@ async def query_knowledge_base(query: str, top_k: int = 3):
                 'type': 'KNOWLEDGE_BASE'
             }
         )
-        
-        logging.info(f"Knowledge base response: {response}")
         
         generated_answer = response.get('output', {}).get('text', '')
         return generated_answer
@@ -603,14 +632,19 @@ def translate_text(text, target_language):
         return None
 
 @app.post("/generate-narrative")
-async def generate_narrative_endpoint(request: Request):
+async def generate_narrative_endpoint(request: Request, current_user: str = Depends(get_current_user)):
     try:
         data = await request.json()
         chapter_content = data.get('chapter_content', '')
-        user_id = data.get('user_id', '')
         file_id = data.get('file_id', '')
         section_id = data.get('section_id', '')
         force_regenerate = data.get('force_regenerate', False)
+
+        user_id = current_user  # This is now fetched from the token
+
+        if not user_id:
+            logging.error("user_id is empty in generate_narrative_endpoint")
+            raise HTTPException(status_code=400, detail="User authentication failed")
 
         narrative_key = f"narratives/{user_id}/{file_id}/{section_id}.json"
         game_idea_key = f"game_ideas/{user_id}/{file_id}/{section_id}.json"
@@ -629,8 +663,10 @@ async def generate_narrative_endpoint(request: Request):
         # Fetch the user's learning profile
         learning_profile = get_learning_profile(user_id)
 
+        logging.info("Received learning_profile: {learning_profile}")
+
         # Query the knowledge base
-        relevant_info = await query_knowledge_base(chapter_content[:1000])
+        relevant_info = await query_knowledge_base(chapter_content[:2000])
 
         # Check if relevant_info is an error message
         if relevant_info.startswith("Error") or relevant_info.startswith("Unexpected error"):
@@ -741,13 +777,23 @@ async def transcribe_audio(audio: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 def get_learning_profile(user_id):
+    if not user_id:
+        logging.error("get_learning_profile called with empty user_id")
+        return "Learning profile not available."
+
     try:
         profile_key = f"learning_profiles/{user_id}.json"
         response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=profile_key)
         profile_data = json.loads(response['Body'].read().decode('utf-8'))
         return profile_data.get('description', 'Learning profile not available.')
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            logging.error(f"Learning profile not found for user_id: {user_id}")
+        else:
+            logging.error(f"Error fetching learning profile: {str(e)}")
+        return "Learning profile not available."
     except Exception as e:
-        logging.error(f"Error fetching learning profile: {str(e)}")
+        logging.error(f"Unexpected error in get_learning_profile: {str(e)}")
         return "Learning profile not available."
     
 def generate_narrative(prompt: str, max_attempts=1, max_tokens=8192):
@@ -945,27 +991,73 @@ async def chat(request: Request):
     try:
         data = await request.json()
         user_message = data.get('message')
-        chapter_id = data.get('chapter_id')
-        chat_history = data.get('chat_history', [])
-        chapter_content = data.get('chapter_content', '')
+        user_id = data.get('userId')
+        file_id = data.get('fileId')
+        section_name = data.get('sectionName')
         language = data.get('language', 'en')
+        force_regenerate = data.get('forceRegenerate')
+        logging.info(f"Received chat request for section: {section_name}, force_regenerate: {force_regenerate}")
 
-        if not user_message or not chapter_content:
-            raise HTTPException(status_code=400, detail="Message and chapter content are required")
+        if not user_message or not user_id or not file_id or not section_name:
+            raise HTTPException(status_code=400, detail="Missing required parameters")
 
+        # Retrieve the extracted text from S3
+        extracted_text_key = f"extracted-text/{user_id}/{file_id}/section_{section_name}.txt"
+        try:
+            extracted_text_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=extracted_text_key)
+            extracted_text = extracted_text_obj['Body'].read().decode('utf-8')
+        except ClientError as e:
+            logging.error(f"Error retrieving extracted text: {e}")
+            extracted_text = "No extracted text available."
+
+        # Retrieve the generated summary narrative from S3
+        narrative_key = f"narratives/{user_id}/{file_id}/{section_name}_{force_regenerate}.json"
+        try:
+            narrative_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=narrative_key)
+            narrative_data = json.loads(narrative_obj['Body'].read().decode('utf-8'))
+            generated_summary = narrative_data.get('narrative', '')
+        except ClientError as e:
+            logging.error(f"Error retrieving narrative: {e}")
+            generated_summary = "No generated summary available."
+
+        # Retrieve chat history from S3
+        chat_history_key = f"chat-history/{user_id}/{file_id}/{section_name}.json"
+        try:
+            chat_history_obj = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=chat_history_key)
+            chat_history = json.loads(chat_history_obj['Body'].read().decode('utf-8'))
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                chat_history = []
+            else:
+                logging.error(f"Error retrieving chat history: {e}")
+                chat_history = []
+
+        # Retrieve knowledge base information
+        knowledge_base_info = await query_knowledge_base(extracted_text[:2000])
+
+        if knowledge_base_info is None:
+            knowledge_base_info = ""
+            logging.error("Knowledge base info is None")
+            
         # Translate user message to English if not already in English
         if language != 'en':
             user_message = translate_text(user_message, 'en')
 
-        context = f"You are an AI tutor assisting a student with their studies. The current chapter is about: {chapter_content[:200]}... Please ensure your responses are relevant to this topic."
+        context = f"""You are an AI tutor assisting a student with their studies. 
+        The current section content is: {extracted_text}... 
+        The generated summary of this section is: {generated_summary}...
+        Relevant information from the knowledge base is: {knowledge_base_info[:2000]}...
+        Please ensure your responses are relevant to this topic."""
 
-        prompt = f"""{context}
+        prompt = f"""Here's the user's learning profile: {get_learning_profile(user_id)}
+
+        {context}
 
         Remember the context of the previous messages in this conversation. Here's the student's latest question:
 
         {user_message}
 
-        Provide a helpful, accurate, and concise answer based on the given context, your general knowledge, and the conversation history. Make sure to reference the chapter content in your answer. Answer the question but be as concise as possible (4-6 sentences)."""
+        Provide a helpful, accurate, and concise answer based on the given context, your general knowledge, and the conversation history. Make sure to reference the section content in your answer. Answer the question but be as concise as possible (4-6 sentences)."""
 
         # Generate AI response using the chat function
         ai_response = generate_chat_response(prompt, chat_history)
@@ -978,7 +1070,15 @@ async def chat(request: Request):
         chat_history.append({"user": "You", "text": data.get('message')})  # Use original message for history
         chat_history.append({"user": "AI", "text": ai_response})
 
-        return {"reply": ai_response, "updated_chat_history": chat_history}
+        # Save updated chat history to S3
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=chat_history_key,
+            Body=json.dumps(chat_history),
+            ContentType='application/json'
+        )
+
+        return {"reply": ai_response}
 
     except Exception as e:
         logging.exception("Error in chat endpoint")
@@ -1014,8 +1114,6 @@ def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 50
         }
 
         request = json.dumps(native_request)
-
-        logging.debug(f"Sending request to Bedrock: {json.dumps(native_request, indent=2)}")
 
         response = bedrock.invoke_model_with_response_stream(
             modelId="anthropic.claude-3-haiku-20240307-v1:0",
@@ -1126,12 +1224,13 @@ async def translate_text_endpoint(request: Request):
     return {"translated_text": translated_text}
 
 @app.post("/generate-diagrams")
-async def generate_diagrams_endpoint(request: Request):
+async def generate_diagrams_endpoint(request: Request, current_user: str = Depends(get_current_user)):
     try:
         data = await request.json()
         chapter_content = data.get('chapter_content', '')
         generated_summary = data.get('generated_summary', '')
-        user_id = data.get('user_id', '')
+        
+        user_id = current_user
         
         # Fetch the user's learning profile
         learning_profile = get_learning_profile(user_id)
@@ -1182,6 +1281,8 @@ async def generate_diagrams_endpoint(request: Request):
 
         return {"diagrams": diagrams}
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logging.error(f"Error in generate_diagrams_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1511,7 +1612,7 @@ async def process_pdf_section(
 
         try:
             s3_key = f"user-uploads/{user_id}/{file_id}_{filename}"
-            extracted_text_key = f"extracted-text/{user_id}/{file_id}/section_{start_page}_{end_page}.txt"
+            extracted_text_key = f"extracted-text/{user_id}/{file_id}/section_{section_name}.txt"
 
             # Check if extracted text already exists in S3
             try:
