@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem, Button } from '@mui/material';
+import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem, Button, Tabs, Tab } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -20,6 +20,7 @@ import MermaidDiagram from '../components/MermaidDiagram';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Auth } from 'aws-amplify';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ChatIcon from '@mui/icons-material/Chat';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -335,6 +336,7 @@ const Study = () => {
   };
 
   const generateDiagrams = async (extractedText, narrative) => {
+    console.log('Generating diagrams...');
     try {
       const token = await Auth.currentSession().then(session => session.getIdToken().getJwtToken());
       const response = await axios.post('/generate-diagrams', {
@@ -433,7 +435,8 @@ const Study = () => {
       setOriginalNarrative(narrative);
       setGameIdea(gameIdea);
       setGameCode(gameCode);
-
+      setDiagrams(diagrams); // Set diagrams here
+      
       if (targetLanguage !== 'en') {
         setNarrativeStatus('Translating summary...');
         console.log('Translating narrative');
@@ -444,24 +447,34 @@ const Study = () => {
         setTranslatedNarrative(narrative);
       }
 
+      // Step 3: Generate diagrams
       setNarrativeStatus('Generating diagrams...');
       console.log('Generating diagrams');
-      // Fetch diagrams
-      const diagrams = await generateDiagrams(extractedText, narrative);
-      setDiagrams(diagrams);
+      const generatedDiagrams = await generateDiagrams(extractedText, narrative);
+      setDiagrams(generatedDiagrams);
       console.log('Diagrams generated');
 
       setNarrativeStatus('');
+      setIsLoading(false);
     } catch (error) {
       console.error('Error in processAndGenerateNarrative:', error);
-      setError('An error occurred while generating the narrative. Please try again.');
-    } finally {
-      setIsNarrativeLoading(false);
+      setError('An error occurred while processing the content. Please try again.');
+      setIsLoading(false);
     }
   };
 
   const toggleChat = () => {
-    setChatExpanded(!chatExpanded);
+    setChatExpanded(prev => !prev);
+    // Optionally, you might want to scroll to the bottom of the chat when it's expanded
+    if (!chatExpanded) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 300); // Wait for the transition to complete
+    }
+  };
+
+  const toggleSidebar = () => {
+    setSidebarOpen(prev => !prev);
   };
 
   // Use effect to render LaTeX when narrative changes
@@ -713,19 +726,10 @@ const Study = () => {
         try {
           setIsLoading(true);
           setError(null);
-
-          // Fetch the PDF for the selected section
           await fetchAndSetPDF(currentSection.id);
-
-          console.log('Triggering narrative generation');
-          // Generate narrative for the selected section
           await processAndGenerateNarrative(userId, file_id, filename, currentSection.title, false);
-
-          // Update the chapter and section information
           setChapter(currentSection.chapter);
           setSection(currentSection);
-
-          // Scroll to the top of the content
           window.scrollTo(0, 0);
         } catch (error) {
           console.error('Error updating content:', error);
@@ -733,8 +737,6 @@ const Study = () => {
         } finally {
           setIsLoading(false);
         }
-      } else {
-        console.log('Missing required information to update content');
       }
     };
 
@@ -770,9 +772,59 @@ const Study = () => {
     fetchUserData();
   }, [userId, navigate]);
 
+  const [leftActiveTab, setLeftActiveTab] = useState('content');
+  const [rightActiveTab, setRightActiveTab] = useState('game');
+
+  const [isRegeneratingGame, setIsRegeneratingGame] = useState(false);
+
+  const handleRegenerateGame = async () => {
+    setIsRegeneratingGame(true);
+    try {
+      // Step 1: Generate new game idea
+      const gameIdeaResponse = await axios.post('/generate-game-idea', {
+        chapter_content: chapter.content,
+        user_id: userId
+      });
+      const newGameIdea = gameIdeaResponse.data.game_idea;
+
+      // Step 2: Generate new game code based on the new idea
+      const gameCodeResponse = await axios.post('/generate-game-code', {
+        game_idea: newGameIdea
+      });
+      const newGameCode = gameCodeResponse.data.code;
+
+      // Step 3: Update state with new game idea and code
+      setGameIdea(newGameIdea);
+      setGameCode(newGameCode);
+
+      // Step 4: Save the new game idea and code (you may need to implement this endpoint)
+      await axios.post('/save-game', {
+        user_id: userId,
+        file_id: file_id,
+        section_id: currentSection.id,
+        game_idea: newGameIdea,
+        game_code: newGameCode
+      });
+
+    } catch (error) {
+      console.error('Error regenerating game:', error);
+      setError('Failed to regenerate game. Please try again.');
+    } finally {
+      setIsRegeneratingGame(false);
+    }
+  };
+
   return (
     <MathJaxContext>
-      <Box display="flex" height="100vh" overflow="hidden">
+      <Box sx={{ 
+        marginLeft: sidebarOpen ? '240px' : '60px', // Adjust based on your sidebar width
+        marginRight: chatExpanded ? '300px' : '60px', 
+        transition: 'margin 0.3s ease',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        overflow: 'hidden'
+      }}>
         <Sidebar 
           onChapterSelect={handleChapterSelect} 
           onSectionSelect={handleSectionSelect} 
@@ -782,276 +834,239 @@ const Study = () => {
           bookTitle={title}
           currentSection={currentSection?.id}
         />
-        <Box 
-          display="flex" 
-          flexDirection="column" 
-          flexGrow={1} 
-          p={2} 
-          ml={sidebarOpen ? '240px' : '60px'} 
-          transition="margin-left 0.3s ease"
-          height="100%"
-        >
-          {/* Top row: Chapter Content and Summary */}
-          <Box display="flex" height="50%" mb={2}>
-            {/* Top Left: Chapter Content */}
-            <Box flex={1} mr={1}>
-              <Paper elevation={3} sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                  {section && chapter 
-                    ? `${chapter.title} - ${section.title}`
-                    : chapter 
-                      ? chapter.title
-                      : 'No chapter selected'}
-                </Typography>
-                {pdfUrl ? (
-                  <iframe
-                    src={pdfUrl}
-                    width="100%"
-                    height="100%"
-                    style={{ border: 'none', flexGrow: 1 }}
-                    title="PDF Viewer"
-                  />
-                ) : (
-                  chapter && chapter.content ? (
-                    <MathJax>
-                      <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
-                    </MathJax>
-                  ) : section && section.content ? (
-                    <MathJax>
-                      <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
-                    </MathJax>
-                  ) : (
-                    <Typography>No content available.</Typography>
-                  )
+        <Box display="flex" flexGrow={1} overflow="hidden">
+          {/* Left Container */}
+          <Box flex={1} p={2} overflow="auto" mr={1}>
+            <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                <Tabs value={leftActiveTab} onChange={(e, newValue) => setLeftActiveTab(newValue)}>
+                  <Tab label="Chapter Content" value="content" />
+                  <Tab label="Summary" value="summary" />
+                </Tabs>
+              </Box>
+              <Box flex={1} overflow="auto" p={2}>
+                {leftActiveTab === 'content' && (
+                  <>
+                    {pdfUrl ? (
+                      <iframe
+                        src={pdfUrl}
+                        width="100%"
+                        height="100%"
+                        style={{ border: 'none', flexGrow: 1 }}
+                        title="PDF Viewer"
+                      />
+                    ) : (
+                      chapter && chapter.content ? (
+                        <MathJax>
+                          <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
+                        </MathJax>
+                      ) : section && section.content ? (
+                        <MathJax>
+                          <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
+                        </MathJax>
+                      ) : (
+                        <Typography>No content available.</Typography>
+                      )
+                    )}
+                  </>
                 )}
-              </Paper>
-            </Box>
-            {/* Top Right: Summary */}
-            <Box flex={1} ml={1}>
-              <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                    Summary
-                  </Typography>
-                  <Box display="flex" alignItems="center">
-                    <Button
-                      onClick={handleRegenerateNarrative}
-                      disabled={isRegeneratingNarrative}
-                      startIcon={<RefreshIcon />}
-                      sx={{ mr: 2 }}
-                    >
-                      Regenerate Narrative
-                    </Button>
-                    <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
-                    <Select
-                      value={targetLanguage}
-                      onChange={handleLanguageChange}
-                      sx={{ minWidth: 120 }}
-                      size="small"
-                    >
-                      <MenuItem value="en">English</MenuItem>
-                      <MenuItem value="es">Spanish</MenuItem>
-                      <MenuItem value="fr">French</MenuItem>
-                      <MenuItem value="de">German</MenuItem>
-                      <MenuItem value="zh">Chinese</MenuItem>
-                    </Select>
-                  </Box>
-                </Box>
-                {isNarrativeLoading || isRegeneratingNarrative ? (
-                  <Box display="flex" justifyContent="center" alignItems="center" height="100%">
-                    <CircularProgress />
-                  </Box>
-                ) : translatedNarrative ? (
-                  <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                    {translatedNarrative}
-                  </Typography>
-                ) : (
-                  <Typography>No summary available.</Typography>
+                {leftActiveTab === 'summary' && (
+                  <>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                      <Box display="flex" alignItems="center">
+                        <Button
+                          onClick={handleRegenerateNarrative}
+                          disabled={isRegeneratingNarrative}
+                          startIcon={<RefreshIcon />}
+                          sx={{ mr: 2 }}
+                        >
+                          Regenerate Summary
+                        </Button>
+                        <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
+                        <Select
+                          value={targetLanguage}
+                          onChange={handleLanguageChange}
+                          sx={{ minWidth: 120 }}
+                          size="small"
+                        >
+                          <MenuItem value="en">English</MenuItem>
+                          <MenuItem value="es">Spanish</MenuItem>
+                          <MenuItem value="fr">French</MenuItem>
+                          <MenuItem value="de">German</MenuItem>
+                          <MenuItem value="zh">Chinese</MenuItem>
+                        </Select>
+                      </Box>
+                    </Box>
+                    {isNarrativeLoading || isRegeneratingNarrative ? (
+                      <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+                        <CircularProgress />
+                      </Box>
+                    ) : translatedNarrative ? (
+                      <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+                        {translatedNarrative}
+                      </Typography>
+                    ) : (
+                      <Typography>No summary available.</Typography>
+                    )}
+                  </>
                 )}
-              </Paper>
-            </Box>
+              </Box>
+            </Paper>
           </Box>
-          
-          {/* Bottom row: Concept Diagrams and Interactive Game */}
-          <Box display="flex" height="50%">
-            {/* Bottom Left: Concept Diagrams */}
-            <Box flex={1} mr={1}>
-              <Paper elevation={3} sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
-                <Typography variant="h6" gutterBottom>Concept Diagrams</Typography>
-                {diagrams.length > 0 ? (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
-                    {diagrams.map((diagram, index) => (
-                      <MermaidDiagram key={`diagram-${index}`} chart={diagram} />
-                    ))}
-                  </Box>
-                ) : (
-                  <Typography>No diagrams available.</Typography>
+
+          {/* Right Container */}
+          <Box flex={1} p={2} overflow="auto" ml={1}>
+            <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                <Tabs value={rightActiveTab} onChange={(e, newValue) => setRightActiveTab(newValue)}>
+                  <Tab label="Interactive Game" value="game" />
+                  <Tab label="Concept Diagrams" value="diagrams" />
+                </Tabs>
+              </Box>
+              <Box flex={1} overflow="auto" p={2}>
+                {rightActiveTab === 'game' && (
+                  <>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                      <Button
+                        onClick={handleRegenerateGame}
+                        disabled={isRegeneratingGame}
+                        startIcon={<RefreshIcon />}
+                      >
+                        Regenerate Game
+                      </Button>
+                    </Box>
+                    <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                      {isRegeneratingGame ? (
+                        <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+                          <CircularProgress />
+                        </Box>
+                      ) : gameCode ? (
+                        <ErrorBoundary>
+                          <DynamicGameComponent gameCode={gameCode} />
+                        </ErrorBoundary>
+                      ) : (
+                        <Typography>No game available for this chapter.</Typography>
+                      )}
+                    </Box>
+                  </>
                 )}
-              </Paper>
-            </Box>
-            {/* Bottom Right: Interactive Game */}
-            <Box flex={1} ml={1}>
-              <Paper elevation={3} sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <Typography variant="h6" gutterBottom>Interactive Game</Typography>
-                <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
-                  {gameCode ? (
-                    <ErrorBoundary>
-                      <DynamicGameComponent gameCode={gameCode} />
-                    </ErrorBoundary>
-                  ) : (
-                    <Typography>No game available for this chapter.</Typography>
-                  )}
-                </Box>
-              </Paper>
-            </Box>
+                {rightActiveTab === 'diagrams' && (
+                  <>
+                    {diagrams && diagrams.length > 0 ? (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
+                        {diagrams.map((diagram, index) => (
+                          <MermaidDiagram key={`diagram-${index}`} chart={diagram} />
+                        ))}
+                      </Box>
+                    ) : (
+                      <Typography>No diagrams available.</Typography>
+                    )}
+                  </>
+                )}
+              </Box>
+            </Paper>
           </Box>
         </Box>
 
-        
-          {/* Chat Section (unchanged) */}
+        {/* Chat Section (unchanged) */}
+        <Box 
+          sx={{ 
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            width: chatExpanded ? '300px' : '60px',
+            height: '100%',
+            transition: 'width 0.3s ease',
+            bgcolor: 'background.paper',
+            boxShadow: 3,
+            display: 'flex',
+            flexDirection: 'column',
+            zIndex: 1000,
+          }}
+        >
           <Box 
+            onClick={toggleChat} 
             sx={{ 
-              position: 'fixed',
-              bottom: 0,
-              right: 0,
-              width: '300px',
-              height: chatExpanded ? '50%' : '60px',
-              transition: 'height 0.3s ease',
-              bgcolor: 'background.paper',
-              boxShadow: 3,
-              display: 'flex',
+              p: 1, 
+              display: 'flex', 
               flexDirection: 'column',
-              zIndex: 1000,
+              alignItems: 'center', 
+              cursor: 'pointer',
+              bgcolor: 'primary.main',
+              color: 'white',
+              height: chatExpanded ? 'auto' : '100%',
             }}
           >
-            <Box 
-              onClick={toggleChat} 
-              sx={{ 
-                p: 1, 
-                display: 'flex', 
-                alignItems: 'center', 
-                cursor: 'pointer',
-                bgcolor: 'primary.main',
-                color: 'white'
-              }}
-            >
-              <Typography variant="h6" color="white" flexGrow={1}>Chat</Typography>
-              <IconButton size="small" sx={{ color: 'white' }}>
-                {chatExpanded ? <ExpandMoreIcon /> : <ExpandLessIcon />}
-              </IconButton>
-            </Box>
+            <IconButton size="large" sx={{ color: 'white' }}>
+              <ChatIcon />
+            </IconButton>
             {chatExpanded && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)' }}>
-                <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
-                  {chatMessages.map((msg, index) => (
-                    <Box 
-                      key={index} 
-                      sx={{ 
-                        mb: 2, 
-                        p: 1, 
-                        bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
-                        borderRadius: 1,
-                        width: '90%',
-                        mx: 'auto',
-                        position: 'relative',
-                      }}
-                    >
-                      <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
-                        {msg.user}:
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
-                        {msg.text}
-                      </Typography>
-                      {msg.user === 'AI' && (
-                        <IconButton 
-                          onClick={() => speakText(msg.text)} 
-                          sx={{ 
-                            color: 'white',
-                            position: 'absolute',
-                            right: 8,
-                            top: 8,
-                            backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                            '&:hover': {
-                              backgroundColor: 'rgba(255, 255, 255, 0.5)',
-                            },
-                          }}
-                        >
-                          {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
-                        </IconButton>
-                      )}
-                    </Box>
-                  ))}
-                  <div ref={messagesEndRef} />
-                </Box>
-                <Divider />
-                <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
-                  <InputBase
-                    sx={{ ml: 1, flex: 1 }}
-                    placeholder="Enter message"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    disabled={isGenerating || isListening}
-                  />
-                  <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
-                    <MicIcon color={isListening ? "secondary" : "primary"} />
-                  </IconButton>
-                  <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
-                    {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
-                  </IconButton>
-                </Paper>
-              </Box>
+              <Typography variant="h6" color="white">Chat</Typography>
             )}
           </Box>
-          <audio ref={audioRef} onEnded={() => setIsSpeaking(false)} />
-          <Box
-            sx={{
-              position: 'fixed',
-              top: 10,
-              right: 0,
-              width: webcamExpanded ? '320px' : '60px',
-              height: webcamExpanded ? '240px' : '60px',
-              transition: 'all 0.3s ease',
-              bgcolor: 'background.paper',
-              boxShadow: 3,
-              display: 'flex',
-              flexDirection: 'column',
-              zIndex: 1000,
-              overflow: 'hidden',
-            }}
-          >
-            <Box
-              onClick={toggleWebcam}
-              sx={{
-                p: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                bgcolor: 'primary.main',
-                color: 'white',
-                height: '60px',
-              }}
-            >
-              <IconButton size="small" sx={{ color: 'white' }}>
-                {webcamExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              </IconButton>
+          {chatExpanded && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 80px)' }}>
+              <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
+                {chatMessages.map((msg, index) => (
+                  <Box 
+                    key={index} 
+                    sx={{ 
+                      mb: 2, 
+                      p: 1, 
+                      bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
+                      borderRadius: 1,
+                      width: '90%',
+                      mx: 'auto',
+                      position: 'relative',
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
+                      {msg.user}:
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
+                      {msg.text}
+                    </Typography>
+                    {msg.user === 'AI' && (
+                      <IconButton 
+                        onClick={() => speakText(msg.text)} 
+                        sx={{ 
+                          color: 'white',
+                          position: 'absolute',
+                          right: 8,
+                          top: 8,
+                          backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                          '&:hover': {
+                            backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                          },
+                        }}
+                      >
+                        {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
+                      </IconButton>
+                    )}
+                  </Box>
+                ))}
+                <div ref={messagesEndRef} />
+              </Box>
+              <Divider />
+              <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
+                <InputBase
+                  sx={{ ml: 1, flex: 1 }}
+                  placeholder="Enter message"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  disabled={isGenerating || isListening}
+                />
+                <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
+                  <MicIcon color={isListening ? "secondary" : "primary"} />
+                </IconButton>
+                <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
+                  {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
+                </IconButton>
+              </Paper>
             </Box>
-            <Box sx={{ display: webcamExpanded ? 'block' : 'none' }}>
-              <Webcam
-                audio={false}
-                ref={webcamRef}
-                screenshotFormat="image/jpeg"
-                videoConstraints={{ width: 320, height: 240, facingMode: "user" }}
-                style={{ width: '100%', height: '180px' }}
-              />
-              {emotion && (
-                <Typography variant="body2" sx={{ p: 1, textAlign: 'center' }}>
-                  Detected emotion: {emotion}
-                </Typography>
-              )}
-            </Box>
-          </Box>
+          )}
         </Box>
+      </Box>
     </MathJaxContext>
   );
 };

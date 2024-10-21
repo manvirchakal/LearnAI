@@ -346,10 +346,6 @@ def upload_file_to_s3(file_name, bucket, object_name=None):
         return False
     return True
 
-class PDFUploadResponse(BaseModel):
-    message: str
-    s3_key: str
-
 @app.post("/upload-pdf")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -1282,54 +1278,57 @@ async def generate_diagrams_endpoint(request: Request, current_user: str = Depen
         return {"diagrams": diagrams}
 
     except HTTPException as he:
+        # This will catch the HTTPException raised in generate_diagrams
         raise he
     except Exception as e:
-        logging.error(f"Error in generate_diagrams_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Unexpected error in generate_diagrams_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
     
-async def generate_diagrams(prompt: str, max_attempts=3):
-    for attempt in range(max_attempts):
-        try:
-            native_request = {
-                'anthropic_version': 'bedrock-2023-05-31',
-                'max_tokens': 4096,
-                'temperature': 0.7,
-                'top_p': 0.9,
-                'messages': [
-                    {
-                        'role': 'user',
-                        'content': [{'type': 'text', 'text': prompt}],
-                    }
-                ],
-            }
+async def generate_diagrams(prompt: str):
+    try:
+        native_request = {
+            'anthropic_version': 'bedrock-2023-05-31',
+            'max_tokens': 4096,
+            'temperature': 0.7,
+            'top_p': 0.9,
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': [{'type': 'text', 'text': prompt}],
+                }
+            ],
+        }
 
-            request = json.dumps(native_request)
+        request = json.dumps(native_request)
 
-            response = bedrock.invoke_model_with_response_stream(
-                modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
-                body=request
-            )
+        response = bedrock.invoke_model_with_response_stream(
+            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+            body=request
+        )
 
-            full_response = ""
-            for event in response['body']:
-                chunk = json.loads(event['chunk']['bytes'])
-                if chunk['type'] == 'content_block_delta':
-                    full_response += chunk['delta'].get('text', '')
+        full_response = ""
+        for event in response['body']:
+            chunk = json.loads(event['chunk']['bytes'])
+            if chunk['type'] == 'content_block_delta':
+                full_response += chunk['delta'].get('text', '')
 
-            # Extract Mermaid diagrams from the response
-            diagrams = re.findall(r'```mermaid\n(.*?)\n```', full_response, re.DOTALL)
-            
-            if diagrams:
-                return diagrams
-            else:
-                logging.warning(f"No diagrams found in the response. Attempt {attempt + 1}/{max_attempts}")
+        # Extract Mermaid diagrams from the response
+        diagrams = re.findall(r'```mermaid\n(.*?)\n```', full_response, re.DOTALL)
+        
+        if diagrams:
+            return diagrams
+        else:
+            logging.warning("No diagrams found in the response.")
+            return []
 
-        except Exception as e:
-            logging.error(f"Error generating diagrams: {str(e)}")
-            if attempt == max_attempts - 1:
-                raise
-
-    return []
+    except ClientError as e:
+        error_message = f"Error generating diagrams: {str(e)}"
+        logging.error(error_message)
+        raise HTTPException(status_code=500, detail=error_message)
+    except Exception as e:
+        error_message = f"Unexpected error generating diagrams: {str(e)}"
+        logging.error(error_message)
+        raise HTTPException(status_code=500, detail=error_message)
 
 @app.get("/user-textbooks")
 async def get_user_textbooks(current_user: str = Depends(get_current_user)):

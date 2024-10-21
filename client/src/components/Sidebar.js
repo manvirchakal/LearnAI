@@ -36,14 +36,18 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
     <Drawer
       variant="permanent"
       sx={{
-        width: isOpen ? 240 : collapsedWidth,
+        width: isOpen ? 240 : 60,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
-          width: isOpen ? 240 : collapsedWidth,
+          width: isOpen ? 240 : 60,
           boxSizing: 'border-box',
           transition: 'width 0.3s ease',
           overflowX: 'hidden',
           bgcolor: 'background.paper',
+          position: 'fixed',
+          height: '100%',
+          zIndex: 1200,
+          borderRight: 'none',
         },
       }}
       open={isOpen}
