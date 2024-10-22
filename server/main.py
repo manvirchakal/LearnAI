@@ -682,6 +682,7 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
         14. Includes practice problems or exercises with detailed solutions to reinforce understanding.
         15. Summarizes key points at the end of each major section to aid in retention and review.
         16. For any practice questions or excercises in the chapter content, provide a detailed solution with a step by step explanation.
+        17. Use Markdown formatting for the summary.
 
         The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content, using at least 75% of the available 8192 token limit. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into manageable parts.
         """
@@ -710,6 +711,8 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
         diagram_result = {
             "diagrams": diagrams
         }
+
+        logging.info(f"Generated narrative: {narrative_result}")
 
         return {**narrative_result, **game_result, **diagram_result}
 

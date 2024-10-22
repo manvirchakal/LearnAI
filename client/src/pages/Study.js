@@ -21,6 +21,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Auth } from 'aws-amplify';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ChatIcon from '@mui/icons-material/Chat';
+import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -61,46 +64,6 @@ const preprocessLatex = (content) => {
     // Clean up extra spaces
     .replace(/\s+/g, ' ')
     .trim();
-};
-
-const formatSummary = (content) => {
-  let processedContent = content;
-  
-  // Store LaTeX equations temporarily
-  const equations = [];
-  processedContent = processedContent.replace(/\$\$(.*?)\$\$|\$(.*?)\$|\\\[(.*?)\\\]|\\\((.*?)\\\)/gs, (match) => {
-    equations.push(match);
-    return `%%EQUATION${equations.length - 1}%%`;
-  });
-
-  // Apply other transformations
-  processedContent = processedContent
-    // Format main headings
-    .replace(/^### (.*?)$/gm, '<h2 class="main-heading">$1</h2>')
-    // Format subheadings
-    .replace(/^## (.*?)$/gm, '<h3 class="sub-heading">$1</h3>')
-    // Format sub-subheadings
-    .replace(/^# (.*?)$/gm, '<h4 class="sub-sub-heading">$1</h4>')
-    // Format lists
-    .replace(/^- (.*?)$/gm, '<li>$1</li>')
-    .replace(/<li>.*?<\/li>/gs, '<ul class="summary-list">$&</ul>')
-    // Format paragraphs
-    .replace(/^(?!<h[2-4]|<ul)(.*?)$/gm, '<p class="summary-paragraph">$1</p>')
-    // Format bold text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    // Format italic text
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    // Add section dividers
-    .replace(/<h2 class="main-heading">/g, '<hr class="section-divider"><h2 class="main-heading">')
-    // Remove empty paragraphs
-    .replace(/<p class="summary-paragraph">\s*<\/p>/g, '');
-
-  // Restore LaTeX equations
-  equations.forEach((eq, index) => {
-    processedContent = processedContent.replace(`%%EQUATION${index}%%`, eq);
-  });
-
-  return processedContent;
 };
 
 const Study = () => {
@@ -345,29 +308,14 @@ const Study = () => {
       setIsLoading(true);
       setError(null);
       
-      console.log('Handling section select:', { sectionId, userId, file_id, filename });
-
-      if (!userId || !file_id || !filename) {
-        console.error('Missing required information');
-        setError('Missing required information to load section. Please try again.');
-        return;
-      }
-
       const foundSection = findSectionInBookStructure(sectionId);
       if (foundSection) {
         setCurrentSection(foundSection);
-        
         await fetchAndSetPDF(sectionId);
-
-        console.log('Current user ID:', userId);
-
-        await processAndGenerateNarrative(
-          userId, 
-          file_id, 
-          filename, 
-          foundSection.title,
-          false // forceRegenerate
-        );
+        await processAndGenerateNarrative(userId, file_id, filename, foundSection.title, false);
+        setChapter(foundSection.chapter);
+        setSection(foundSection);
+        window.scrollTo(0, 0);
       } else {
         console.error('Section not found in book structure');
         setError('Failed to load section. Please try again.');
@@ -696,7 +644,6 @@ const Study = () => {
           setIsLoading(true);
           setError(null);
           await fetchAndSetPDF(currentSection.id);
-          await processAndGenerateNarrative(userId, file_id, filename, currentSection.title, false);
           setChapter(currentSection.chapter);
           setSection(currentSection);
           window.scrollTo(0, 0);
@@ -875,9 +822,17 @@ const Study = () => {
                         <CircularProgress />
                       </Box>
                     ) : translatedNarrative ? (
-                      <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                        {translatedNarrative}
-                      </Typography>
+                      <ReactMarkdown 
+                        children={translatedNarrative} 
+                        rehypePlugins={[rehypeRaw]} 
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          pre: ({node, ...props}) => <pre style={{overflow: 'auto'}} {...props} />,
+                          code: ({node, inline, ...props}) => (
+                            <code style={{backgroundColor: '#f0f0f0', padding: inline ? '2px 4px' : '10px', borderRadius: '4px'}} {...props} />
+                          )
+                        }}
+                      />
                     ) : (
                       <Typography>No summary available.</Typography>
                     )}
