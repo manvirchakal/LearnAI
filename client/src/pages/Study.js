@@ -173,6 +173,8 @@ const Study = () => {
       // Fetch narrative and game idea
       const narrativeResponse = await axios.post(`/generate-narrative/${chapterId}`, {
         chapter_content: chapterContent,
+        user_id: userId,
+        file_id: file_id,
       });
       
       console.log("Fetched narrative:", narrativeResponse.data);
@@ -181,18 +183,9 @@ const Study = () => {
       const gameIdea = narrativeResponse.data.game_idea;
       const gameCode = narrativeResponse.data.game_code;
 
-      // Fetch diagrams using both chapter content and generated narrative
-      const diagramsResponse = await axios.post(`/generate-diagrams`, {
-        chapter_content: chapterContent,
-        generated_summary: generatedNarrative,
-      });
-
-      console.log("Fetched diagrams:", diagramsResponse.data);
-
       setOriginalNarrative(generatedNarrative);
       setGameIdea(gameIdea);
       setGameCode(gameCode);
-      setDiagrams(diagramsResponse.data.diagrams || []);
 
       if (targetLanguage !== 'en') {
         const translatedText = await translateText(generatedNarrative, targetLanguage);
@@ -201,7 +194,6 @@ const Study = () => {
         setTranslatedNarrative(generatedNarrative);
       }
     } catch (error) {
-      console.error('Error fetching narrative or diagrams:', error);
       setOriginalNarrative('Failed to load narrative. Please try again.');
       setTranslatedNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
@@ -331,28 +323,9 @@ const Study = () => {
     return {
       narrative: response.data.narrative,
       gameIdea: response.data.game_idea,
-      gameCode: response.data.game_code
+      gameCode: response.data.game_code,
+      diagrams: response.data.diagrams
     };
-  };
-
-  const generateDiagrams = async (extractedText, narrative) => {
-    console.log('Generating diagrams...');
-    try {
-      const token = await Auth.currentSession().then(session => session.getIdToken().getJwtToken());
-      const response = await axios.post('/generate-diagrams', {
-        chapter_content: extractedText,
-        generated_summary: narrative,
-      }, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      return response.data.diagrams || [];
-    } catch (error) {
-      console.error('Error generating diagrams:', error);
-      return [];
-    }
   };
 
   useEffect(() => {
@@ -429,33 +402,29 @@ const Study = () => {
       setNarrativeStatus('Generating summary...');
       // Step 2: Generate narrative
       console.log('Generating narrative');
-      const { narrative, gameIdea, gameCode } = await generateNarrative(extractedText, userId, fileId, sectionName, forceRegenerate);
-      console.log('Narrative generated');
+      const { narrative, gameIdea, gameCode, diagrams } = await generateNarrative(extractedText, userId, fileId, sectionName, forceRegenerate);
+      console.log('Narrative generated:', narrative);
+      console.log('Diagrams generated:', diagrams);
 
       setOriginalNarrative(narrative);
       setGameIdea(gameIdea);
       setGameCode(gameCode);
-      setDiagrams(diagrams); // Set diagrams here
+      setDiagrams(diagrams);
       
       if (targetLanguage !== 'en') {
         setNarrativeStatus('Translating summary...');
         console.log('Translating narrative');
         const translatedText = await translateText(narrative, targetLanguage);
         setTranslatedNarrative(translatedText);
-        console.log('Narrative translated');
+        console.log('Narrative translated:', translatedText); // Add this line
       } else {
         setTranslatedNarrative(narrative);
+        console.log('Setting translated narrative (same as original):', narrative); // Add this line
       }
-
-      // Step 3: Generate diagrams
-      setNarrativeStatus('Generating diagrams...');
-      console.log('Generating diagrams');
-      const generatedDiagrams = await generateDiagrams(extractedText, narrative);
-      setDiagrams(generatedDiagrams);
-      console.log('Diagrams generated');
 
       setNarrativeStatus('');
       setIsLoading(false);
+      console.log('Narrative loading complete'); // Add this line
     } catch (error) {
       console.error('Error in processAndGenerateNarrative:', error);
       setError('An error occurred while processing the content. Please try again.');
@@ -814,6 +783,10 @@ const Study = () => {
     }
   };
 
+  useEffect(() => {
+    console.log('isNarrativeLoading changed:', isNarrativeLoading);
+  }, [isNarrativeLoading]);
+
   return (
     <MathJaxContext>
       <Box sx={{ 
@@ -935,7 +908,7 @@ const Study = () => {
                         Regenerate Game
                       </Button>
                     </Box>
-                    <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                    <Box sx={{ flexGrow: 1, overflow: 'hidden', height: 'calc(100vh - 200px)' }}>
                       {isRegeneratingGame ? (
                         <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                           <CircularProgress />

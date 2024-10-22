@@ -632,8 +632,6 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
     try:
         data = await request.json()
         chapter_content = data.get('chapter_content', '')
-        file_id = data.get('file_id', '')
-        section_id = data.get('section_id', '')
         force_regenerate = data.get('force_regenerate', False)
 
         user_id = current_user  # This is now fetched from the token
@@ -641,20 +639,6 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
         if not user_id:
             logging.error("user_id is empty in generate_narrative_endpoint")
             raise HTTPException(status_code=400, detail="User authentication failed")
-
-        narrative_key = f"narratives/{user_id}/{file_id}/{section_id}.json"
-        game_idea_key = f"game_ideas/{user_id}/{file_id}/{section_id}.json"
-
-        if not force_regenerate:
-            try:
-                existing_narrative = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=narrative_key)
-                existing_game_idea = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=game_idea_key)
-                narrative_data = json.loads(existing_narrative['Body'].read().decode('utf-8'))
-                game_idea_data = json.loads(existing_game_idea['Body'].read().decode('utf-8'))
-                return {**narrative_data, **game_idea_data}
-            except s3_client.exceptions.NoSuchKey:
-                # If either file doesn't exist, proceed with generation
-                pass
 
         # Fetch the user's learning profile
         learning_profile = get_learning_profile(user_id)
@@ -697,18 +681,22 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
         13. Explains the implications and importance of the concepts for future topics in the subject.
         14. Includes practice problems or exercises with detailed solutions to reinforce understanding.
         15. Summarizes key points at the end of each major section to aid in retention and review.
+        16. For any practice questions or excercises in the chapter content, provide a detailed solution with a step by step explanation.
 
         The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content, using at least 75% of the available 8192 token limit. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into manageable parts.
         """
 
         narrative = generate_narrative(narrative_prompt)
-        
+
         # Generate game idea
         game_response = generate_game_idea(chapter_content, learning_profile)
         
         # Generate game code
         game_code_response = await generate_game_code(GameIdeaRequest(game_idea=game_response))
         game_code = game_code_response.get("code", "")
+
+        # Generate diagrams
+        diagrams = await generate_diagrams(chapter_content, narrative, learning_profile)
 
         narrative_result = {
             "narrative": narrative
@@ -719,13 +707,11 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
             "game_code": game_code
         }
 
-        # Save the generated narrative to S3
-        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=narrative_key, Body=json.dumps(narrative_result))
-        
-        # Save the generated game idea and code to S3
-        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=game_idea_key, Body=json.dumps(game_result))
+        diagram_result = {
+            "diagrams": diagrams
+        }
 
-        return {**narrative_result, **game_result}
+        return {**narrative_result, **game_result, **diagram_result}
 
     except Exception as e:
         logging.exception("Error in generate_narrative_endpoint")
@@ -907,6 +893,8 @@ async def generate_game_code(request: GameIdeaRequest):
                     - In the useEffect for keyboard events, check if the game container has focus before handling key presses
                 19. Display the current function prominently using plain text, and update it whenever it changes
                 20. Use requestAnimationFrame for the game loop to ensure smooth animation
+                21. Add error checking before accessing array elements or object properties
+                22. Use optional chaining (?.) when accessing nested properties to prevent errors
                                                                 
             Generate the game code now, remember to not include any explanations or comments, just the code:
             """
@@ -1218,117 +1206,6 @@ async def translate_text_endpoint(request: Request):
         raise HTTPException(status_code=500, detail="Translation failed")
 
     return {"translated_text": translated_text}
-
-@app.post("/generate-diagrams")
-async def generate_diagrams_endpoint(request: Request, current_user: str = Depends(get_current_user)):
-    try:
-        data = await request.json()
-        chapter_content = data.get('chapter_content', '')
-        generated_summary = data.get('generated_summary', '')
-        
-        user_id = current_user
-        
-        # Fetch the user's learning profile
-        learning_profile = get_learning_profile(user_id)
-
-        # Construct the prompt
-        prompt = f"""
-        Based on the following chapter content, generated summary, and the user's learning profile, create a set of diagrams that illustrate the key concepts:
-
-        Chapter content: {chapter_content}
-
-        Generated summary: {generated_summary}
-
-        User's learning profile: {learning_profile}
-
-        Here's a template for the diagrams:
-        ```mermaid
-        graph TD
-            A[First Concept] --> B[Second Concept]
-            B --> C[Third Concept]
-            C --> D[Fourth Concept]
-            D --> E[Fifth Concept]
-        ```
-
-        Please create diagrams that:
-        1. Illustrate the main concepts and their relationships
-        2. Are clear and easy to understand
-        3. Are tailored to the user's learning style as described in their profile
-        4. Use appropriate visual representations (e.g., flowcharts, mind maps, etc.)
-
-        Some extra guidelines:
-        - Always start with 'graph TD' on its own line
-        - Use single letters for node IDs (A, B, C, etc.)
-        - Use square brackets for node labels: [Label text]
-        - Use only --> for arrows (no labels or other arrow types)
-        - Each node and connection should be on its own line
-        - Indent each line after 'graph TD' with 4 spaces
-        - Use only plain English words in labels, NO mathematical symbols or notation
-        - Avoid special characters, apostrophes, or quotation marks in labels
-        - Use simple, descriptive text for labels
-        - If referring to mathematical concepts, use words instead of symbols (e.g., "First Derivative" instead of "f'(x)")
-        - Ensure all nodes are connected in a logical flow
-
-        Provide the diagrams in Mermaid syntax.
-        """
-
-        # Generate diagrams
-        diagrams = await generate_diagrams(prompt)
-
-        return {"diagrams": diagrams}
-
-    except HTTPException as he:
-        # This will catch the HTTPException raised in generate_diagrams
-        raise he
-    except Exception as e:
-        logging.error(f"Unexpected error in generate_diagrams_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred")
-    
-async def generate_diagrams(prompt: str):
-    try:
-        native_request = {
-            'anthropic_version': 'bedrock-2023-05-31',
-            'max_tokens': 4096,
-            'temperature': 0.7,
-            'top_p': 0.9,
-            'messages': [
-                {
-                    'role': 'user',
-                    'content': [{'type': 'text', 'text': prompt}],
-                }
-            ],
-        }
-
-        request = json.dumps(native_request)
-
-        response = bedrock.invoke_model_with_response_stream(
-            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
-            body=request
-        )
-
-        full_response = ""
-        for event in response['body']:
-            chunk = json.loads(event['chunk']['bytes'])
-            if chunk['type'] == 'content_block_delta':
-                full_response += chunk['delta'].get('text', '')
-
-        # Extract Mermaid diagrams from the response
-        diagrams = re.findall(r'```mermaid\n(.*?)\n```', full_response, re.DOTALL)
-        
-        if diagrams:
-            return diagrams
-        else:
-            logging.warning("No diagrams found in the response.")
-            return []
-
-    except ClientError as e:
-        error_message = f"Error generating diagrams: {str(e)}"
-        logging.error(error_message)
-        raise HTTPException(status_code=500, detail=error_message)
-    except Exception as e:
-        error_message = f"Unexpected error generating diagrams: {str(e)}"
-        logging.error(error_message)
-        raise HTTPException(status_code=500, detail=error_message)
 
 @app.get("/user-textbooks")
 async def get_user_textbooks(current_user: str = Depends(get_current_user)):
@@ -1693,3 +1570,77 @@ def extract_text_and_tables(textract_response):
                 extracted_content += "\n"
             extracted_content += "\n"
     return extracted_content
+
+async def generate_diagrams(chapter_content: str, generated_summary: str, learning_profile: str):
+    prompt = f"""Based on the following chapter content, generated summary, and the user's learning profile, create a set of diagrams that illustrate the key concepts:
+
+    Chapter content: {chapter_content}
+
+    Generated summary: {generated_summary}
+
+    User's learning profile: {learning_profile}
+
+    Here's a template for the diagrams:
+    ```mermaid
+    graph TD
+        A[First Concept] --> B[Second Concept]
+        B --> C[Third Concept]
+        C --> D[Fourth Concept]
+        D --> E[Fifth Concept]
+    ```
+
+    Please create diagrams that:
+    1. Illustrate the main concepts and their relationships
+    2. Are clear and easy to understand
+    3. Are tailored to the user's learning style as described in their profile
+    4. Use appropriate visual representations (e.g., flowcharts, mind maps, etc.)
+
+    Some extra guidelines:
+    - Always start with 'graph TD' on its own line
+    - Use single letters for node IDs (A, B, C, etc.)
+    - Use square brackets for node labels: [Label text]
+    - Use only --> for arrows (no labels or other arrow types)
+    - Each node and connection should be on its own line
+    - Indent each line after 'graph TD' with 4 spaces
+    - Use only plain English words in labels, NO mathematical symbols or notation
+    - Avoid special characters, apostrophes, or quotation marks in labels
+    - Use simple, descriptive text for labels
+    - If referring to mathematical concepts, use words instead of symbols (e.g., "First Derivative" instead of "f'(x)")
+    - Ensure all nodes are connected in a logical flow
+
+    Provide the diagrams in Mermaid syntax.
+    """
+
+    try:
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 2000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}]
+                }
+            ],
+            "temperature": 0.7,
+            "top_p": 0.9,
+        })
+
+        response = bedrock.invoke_model_with_response_stream(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=body
+        )
+
+        generated_diagrams = ""
+        for event in response['body']:
+            chunk = json.loads(event['chunk']['bytes'])
+            if chunk['type'] == 'content_block_delta':
+                generated_diagrams += chunk['delta'].get('text', '')
+
+        # Extract Mermaid diagrams from the response
+        mermaid_diagrams = re.findall(r'```mermaid\n(.*?)\n```', generated_diagrams, re.DOTALL)
+
+        return mermaid_diagrams
+
+    except Exception as e:
+        logging.error(f"Error generating diagrams: {str(e)}")
+        return []
