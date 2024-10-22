@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Auth } from 'aws-amplify';
+import NavBar from '../pages/NavBar'; // Import the NavBar component
 
 function UserBooks() {
     const [books, setBooks] = useState([]);
@@ -50,15 +51,18 @@ function UserBooks() {
 
     return (
         <div>
-            <h2>Your Books</h2>
-            <ul>
-                {books.map(book => (
-                    <li key={book.id}>
-                        {book.title}
-                        <button onClick={() => downloadBook(book.id)}>Download</button>
-                    </li>
-                ))}
-            </ul>
+            <NavBar /> 
+            <div className="user-books-content">
+                <h2>Your Books</h2>
+                <ul>
+                    {books.map(book => (
+                        <li key={book.id}>
+                            {book.title}
+                            <button onClick={() => downloadBook(book.id)}>Download</button>
+                        </li>
+                    ))}
+                </ul>
+            </div>
         </div>
     );
 }

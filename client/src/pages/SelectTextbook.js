@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Auth } from 'aws-amplify';
 import { Box, Typography, List, ListItem, ListItemText, Button, CircularProgress } from '@mui/material';
+import NavBar from './NavBar';
 
 const SelectTextbook = () => {
   const [textbooks, setTextbooks] = useState([]);
@@ -68,35 +69,50 @@ const SelectTextbook = () => {
     }
   };
 
-  if (loading) return <CircularProgress />;
-  if (error) return <Typography color="error">{error}</Typography>;
+  if (loading) return (
+    <>
+      <NavBar />
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress />
+      </Box>
+    </>
+  );
+  if (error) return (
+    <>
+      <NavBar />
+      <Typography color="error">{error}</Typography>
+    </>
+  );
 
   return (
-    <Box sx={{ maxWidth: 600, margin: 'auto', mt: 4 }}>
-      <Typography variant="h4" gutterBottom>Select a Textbook</Typography>
+    <>
+      <NavBar />
+      <Box sx={{ maxWidth: 600, margin: 'auto', mt: 4 }}>
+        <Typography variant="h4" gutterBottom>Select a Textbook</Typography>
       {textbooks.length === 0 ? (
         <Typography>No textbooks found. Please upload a textbook first.</Typography>
-      ) : (
-        <List>
-          {textbooks.map((textbook, index) => (
-            <ListItem 
-              key={index} 
-              button 
-              onClick={() => handleSelectTextbook(textbook.s3_key, textbook.title)}
-              sx={{ border: '1px solid #ddd', borderRadius: 1, mb: 1 }}
-            >
-              <ListItemText 
-                primary={textbook.title} 
-                secondary={`Uploaded on: ${textbook.upload_date}`} 
-              />
-            </ListItem>
-          ))}
-        </List>
-      )}
-      <Button variant="contained" onClick={() => navigate('/upload')} sx={{ mt: 2 }}>
-        Upload New Textbook
-      </Button>
-    </Box>
+        ) : (
+          <List>
+            {textbooks.map((textbook, index) => (
+              <ListItem 
+                key={index} 
+                button 
+                onClick={() => handleSelectTextbook(textbook.s3_key, textbook.title)}
+                sx={{ border: '1px solid #ddd', borderRadius: 1, mb: 1 }}
+              >
+                <ListItemText 
+                  primary={textbook.title} 
+                  secondary={`Uploaded on: ${textbook.upload_date}`} 
+                />
+              </ListItem>
+            ))}
+          </List>
+        )}
+        <Button variant="contained" onClick={() => navigate('/upload')} sx={{ mt: 2 }}>
+          Upload New Textbook
+        </Button>
+      </Box>
+    </>
   );
 };
 

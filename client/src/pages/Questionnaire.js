@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios'; // Add this import
 import './Questionnaire.css'; // Import your styles
 import { calculateLearningProfile } from '../utils/learningProfile';
+import NavBar from './NavBar';
 
 const learningCategories = {
   Visual: [
@@ -101,8 +102,10 @@ const Questionnaire = () => {
   };
 
   return (
-    <div className="questionnaire-container">
-      <h2>Fill out this questionnaire so we can cater LearnAI based on your learning style</h2>
+      <>
+      <NavBar />
+      <div className="questionnaire-container">
+        <h2>Fill out this questionnaire so we can cater LearnAI based on your learning style</h2>
       <form onSubmit={handleSubmit}>
         {Object.keys(learningCategories).map((category, categoryIndex) => (
           <div key={categoryIndex} className="category">
@@ -128,8 +131,9 @@ const Questionnaire = () => {
           </div>
         ))}
         <button type="submit">Submit</button>
-      </form>
-    </div>
+        </form>
+      </div>
+    </>
   );
 };
 
