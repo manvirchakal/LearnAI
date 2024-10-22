@@ -472,7 +472,7 @@ def extract_chapters_from_textract(textract_response, content_start_page):
             text = block['Text'].strip()
             logging.debug(f"Processing line: {text}")
             
-            if text.startswith('Chapter'):
+            if text.lower().startswith('chapter ') and re.match(r'^\d+(\.\d+)?:?', text.split()[1]):
                 logging.info(f"Found new chapter: {text}")
                 if current_chapter:
                     chapters.append(current_chapter)
