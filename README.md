@@ -1,4 +1,4 @@
-# LearnAI: Revolutionizing Education with AI
+# LearnAI: Revolutionizing Education with GenAI
 
 Welcome to LearnAI, an innovative AI-driven educational platform designed to transform the learning experience. Our mission is to provide personalized, adaptive, and engaging education for every student. LearnAI empowers students to learn at their own pace, ensuring that each individual receives the support and resources they need to succeed. By harnessing the power of artificial intelligence, we're creating a future where education is tailored to you. Our platform offers personalized learning paths, performance-based content adjustment, dynamic resource allocation, and a interactive learning elements. Join us on this exciting journey to revolutionize learning!
 
