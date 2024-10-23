@@ -1583,35 +1583,34 @@ async def generate_diagrams(chapter_content: str, generated_summary: str, learni
 
     User's learning profile: {learning_profile}
 
-    Here's a template for the diagrams:
-    ```mermaid
-    graph TD
-        A[First Concept] --> B[Second Concept]
-        B --> C[Third Concept]
-        C --> D[Fourth Concept]
-        D --> E[Fifth Concept]
-    ```
-
     Please create diagrams that:
     1. Illustrate the main concepts and their relationships
     2. Are clear and easy to understand
     3. Are tailored to the user's learning style as described in their profile
     4. Use appropriate visual representations (e.g., flowcharts, mind maps, etc.)
 
-    Some extra guidelines:
-    - Always start with 'graph TD' on its own line
-    - Use single letters for node IDs (A, B, C, etc.)
+    Strict guidelines for Mermaid syntax:
+    - Start each diagram with 'graph TD' on its own line
+    - Use only alphanumeric characters and underscores for node IDs (e.g., A, B, C, or Node1, Node2, Node3)
     - Use square brackets for node labels: [Label text]
     - Use only --> for arrows (no labels or other arrow types)
-    - Each node and connection should be on its own line
-    - Indent each line after 'graph TD' with 4 spaces
-    - Use only plain English words in labels, NO mathematical symbols or notation
-    - Avoid special characters, apostrophes, or quotation marks in labels
-    - Use simple, descriptive text for labels
+    - Put each node and connection on its own line
+    - Do not use any special characters, mathematical symbols, or subscripts in labels
     - If referring to mathematical concepts, use words instead of symbols (e.g., "First Derivative" instead of "f'(x)")
     - Ensure all nodes are connected in a logical flow
+    - Keep labels short and concise
+    - Limit each diagram to a maximum of 10 nodes for clarity
 
-    Provide the diagrams in Mermaid syntax.
+    Example of correct Mermaid syntax:
+    ```mermaid
+    graph TD
+        A[First Concept] --> B[Second Concept]
+        B --> C[Third Concept]
+        C --> D[Fourth Concept]
+        B --> E[Fifth Concept]
+    ```
+
+    Provide 2-3 diagrams in correct Mermaid syntax, each enclosed in ```mermaid and ``` tags.
     """
 
     try:
@@ -1641,9 +1640,41 @@ async def generate_diagrams(chapter_content: str, generated_summary: str, learni
 
         # Extract Mermaid diagrams from the response
         mermaid_diagrams = re.findall(r'```mermaid\n(.*?)\n```', generated_diagrams, re.DOTALL)
+        
+        # Post-process each diagram
+        processed_diagrams = [post_process_mermaid(diagram) for diagram in mermaid_diagrams]
 
-        return mermaid_diagrams
+        return processed_diagrams
 
     except Exception as e:
         logging.error(f"Error generating diagrams: {str(e)}")
         return []
+
+def post_process_mermaid(diagram):
+    # Remove any empty lines
+    lines = [line for line in diagram.split('\n') if line.strip()]
+    
+    # Ensure the diagram starts with 'graph TD'
+    if lines[0].strip() != 'graph TD':
+        lines.insert(0, 'graph TD')
+    
+    # Process each line
+    processed_lines = []
+    for line in lines:
+        # Remove any special characters from node IDs
+        line = re.sub(r'([A-Za-z0-9_]+)', lambda m: re.sub(r'[^A-Za-z0-9_]', '', m.group(1)), line)
+        
+        # Ensure proper formatting for node labels
+        line = re.sub(r'\[(.*?)\]', lambda m: f"[{m.group(1).replace('_', ' ')}]", line)
+        
+        # Ensure proper arrow syntax
+        line = re.sub(r'-->', ' --> ', line)
+        
+        processed_lines.append(line)
+    
+    # Ensure proper indentation
+    indented_lines = ['graph TD']
+    for line in processed_lines[1:]:
+        indented_lines.append('    ' + line.strip())
+    
+    return '\n'.join(indented_lines)

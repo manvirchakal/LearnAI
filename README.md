@@ -1,6 +1,6 @@
 # LearnAI: Revolutionizing Education with AI
 
-Welcome to LearnAI, an innovative AI-driven educational platform designed to transform the learning experience. Our mission is to provide personalized, adaptive, and engaging education for every student. LearnAI empowers students to learn at their own pace, ensuring that each individual receives the support and resources they need to succeed. By harnessing the power of artificial intelligence, we're creating a future where education is tailored to you. Our platform offers personalized learning paths, real-time emotional state analysis, performance-based content adjustment, dynamic resource allocation, and a motivational feedback system. Join us on this exciting journey to revolutionize learning!
+Welcome to LearnAI, an innovative AI-driven educational platform designed to transform the learning experience. Our mission is to provide personalized, adaptive, and engaging education for every student. LearnAI empowers students to learn at their own pace, ensuring that each individual receives the support and resources they need to succeed. By harnessing the power of artificial intelligence, we're creating a future where education is tailored to you. Our platform offers personalized learning paths, performance-based content adjustment, dynamic resource allocation, and a interactive learning elements. Join us on this exciting journey to revolutionize learning!
 
 ## Table of Contents
 - [Features](#features)
@@ -11,8 +11,8 @@ Welcome to LearnAI, an innovative AI-driven educational platform designed to tra
 
 ## Features
 
-1. **Emotion-Aware Content Adaptation**
-   - Description: The platform uses real-time facial emotion detection to assess the learner's emotional state and adapts the content accordingly. For example, if frustration is detected, the platform may simplify the content or offer additional practice problems.
+1. **Learner-Aware Content Adaptation**
+   - Description: The platform uses questionnaires to assess the learner's learning style and adapts the content accordingly. For example, if the learner is a visual learner, the platform may provide more diagrams and visual aids.
    - Purpose: This feature ensures that learners remain engaged and supported, particularly when they encounter difficult concepts.
 
 2. **Adaptive Learning Paths**
@@ -23,21 +23,21 @@ Welcome to LearnAI, an innovative AI-driven educational platform designed to tra
    - Description: The platform leverages Llama 3.1 and T5 models to generate simplified explanations, engaging narratives, and interactive content from textbook materials.
    - Purpose: By converting complex educational content into more accessible formats, the platform caters to learners with varying levels of proficiency and learning preferences.
 
-4. **Interactive Quizzes and Real-Time Feedback**
-   - Description: The platform generates quizzes tailored to the learner's current level and provides instant feedback. Motivational messages are also generated based on the learner's emotional state and quiz performance.
+4. **Interactive Learning Elements and Real-Time Diagrams**
+   - Description: The platform generates interactive learning elements like games and diagrams to help learners understand and remember concepts.
    - Purpose: This feature keeps learners motivated and helps reinforce concepts by providing timely feedback and encouragement.
 
 5. **Inclusivity and Accessibility**
    - Description: The platform is designed to be accessible to all learners, including those with disabilities. Features like text-to-speech, customizable interfaces, and multilingual support ensure that the platform can be used by a diverse audience.
    - Purpose: To create an inclusive learning environment that removes barriers to education, ensuring that everyone has the opportunity to succeed.
 
-## Installation
+## Installation and Setup
 
-To install LearnAI, follow these steps:
+To install and setupLearnAI, follow these steps:
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/LearnAI.git
+   git clone https://github.com/manvirchakal/LearnAI
    ```
 2. Navigate to the project directory:
    ```
@@ -67,34 +67,42 @@ To install LearnAI, follow these steps:
 6. Install npm packages:
    ```
    cd client
-   npm install
+   npm install --legacy-peer-deps
+   ```
+7. Create a new file called `.env` in the root directory and add the following:
+   ```
+   AWS_ACCESS_KEY_ID=<your_aws_access_key_id>
+   AWS_SECRET_ACCESS_KEY=<your_aws_secret_access_key>
+   AWS_DEFAULT_REGION=<your_aws_region>
+   COGNITO_AUTHORIZATION_URL=<your_cognito_authorization_url>
+   COGNITO_TOKEN_URL=<your_cognito_token_url>
+   COGNITO_JWKS_URL=<your_cognito_jwks_url>
+   COGNITO_APP_CLIENT_ID=<your_cognito_app_client_id>
+   KNOWLEDGE_BASE_ID=<your_knowledge_base_id>
+   MODEL_ARN=arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-instant-v1
+   TEXTBOOK_S3_BUCKET=<your_textbook_s3_bucket>
+   ```
+8. Create and `.env.local` file in the client directory and add the following:
+   ```
+   REACT_APP_AWS_REGION=<your_aws_region>
+   REACT_APP_USER_POOL_ID=<your_user_pool_id>
+   REACT_APP_USER_POOL_WEB_CLIENT_ID=<your_cognito_app_client_id>
    ```
 
 ## Usage
 
 To use LearnAI, follow these steps:
 
-1. Replace at line 63 in server/main.py:
-   ```
-   aiplatform.init(project="the-program-434420-u3", location="us-central1")
-   ```
-   with
-   ```
-   aiplatform.init(project="{your project ID from GCP}", location="us-central1")
-   ```
-2. Login to Gcloud using(install GCP CLI if you have not from https://cloud.google.com/sdk/docs/install):
-   ```
-   gcloud auth login
-   ```
-3. To run the server:
+1. To run the server:
    ```
    uvicorn server.main:app --reload
    ```
-4. To run the client:
+2. To run the client:
    ```
    cd client
    npm start
    ```
+3. Navigate to the URL provided in the client terminal to access the application. (Usually http://localhost:3000)
 
 ## Contributing
 
@@ -111,8 +119,8 @@ We welcome contributions to LearnAI! Please follow these steps to contribute:
 This project is licensed under multiple licenses due to the various components used:
 
 - FastAPI and React components are licensed under the [MIT License](https://opensource.org/licenses/MIT).
-- Llama 3.1 is used under the [Meta AI Research License Agreement](https://github.com/facebookresearch/llama/blob/main/LICENSE).
-- OpenCV and TensorFlow components are licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+- Anthropic Claude is used under the [Anthropic API Terms of Use](https://www.anthropic.com/legal/terms).
+- AWS services are used under the [AWS Customer Agreement](https://aws.amazon.com/agreement/).
 
 Please see the [LICENSE.md](LICENSE.md) file for full license texts and any additional details.
 
