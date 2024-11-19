@@ -294,7 +294,7 @@ Please provide a comprehensive description of the user's learning style, highlig
         })
 
         response = bedrock.invoke_model_with_response_stream(
-            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             body=body
         )
 
@@ -597,7 +597,7 @@ def generate_game_idea(text: str, learning_profile: str, max_attempts=1, max_tok
             request = json.dumps(native_request)
 
             response = bedrock.invoke_model_with_response_stream(
-                modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
                 body=request
             )
 
@@ -664,7 +664,7 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
 
         Learning profile: {learning_profile}
 
-        Please create a comprehensive, detailed summary that:
+        Please create a comprehensive, detailed walkthrough and summary that:
 
         1. Thoroughly explains all key concepts, formulas, and theorems presented in the chapter, providing step-by-step derivations where applicable.
         2. Elaborates on each subtopic within the chapter, ensuring no important detail is omitted.
@@ -684,7 +684,7 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
         16. For any practice questions or excercises in the chapter content, provide a detailed solution with a step by step explanation.
         17. Use Markdown formatting for the summary.
 
-        The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content, using at least 75% of the available 8192 token limit. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into manageable parts.
+        The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into understandable parts.
         """
 
         narrative = generate_narrative(narrative_prompt)
@@ -801,7 +801,7 @@ def generate_narrative(prompt: str, max_attempts=1, max_tokens=8192):
             request = json.dumps(native_request)
 
             response = bedrock.invoke_model_with_response_stream(
-                modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
                 body=request
             )
 
@@ -917,7 +917,7 @@ async def generate_game_code(request: GameIdeaRequest):
         })
 
         response = bedrock.invoke_model_with_response_stream(
-            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+            modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
             body=body
         )
 
@@ -1103,7 +1103,7 @@ def generate_chat_response(prompt: str, chat_history: list, max_tokens: int = 50
         request = json.dumps(native_request)
 
         response = bedrock.invoke_model_with_response_stream(
-            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             body=request
         )
 
@@ -1628,7 +1628,7 @@ async def generate_diagrams(chapter_content: str, generated_summary: str, learni
         })
 
         response = bedrock.invoke_model_with_response_stream(
-            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             body=body
         )
 
