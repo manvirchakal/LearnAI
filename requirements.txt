@@ -1,17 +1,8 @@
-SQLAlchemy
 chardet
 fastapi
 asyncio
 httpx
-google-api-python-client
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-core
-google-cloud-storage
-google-cloud-aiplatform
 uvicorn
-google-cloud-discoveryengine
 boto3
 python-multipart
 python-dotenv
@@ -22,5 +13,6 @@ python-jose
 cryptography
 PyPDF2
 pikepdf
-mysql-connector-python
 PyMuPDF
+requests
+cachetools

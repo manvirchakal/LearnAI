@@ -37,7 +37,6 @@ import requests
 from PyPDF2 import PdfReader, PdfWriter
 import io
 import pikepdf
-import mysql.connector
 import PyPDF2
 import atexit
 import fitz  # PyMuPDF
