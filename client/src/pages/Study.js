@@ -881,9 +881,16 @@ const Study = () => {
                 {rightActiveTab === 'diagrams' && (
                   <>
                     {diagrams && diagrams.length > 0 ? (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
+                      <Box sx={{ 
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        width: '100%'
+                      }}>
                         {diagrams.map((diagram, index) => (
-                          <MermaidDiagram key={`diagram-${index}`} chart={diagram} />
+                          <Box key={`diagram-${index}`} sx={{ width: '100%' }}>
+                            <MermaidDiagram chart={diagram} />
+                          </Box>
                         ))}
                       </Box>
                     ) : (
