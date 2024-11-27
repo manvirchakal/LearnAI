@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MathJaxContext, MathJax } from 'better-react-mathjax';
+import { MathJax } from 'better-react-mathjax';
 import ErrorBoundary from './ErrorBoundary';
 
 const DynamicGameComponent = ({ gameCode }) => {
@@ -40,11 +40,17 @@ const DynamicGameComponent = ({ gameCode }) => {
   }, [gameCode]);
 
   useEffect(() => {
-    if (gameRef.current && window.MathJax) {
-      window.MathJax.typesetPromise([gameRef.current]).catch((err) => {
-        console.error('MathJax typesetting failed:', err);
-      });
-    }
+    const typesetMath = async () => {
+      if (gameRef.current && window.MathJax) {
+        try {
+          await window.MathJax.typesetPromise([gameRef.current]);
+        } catch (err) {
+          console.error('MathJax typesetting failed:', err);
+        }
+      }
+    };
+    
+    typesetMath();
   }, [GameComponent]);
 
   useEffect(() => {
@@ -85,11 +91,9 @@ const DynamicGameComponent = ({ gameCode }) => {
   }
 
   return (
-    <MathJaxContext>
-      <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
-        <GameComponent />
-      </div>
-    </MathJaxContext>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+      <GameComponent />
+    </div>
   );
 };
 

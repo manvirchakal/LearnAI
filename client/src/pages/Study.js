@@ -24,6 +24,8 @@ import ChatIcon from '@mui/icons-material/Chat';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 
 // Set the base URL for Axios
 axios.defaults.baseURL = 'http://localhost:8000';
@@ -112,21 +114,39 @@ const Study = () => {
   const fetchChapter = async (chapterId) => {
     try {
       setIsNarrativeLoading(true);
-      const chapterResponse = await axios.get(`/chapters/${chapterId}`);
       
-      console.log("Fetched chapter data:", chapterResponse.data);
-      setChapter(chapterResponse.data);
-      setSection(chapterResponse.data.sections.length > 0 ? chapterResponse.data.sections[0] : null);
+      // Find the chapter in bookStructure
+      const chapter = bookStructure.chapters.find(ch => ch.id === chapterId);
+      if (!chapter) {
+        throw new Error('Chapter not found in book structure');
+      }
       
-      // Fetch narrative with chapter content
-      fetchNarrative(chapterId, chapterResponse.data.content);
+      setChapter(chapter);
+      if (chapter.sections && chapter.sections.length > 0) {
+        setSection(chapter.sections[0]);
+        // Fetch the first section's content
+        await handleSectionSelect(chapter.sections[0].id);
+      }
+      
+      // Generate narrative for the chapter
+      if (chapter.content) {
+        await fetchNarrative(chapterId, chapter.content);
+      }
+      
     } catch (error) {
       console.error('Error fetching chapter:', error);
       setNarrative('Failed to load narrative. Please try again.');
       setGameIdea('');
       setGameCode('');
+    } finally {
       setIsNarrativeLoading(false);
     }
+  };
+
+  const handleChapterSelect = (chapterId) => {
+    console.log("Selected chapter:", chapterId);
+    setSection(null);
+    fetchChapter(chapterId);
   };
 
   const fetchNarrative = useCallback(async (chapterId, chapterContent) => {
@@ -202,12 +222,6 @@ const Study = () => {
       setGameCode('');
       setIsNarrativeLoading(false);
     }
-  };
-
-  // Handle chapter selection from the sidebar
-  const handleChapterSelect = (chapterId) => {
-    setSection(null);
-    fetchChapter(chapterId);
   };
 
   // Handle section selection from the sidebar
@@ -364,18 +378,19 @@ const Study = () => {
         console.log('Translating narrative');
         const translatedText = await translateText(narrative, targetLanguage);
         setTranslatedNarrative(translatedText);
-        console.log('Narrative translated:', translatedText); // Add this line
+        console.log('Narrative translated:', translatedText);
       } else {
         setTranslatedNarrative(narrative);
-        console.log('Setting translated narrative (same as original):', narrative); // Add this line
+        console.log('Setting translated narrative (same as original):', narrative);
       }
 
       setNarrativeStatus('');
-      setIsLoading(false);
-      console.log('Narrative loading complete'); // Add this line
+      console.log('Narrative loading complete');
     } catch (error) {
       console.error('Error in processAndGenerateNarrative:', error);
       setError('An error occurred while processing the content. Please try again.');
+    } finally {
+      setIsNarrativeLoading(false);
       setIsLoading(false);
     }
   };
@@ -734,275 +749,388 @@ const Study = () => {
     console.log('isNarrativeLoading changed:', isNarrativeLoading);
   }, [isNarrativeLoading]);
 
-  return (
-    <MathJaxContext>
-      <Box sx={{ 
-        marginLeft: sidebarOpen ? '240px' : '60px', // Adjust based on your sidebar width
-        marginRight: chatExpanded ? '300px' : '60px', 
-        transition: 'margin 0.3s ease',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        overflow: 'hidden'
-      }}>
-        <Sidebar 
-          onChapterSelect={handleChapterSelect} 
-          onSectionSelect={handleSectionSelect} 
-          setOpen={setSidebarOpen} 
-          isOpen={sidebarOpen}
-          bookStructure={bookStructure || { chapters: [] }}
-          bookTitle={title}
-          currentSection={currentSection?.id}
-        />
-        <Box display="flex" flexGrow={1} overflow="hidden">
-          {/* Left Container */}
-          <Box flex={1} p={2} overflow="auto" mr={1}>
-            <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                <Tabs value={leftActiveTab} onChange={(e, newValue) => setLeftActiveTab(newValue)}>
-                  <Tab label="Chapter Content" value="content" />
-                  <Tab label="Summary" value="summary" />
-                </Tabs>
-              </Box>
-              <Box flex={1} overflow="auto" p={2}>
-                {leftActiveTab === 'content' && (
-                  <>
-                    {pdfUrl ? (
-                      <iframe
-                        src={pdfUrl}
-                        width="100%"
-                        height="100%"
-                        style={{ border: 'none', flexGrow: 1 }}
-                        title="PDF Viewer"
-                      />
-                    ) : (
-                      chapter && chapter.content ? (
-                        <MathJax>
-                          <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
-                        </MathJax>
-                      ) : section && section.content ? (
-                        <MathJax>
-                          <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
-                        </MathJax>
-                      ) : (
-                        <Typography>No content available.</Typography>
-                      )
-                    )}
-                  </>
-                )}
-                {leftActiveTab === 'summary' && (
-                  <>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                      <Box display="flex" alignItems="center">
-                        <Button
-                          onClick={handleRegenerateNarrative}
-                          disabled={isRegeneratingNarrative}
-                          startIcon={<RefreshIcon />}
-                          sx={{ mr: 2 }}
-                        >
-                          Regenerate Summary
-                        </Button>
-                        <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
-                        <Select
-                          value={targetLanguage}
-                          onChange={handleLanguageChange}
-                          sx={{ minWidth: 120 }}
-                          size="small"
-                        >
-                          <MenuItem value="en">English</MenuItem>
-                          <MenuItem value="es">Spanish</MenuItem>
-                          <MenuItem value="fr">French</MenuItem>
-                          <MenuItem value="de">German</MenuItem>
-                          <MenuItem value="zh">Chinese</MenuItem>
-                        </Select>
-                      </Box>
-                    </Box>
-                    {isNarrativeLoading || isRegeneratingNarrative ? (
-                      <Box display="flex" justifyContent="center" alignItems="center" height="100%">
-                        <CircularProgress />
-                      </Box>
-                    ) : translatedNarrative ? (
-                      <ReactMarkdown 
-                        children={translatedNarrative} 
-                        rehypePlugins={[rehypeRaw]} 
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          pre: ({node, ...props}) => <pre style={{overflow: 'auto'}} {...props} />,
-                          code: ({node, inline, ...props}) => (
-                            <code style={{backgroundColor: '#f0f0f0', padding: inline ? '2px 4px' : '10px', borderRadius: '4px'}} {...props} />
-                          )
-                        }}
-                      />
-                    ) : (
-                      <Typography>No summary available.</Typography>
-                    )}
-                  </>
-                )}
-              </Box>
-            </Paper>
-          </Box>
+  useEffect(() => {
+    const typesetMath = async () => {
+      if (window.MathJax) {
+        try {
+          const contentElement = document.querySelector('.chapterContent');
+          if (contentElement) {
+            await window.MathJax.typesetPromise([contentElement]);
+            console.log('MathJax typesetting complete');
+          }
+        } catch (err) {
+          console.error('MathJax typesetting failed:', err);
+        }
+      }
+    };
 
-          {/* Right Container */}
-          <Box flex={1} p={2} overflow="auto" ml={1}>
-            <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                <Tabs value={rightActiveTab} onChange={(e, newValue) => setRightActiveTab(newValue)}>
-                  <Tab label="Interactive Game" value="game" />
-                  <Tab label="Concept Diagrams" value="diagrams" />
-                </Tabs>
-              </Box>
-              <Box flex={1} overflow="auto" p={2}>
-                {rightActiveTab === 'game' && (
-                  <>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                      <Button
-                        onClick={handleRegenerateGame}
-                        disabled={isRegeneratingGame}
-                        startIcon={<RefreshIcon />}
-                      >
-                        Regenerate Game
-                      </Button>
-                    </Box>
-                    <Box sx={{ flexGrow: 1, overflow: 'hidden', height: 'calc(100vh - 200px)' }}>
-                      {isRegeneratingGame ? (
+    if ((chapter && chapter.content) || (section && section.content)) {
+      typesetMath();
+    }
+  }, [chapter, section]);
+
+  const [currentDiagramIndex, setCurrentDiagramIndex] = useState(0);
+
+  // Reset diagram index when diagrams change
+  useEffect(() => {
+    setCurrentDiagramIndex(0);
+  }, [diagrams]);
+
+  return (
+    <ErrorBoundary>
+      <MathJaxContext>
+        <Box sx={{ 
+          marginLeft: sidebarOpen ? '240px' : '60px', // Adjust based on your sidebar width
+          marginRight: chatExpanded ? '300px' : '60px', 
+          transition: 'margin 0.3s ease',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100vh',
+          overflow: 'hidden'
+        }}>
+          <Sidebar 
+            onChapterSelect={handleChapterSelect} 
+            onSectionSelect={handleSectionSelect} 
+            setOpen={setSidebarOpen} 
+            isOpen={sidebarOpen}
+            bookStructure={bookStructure || { chapters: [] }}
+            bookTitle={title}
+            currentSection={currentSection?.id}
+          />
+          <Box display="flex" flexGrow={1} overflow="hidden">
+            {/* Left Container */}
+            <Box flex={1} p={2} overflow="auto" mr={1}>
+              <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                  <Tabs value={leftActiveTab} onChange={(e, newValue) => setLeftActiveTab(newValue)}>
+                    <Tab label="Chapter Content" value="content" />
+                    <Tab label="Summary" value="summary" />
+                  </Tabs>
+                </Box>
+                <Box flex={1} overflow="auto" p={2}>
+                  {leftActiveTab === 'content' && (
+                    <ErrorBoundary>
+                      {pdfUrl ? (
+                        <iframe
+                          src={pdfUrl}
+                          width="100%"
+                          height="100%"
+                          style={{ border: 'none', flexGrow: 1 }}
+                          title="PDF Viewer"
+                        />
+                      ) : (
+                        chapter && chapter.content ? (
+                          <MathJax>
+                            <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(chapter.content) }} />
+                          </MathJax>
+                        ) : section && section.content ? (
+                          <MathJax>
+                            <div className={styles.chapterContent} dangerouslySetInnerHTML={{ __html: preprocessLatex(section.content) }} />
+                          </MathJax>
+                        ) : (
+                          <Typography>No content available.</Typography>
+                        )
+                      )}
+                    </ErrorBoundary>
+                  )}
+                  {leftActiveTab === 'summary' && (
+                    <>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                        <Box display="flex" alignItems="center">
+                          <Button
+                            onClick={handleRegenerateNarrative}
+                            disabled={isRegeneratingNarrative}
+                            startIcon={<RefreshIcon />}
+                            sx={{ mr: 2 }}
+                          >
+                            Regenerate Summary
+                          </Button>
+                          <Typography variant="body2" sx={{ mr: 1 }}>Language:</Typography>
+                          <Select
+                            value={targetLanguage}
+                            onChange={handleLanguageChange}
+                            sx={{ minWidth: 120 }}
+                            size="small"
+                          >
+                            <MenuItem value="en">English</MenuItem>
+                            <MenuItem value="es">Spanish</MenuItem>
+                            <MenuItem value="fr">French</MenuItem>
+                            <MenuItem value="de">German</MenuItem>
+                            <MenuItem value="zh">Chinese</MenuItem>
+                          </Select>
+                        </Box>
+                      </Box>
+                      {isNarrativeLoading || isRegeneratingNarrative ? (
                         <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                           <CircularProgress />
                         </Box>
-                      ) : gameCode ? (
-                        <ErrorBoundary>
-                          <DynamicGameComponent gameCode={gameCode} />
-                        </ErrorBoundary>
+                      ) : translatedNarrative ? (
+                        <ReactMarkdown 
+                          children={translatedNarrative} 
+                          rehypePlugins={[rehypeRaw]} 
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            pre: ({node, ...props}) => <pre style={{overflow: 'auto'}} {...props} />,
+                            code: ({node, inline, ...props}) => (
+                              <code style={{backgroundColor: '#f0f0f0', padding: inline ? '2px 4px' : '10px', borderRadius: '4px'}} {...props} />
+                            )
+                          }}
+                        />
                       ) : (
-                        <Typography>No game available for this chapter.</Typography>
+                        <Typography>No summary available.</Typography>
                       )}
-                    </Box>
-                  </>
-                )}
-                {rightActiveTab === 'diagrams' && (
-                  <>
-                    {diagrams && diagrams.length > 0 ? (
-                      <Box sx={{ 
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                        width: '100%'
-                      }}>
-                        {diagrams.map((diagram, index) => (
-                          <Box key={`diagram-${index}`} sx={{ width: '100%' }}>
-                            <MermaidDiagram chart={diagram} />
-                          </Box>
-                        ))}
-                      </Box>
-                    ) : (
-                      <Typography>No diagrams available.</Typography>
-                    )}
-                  </>
-                )}
-              </Box>
-            </Paper>
-          </Box>
-        </Box>
-
-        {/* Chat Section (unchanged) */}
-        <Box 
-          sx={{ 
-            position: 'fixed',
-            top: 0,
-            right: 0,
-            width: chatExpanded ? '300px' : '60px',
-            height: '100%',
-            transition: 'width 0.3s ease',
-            bgcolor: 'background.paper',
-            boxShadow: 3,
-            display: 'flex',
-            flexDirection: 'column',
-            zIndex: 1000,
-          }}
-        >
-          <Box 
-            onClick={toggleChat} 
-            sx={{ 
-              p: 1, 
-              display: 'flex', 
-              flexDirection: 'column',
-              alignItems: 'center', 
-              cursor: 'pointer',
-              bgcolor: 'primary.main',
-              color: 'white',
-              height: chatExpanded ? 'auto' : '100%',
-            }}
-          >
-            <IconButton size="large" sx={{ color: 'white' }}>
-              <ChatIcon />
-            </IconButton>
-            {chatExpanded && (
-              <Typography variant="h6" color="white">Chat</Typography>
-            )}
-          </Box>
-          {chatExpanded && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 80px)' }}>
-              <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
-                {chatMessages.map((msg, index) => (
-                  <Box 
-                    key={index} 
-                    sx={{ 
-                      mb: 2, 
-                      p: 1, 
-                      bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
-                      borderRadius: 1,
-                      width: '90%',
-                      mx: 'auto',
-                      position: 'relative',
-                    }}
-                  >
-                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
-                      {msg.user}:
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
-                      {msg.text}
-                    </Typography>
-                    {msg.user === 'AI' && (
-                      <IconButton 
-                        onClick={() => speakText(msg.text)} 
-                        sx={{ 
-                          color: 'white',
-                          position: 'absolute',
-                          right: 8,
-                          top: 8,
-                          backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                          '&:hover': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.5)',
-                          },
-                        }}
-                      >
-                        {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
-                      </IconButton>
-                    )}
-                  </Box>
-                ))}
-                <div ref={messagesEndRef} />
-              </Box>
-              <Divider />
-              <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
-                <InputBase
-                  sx={{ ml: 1, flex: 1 }}
-                  placeholder="Enter message"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  disabled={isGenerating || isListening}
-                />
-                <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
-                  <MicIcon color={isListening ? "secondary" : "primary"} />
-                </IconButton>
-                <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
-                  {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
-                </IconButton>
+                    </>
+                  )}
+                </Box>
               </Paper>
             </Box>
-          )}
+
+            {/* Right Container */}
+            <Box flex={1} p={2} overflow="auto" ml={1}>
+              <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                  <Tabs value={rightActiveTab} onChange={(e, newValue) => setRightActiveTab(newValue)}>
+                    <Tab label="Interactive Game" value="game" />
+                    <Tab label="Concept Diagrams" value="diagrams" />
+                  </Tabs>
+                </Box>
+                <Box flex={1} overflow="auto" p={2}>
+                  {rightActiveTab === 'game' && (
+                    <>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                        <Button
+                          onClick={handleRegenerateGame}
+                          disabled={isRegeneratingGame}
+                          startIcon={<RefreshIcon />}
+                        >
+                          Regenerate Game
+                        </Button>
+                      </Box>
+                      <Box sx={{ flexGrow: 1, overflow: 'hidden', height: 'calc(100vh - 200px)' }}>
+                        {isRegeneratingGame ? (
+                          <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+                            <CircularProgress />
+                          </Box>
+                        ) : gameCode ? (
+                          <ErrorBoundary>
+                            <DynamicGameComponent gameCode={gameCode} />
+                          </ErrorBoundary>
+                        ) : (
+                          <Typography>No game available for this chapter.</Typography>
+                        )}
+                      </Box>
+                    </>
+                  )}
+                  {rightActiveTab === 'diagrams' && (
+                    <>
+                      {diagrams && diagrams.length > 0 ? (
+                        <Box sx={{ 
+                          display: 'flex',
+                          flexDirection: 'column',
+                          height: '100%',
+                          position: 'relative',
+                          overflow: 'hidden'
+                        }}>
+                          {/* Navigation Arrows */}
+                          <Box sx={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center',
+                            position: 'absolute',
+                            width: '100%',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            px: 2,
+                            zIndex: 1
+                          }}>
+                            <IconButton 
+                              onClick={() => setCurrentDiagramIndex(prev => Math.max(0, prev - 1))}
+                              disabled={currentDiagramIndex === 0}
+                              sx={{ 
+                                bgcolor: 'background.paper',
+                                '&:hover': { bgcolor: 'grey.200' },
+                                boxShadow: 2
+                              }}
+                            >
+                              <NavigateBeforeIcon />
+                            </IconButton>
+                            <IconButton 
+                              onClick={() => setCurrentDiagramIndex(prev => Math.min(diagrams.length - 1, prev + 1))}
+                              disabled={currentDiagramIndex === diagrams.length - 1}
+                              sx={{ 
+                                bgcolor: 'background.paper',
+                                '&:hover': { bgcolor: 'grey.200' },
+                                boxShadow: 2
+                              }}
+                            >
+                              <NavigateNextIcon />
+                            </IconButton>
+                          </Box>
+
+                          {/* Current Diagram */}
+                          <Box sx={{ 
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            height: 'calc(100% - 100px)', // Adjust for arrows and progress indicator
+                            '& > div': {  // Target the MermaidDiagram container
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              '& svg': {
+                                width: 'auto !important',
+                                height: 'auto !important',
+                                maxWidth: '90%',
+                                maxHeight: '90%'
+                              }
+                            }
+                          }}>
+                            <MermaidDiagram 
+                              chart={diagrams[currentDiagramIndex]} 
+                              index={currentDiagramIndex} 
+                            />
+                          </Box>
+
+                          {/* Progress Indicator */}
+                          <Box sx={{ 
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            p: 2,
+                            height: '50px'  // Fixed height for progress indicator
+                          }}>
+                            {diagrams.map((_, index) => (
+                              <Box
+                                key={index}
+                                onClick={() => setCurrentDiagramIndex(index)}
+                                sx={{
+                                  width: 30,
+                                  height: 4,
+                                  mx: 0.5,
+                                  bgcolor: index === currentDiagramIndex ? 'primary.main' : 'grey.300',
+                                  cursor: 'pointer',
+                                  transition: 'background-color 0.3s ease'
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        </Box>
+                      ) : (
+                        <Typography>No diagrams available.</Typography>
+                      )}
+                    </>
+                  )}
+                </Box>
+              </Paper>
+            </Box>
+          </Box>
+
+          {/* Chat Section (unchanged) */}
+          <Box 
+            sx={{ 
+              position: 'fixed',
+              top: 0,
+              right: 0,
+              width: chatExpanded ? '300px' : '60px',
+              height: '100%',
+              transition: 'width 0.3s ease',
+              bgcolor: 'background.paper',
+              boxShadow: 3,
+              display: 'flex',
+              flexDirection: 'column',
+              zIndex: 1000,
+            }}
+          >
+            <Box 
+              onClick={toggleChat} 
+              sx={{ 
+                p: 1, 
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center', 
+                cursor: 'pointer',
+                bgcolor: 'primary.main',
+                color: 'white',
+                height: chatExpanded ? 'auto' : '100%',
+              }}
+            >
+              <IconButton size="large" sx={{ color: 'white' }}>
+                <ChatIcon />
+              </IconButton>
+              {chatExpanded && (
+                <Typography variant="h6" color="white">Chat</Typography>
+              )}
+            </Box>
+            {chatExpanded && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 80px)' }}>
+                <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
+                  {chatMessages.map((msg, index) => (
+                    <Box 
+                      key={index} 
+                      sx={{ 
+                        mb: 2, 
+                        p: 1, 
+                        bgcolor: msg.user === 'You' ? 'grey.100' : 'primary.main', 
+                        borderRadius: 1,
+                        width: '90%',
+                        mx: 'auto',
+                        position: 'relative',
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', color: msg.user === 'You' ? 'text.primary' : 'white' }}>
+                        {msg.user}:
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: msg.user === 'You' ? 'text.primary' : 'white', pr: 4 }}>
+                        {msg.text}
+                      </Typography>
+                      {msg.user === 'AI' && (
+                        <IconButton 
+                          onClick={() => speakText(msg.text)} 
+                          sx={{ 
+                            color: 'white',
+                            position: 'absolute',
+                            right: 8,
+                            top: 8,
+                            backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                            '&:hover': {
+                              backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                            },
+                          }}
+                        >
+                          {isSpeaking ? <StopIcon /> : <VolumeUpIcon />}
+                        </IconButton>
+                      )}
+                    </Box>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </Box>
+                <Divider />
+                <Paper component="form" sx={{ p: '2px 4px', display: 'flex', alignItems: 'center' }} onSubmit={handleSendMessage}>
+                  <InputBase
+                    sx={{ ml: 1, flex: 1 }}
+                    placeholder="Enter message"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    disabled={isGenerating || isListening}
+                  />
+                  <IconButton onClick={handleSpeechRecognition} sx={{ p: '10px' }} aria-label="transcribe">
+                    <MicIcon color={isListening ? "secondary" : "primary"} />
+                  </IconButton>
+                  <IconButton type="submit" sx={{ p: '10px' }} aria-label="send" disabled={isGenerating || isListening}>
+                    {isGenerating ? <CircularProgress size={24} /> : <SendIcon />}
+                  </IconButton>
+                </Paper>
+              </Box>
+            )}
+          </Box>
         </Box>
-      </Box>
-    </MathJaxContext>
+      </MathJaxContext>
+    </ErrorBoundary>
   );
 };
 

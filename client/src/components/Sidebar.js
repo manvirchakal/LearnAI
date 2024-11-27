@@ -15,8 +15,8 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
   };
 
   const handleChapterClick = (chapterId) => {
+    console.log("Handling chapter click:", chapterId);
     setExpandedChapter(expandedChapter === chapterId ? null : chapterId);
-    onChapterSelect(chapterId);
   };
 
   const handleSectionClick = (sectionId) => {
@@ -86,7 +86,9 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
                 }}
               >
                 <ListItemText primary={chapter.title} />
-                {expandedChapter === chapter.id ? <ExpandLess /> : <ExpandMore />}
+                {chapter.sections && chapter.sections.length > 0 && (
+                  expandedChapter === chapter.id ? <ExpandLess /> : <ExpandMore />
+                )}
               </ListItem>
               <Collapse in={isOpen && expandedChapter === chapter.id} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>

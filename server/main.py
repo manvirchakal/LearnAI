@@ -563,19 +563,14 @@ def generate_game_idea(text: str, learning_profile: str, max_attempts=1, max_tok
     1. Be implementable in JavaScript
     2. Reinforce one or more key concepts from the chapter
     3. Be engaging and educational for students
-    4. Be described in 2-3 sentences
+    4. Not be resource intensive and be able to run on a web browser that is using React for frontend
     5. Be tailored to the user's learning style as described in their profile
-
-    Additionally, provide a brief summary of the chapter's main concepts (2-3 sentences).
-
-    Use clear, engaging language suitable for a student new to these concepts. 
-    Use LaTeX formatting for mathematical equations. Enclose LaTeX expressions in dollar signs for inline equations ($...$) and double dollar signs for display equations ($$...$$).
 
     Chapter content: {text}
 
     User's learning profile: {learning_profile}
 
-    Now, provide a brief summary of the chapter's key concepts, followed by an engaging game idea tailored to the user's learning style:"""
+    Now, provide a game idea:"""
 
     full_response = ""
     for i in range(max_attempts):
@@ -654,8 +649,7 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
 
         # Generate narrative
         narrative_prompt = f"""
-        Generate an extensive, in-depth narrative summary for the following chapter content, 
-        incorporating the provided relevant information from the knowledge base and tailoring it to the user's learning profile:
+        You are LearnAI, a GenAI powered learning assistant that adjusts textbook content to the user's learning profile. Generate an extensive, in-depth summary for the following chapter content, making sure to cover all the key concepts and details while incorporating the provided relevant information from the knowledge base and tailoring it to the user's learning profile:
 
         Chapter content: {chapter_content}
 
@@ -674,14 +668,14 @@ async def generate_narrative_endpoint(request: Request, current_user: str = Depe
         7. Discusses the significance and practical applications of the topic in various fields (e.g., physics, engineering, economics, etc., as appropriate for the subject matter).
         8. Addresses common misconceptions, potential areas of confusion, and frequently asked questions related to the topic.
         9. Includes thought-provoking questions and prompts throughout the narrative to encourage active engagement with the material.
-        10. Incorporates elements that cater to the user's learning profile, such as visual aids for visual learners, auditory cues for auditory learners, or hands-on activities for kinesthetic learners.
+        10. Adjusts the chapter content to cater to the user's learning profile.
         11. Provides a detailed explanation of any graphs, charts, or diagrams mentioned in the chapter, describing their features and significance.
         12. Discusses any historical context or the development of the concepts over time, if relevant.
         13. Explains the implications and importance of the concepts for future topics in the subject.
-        14. Includes practice problems or exercises with detailed solutions to reinforce understanding.
-        15. Summarizes key points at the end of each major section to aid in retention and review.
-        16. For any practice questions or excercises in the chapter content, provide a detailed solution with a step by step explanation.
-        17. Use Markdown formatting for the summary.
+        14. Summarizes key points at the end of each major section to aid in retention and review.
+        15. For any practice questions or excercises in the chapter content, provide a detailed solution with a thorough step by step explanation.
+        16. Use Markdown formatting for the summary.
+        17. Simply use the learning profile to tailor the narrative to the user's learning style but do not make it the focus of the narrative or explicitly mention it.
 
         The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into understandable parts.
         """
@@ -1029,7 +1023,7 @@ async def chat(request: Request):
         if language != 'en':
             user_message = translate_text(user_message, 'en')
 
-        context = f"""You are an AI tutor assisting a student with their studies. 
+        context = f"""You are LearnAI, a GenAI powered learning assistant that adjusts textbook content to the user's learning profile. 
         The current section content is: {extracted_text}... 
         The generated summary of this section is: {generated_summary}...
         Relevant information from the knowledge base is: {knowledge_base_info[:2000]}...

@@ -96,7 +96,7 @@ const SelectTextbook = () => {
             {textbooks.map((textbook, index) => (
               <ListItem 
                 key={index} 
-                button 
+                button={true}
                 onClick={() => handleSelectTextbook(textbook.s3_key, textbook.title)}
                 sx={{ border: '1px solid #ddd', borderRadius: 1, mb: 1 }}
               >
