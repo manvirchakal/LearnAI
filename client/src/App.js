@@ -10,6 +10,8 @@ import SelectTextbook from './pages/SelectTextbook';
 import { RequireAuth } from './components/Auth';
 import './latex-styles.css';
 import { MathJaxContext } from 'better-react-mathjax';
+import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
 
 Amplify.configure({
     Auth: {
@@ -39,7 +41,9 @@ function App() {
       <Authenticator.Provider>
         <Router>
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
             <Route path="/study" element={<RequireAuth><Study /></RequireAuth>} />
             <Route path="/questionnaire" element={<RequireAuth><Questionnaire /></RequireAuth>} />
             <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />

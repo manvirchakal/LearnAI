@@ -1,0 +1,86 @@
+.login-page-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: #f8f9fa;
+    padding: 20px;
+  }
+  
+  .login-logo {
+    width: 250px;
+    margin-bottom: 40px;
+  }
+  
+  .login-form-container {
+    background: white;
+    padding: 40px;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 400px;
+  }
+  
+  /* AWS Amplify UI Authenticator customization */
+  .login-form-container [data-amplify-authenticator] {
+    --amplify-colors-background-primary: #3B82F6;
+    --amplify-colors-brand-primary-80: #2563EB;
+    --amplify-colors-brand-primary-90: #1D4ED8;
+    --amplify-colors-brand-primary-100: #1E40AF;
+    --amplify-components-button-primary-background-color: #3B82F6;
+    --amplify-components-button-primary-hover-background-color: #2563EB;
+    --amplify-components-button-primary-focus-background-color: #1D4ED8;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-button[data-variation='primary'] {
+    background-color: #3B82F6;
+    color: white;
+    border-radius: 25px;
+    font-weight: 600;
+    padding: 12px 20px;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-button[data-variation='primary']:hover {
+    background-color: #2563EB;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-tabs {
+    border-bottom: 2px solid #3B82F6;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-tabs-item[data-state='active'] {
+    color: #3B82F6;
+    border-bottom-color: #3B82F6;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-input {
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-input:focus {
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-label {
+    color: #4b5563;
+    font-weight: 500;
+  }
+  
+  /* Error message styling */
+  .login-form-container [data-amplify-authenticator] .amplify-alert {
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  
+  /* Link styling */
+  .login-form-container [data-amplify-authenticator] .amplify-link {
+    color: #3B82F6;
+    text-decoration: none;
+  }
+  
+  .login-form-container [data-amplify-authenticator] .amplify-link:hover {
+    text-decoration: underline;
+  }
