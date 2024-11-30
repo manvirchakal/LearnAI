@@ -711,9 +711,13 @@ const Study = () => {
   const handleRegenerateGame = async () => {
     setIsRegeneratingGame(true);
     try {
+      if (!currentSection || !currentSection.content) {
+        throw new Error('Section content is not available.');
+      }
+
       // Step 1: Generate new game idea
       const gameIdeaResponse = await axios.post('/generate-game-idea', {
-        chapter_content: chapter.content,
+        chapter_content: currentSection.content,
         user_id: userId
       });
       const newGameIdea = gameIdeaResponse.data.game_idea;
@@ -728,7 +732,7 @@ const Study = () => {
       setGameIdea(newGameIdea);
       setGameCode(newGameCode);
 
-      // Step 4: Save the new game idea and code (you may need to implement this endpoint)
+      // Step 4: Save the new game idea and code
       await axios.post('/save-game', {
         user_id: userId,
         file_id: file_id,

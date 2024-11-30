@@ -60,10 +60,7 @@ const DynamicGameComponent = ({ gameCode }) => {
         const containerHeight = containerRef.current.clientHeight;
         const gameElement = gameRef.current.firstChild;
         if (gameElement) {
-          const scale = Math.min(
-            containerWidth / gameElement.offsetWidth,
-            containerHeight / gameElement.offsetHeight
-          );
+          const scale = containerWidth / gameElement.offsetWidth;
           gameElement.style.transform = `scale(${scale})`;
           gameElement.style.transformOrigin = 'top left';
         }

@@ -891,6 +891,21 @@ async def generate_game_code(request: GameIdeaRequest):
                 20. Use requestAnimationFrame for the game loop to ensure smooth animation
                 21. Add error checking before accessing array elements or object properties
                 22. Use optional chaining (?.) when accessing nested properties to prevent errors
+                23. The background color of the dynamic game component is white keep this as the background color of the game.
+                24. Do not forget to include instructions for the user on how to play the game in the game component and how it relates to the chapter content as text in the game component.
+                25. Container Sizing Requirements:
+                    - The container is the parent of the game component and is in a portrait orientation occupying vertically the right half of the screen(it's aspect ratio is 5:6)
+                    - The game must automatically scale to fit its container width without scrollbars
+                    - Use relative units (%, vh, vw) instead of fixed pixel values
+                    - All game elements must be sized relative to their container
+                    - The game container uses width: 100% and height: 100%
+                    - Add a useEffect hook to handle window resizing and maintain proper scaling
+                    - Ensure the game's aspect ratio is maintained while fitting the width
+                    - Use transform: scale() if needed to ensure proper fitting
+                    - Set initial dimensions using percentages of the parent container
+                    - Listen for container size changes and update game element sizes accordingly
+                    - Use getBoundingClientRect() to get accurate container dimensions
+                    - Apply CSS transform-origin: top left when scaling
                                                                 
             Generate the game code now, remember to not include any explanations or comments, just the code:
             """
