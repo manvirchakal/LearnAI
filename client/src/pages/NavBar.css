@@ -12,7 +12,7 @@
   align-items: center;
   padding: 20px 50px;
   background-color: white;
-  border-bottom: 2px solid #3B82F6; /* Blue bottom border */
+  border-bottom: 2px solid #3B82F6;
 }
 
 .logo-container {
@@ -21,28 +21,35 @@
 }
 
 .logo-img {
-  width: 80px; /* Increased the width of the logo */
-  height: auto; /* Let the height adjust proportionally */
+  width: 100px;
+  height: auto;
 }
 
+/* Update nav-links styling */
 .nav-links {
   list-style-type: none;
   display: flex;
+  align-items: center;
   gap: 30px;
   margin: 0;
   padding: 0;
 }
 
+.nav-links li {
+  display: flex;
+  align-items: center;
+}
+
 .nav-links a {
   text-decoration: none;
-  color: black; /* Default link color */
+  color: black;
   font-weight: 600;
+  padding: 10px 0;
+  display: flex;
+  align-items: center;
 }
 
-.nav-links a:hover {
-  color: #3B82F6; /* Change to blue on hover */
-}
-
+/* Active link styling */
 .nav-links a.active {
   color: #3B82F6;
   position: relative;
@@ -51,14 +58,14 @@
 .nav-links a.active::after {
   content: '';
   position: absolute;
-  bottom: -5px;
+  bottom: 0;
   left: 0;
   width: 100%;
   height: 2px;
   background-color: #3B82F6;
 }
 
-/* Replace the sign-up-btn styles with sign-out-btn */
+/* Sign out button styling */
 .sign-out-btn {
   background-color: #ef4444;
   color: white;
@@ -68,8 +75,18 @@
   cursor: pointer;
   font-weight: 600;
   text-decoration: none;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sign-out-btn:hover {
   background-color: #dc2626;
+}
+
+/* Icon alignment */
+.nav-links a svg {
+  margin-left: 5px;
+  vertical-align: middle;
 }
