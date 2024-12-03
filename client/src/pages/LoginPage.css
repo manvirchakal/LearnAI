@@ -1,86 +1,158 @@
 .login-page-container {
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background-color: #f8f9fa;
+    min-height: 100vh;
     padding: 20px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
   }
   
   .login-logo {
-    width: 250px;
-    margin-bottom: 40px;
+    max-width: 180px;
+    margin-bottom: 2rem;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
   }
   
   .login-form-container {
-    background: white;
-    padding: 40px;
-    border-radius: 15px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     width: 100%;
-    max-width: 400px;
+    max-width: 420px;
   }
   
-  /* AWS Amplify UI Authenticator customization */
-  .login-form-container [data-amplify-authenticator] {
-    --amplify-colors-background-primary: #3B82F6;
-    --amplify-colors-brand-primary-80: #2563EB;
-    --amplify-colors-brand-primary-90: #1D4ED8;
-    --amplify-colors-brand-primary-100: #1E40AF;
-    --amplify-components-button-primary-background-color: #3B82F6;
-    --amplify-components-button-primary-hover-background-color: #2563EB;
-    --amplify-components-button-primary-focus-background-color: #1D4ED8;
+  /* Override Amplify's default styles */
+  [data-amplify-authenticator] {
+    --amplify-components-authenticator-container-width: 100% !important;
+    --amplify-components-authenticator-container-height: auto !important;
+    --amplify-components-tabs-item-active-color: #3B82F6 !important;
+    --amplify-components-tabs-item-focus-color: #3B82F6 !important;
+    --amplify-components-button-primary-background-color: #3B82F6 !important;
+    --amplify-components-button-primary-hover-background-color: #2563EB !important;
+    --amplify-components-fieldcontrol-border-color: #e2e8f0 !important;
   }
   
-  .login-form-container [data-amplify-authenticator] .amplify-button[data-variation='primary'] {
-    background-color: #3B82F6;
-    color: white;
-    border-radius: 25px;
-    font-weight: 600;
-    padding: 12px 20px;
+  [data-amplify-authenticator] [data-amplify-router] {
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    background: white;
+    padding: 2rem;
+    margin: 0;
+    width: 100%;
   }
   
-  .login-form-container [data-amplify-authenticator] .amplify-button[data-variation='primary']:hover {
-    background-color: #2563EB;
-  }
-  
-  .login-form-container [data-amplify-authenticator] .amplify-tabs {
-    border-bottom: 2px solid #3B82F6;
-  }
-  
-  .login-form-container [data-amplify-authenticator] .amplify-tabs-item[data-state='active'] {
-    color: #3B82F6;
-    border-bottom-color: #3B82F6;
-  }
-  
-  .login-form-container [data-amplify-authenticator] .amplify-input {
+  [data-amplify-authenticator] .amplify-button[data-variation='primary'] {
     border-radius: 8px;
-    border: 1px solid #e2e8f0;
+    font-weight: 600;
+    padding: 12px 24px;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 0.9rem;
   }
   
-  .login-form-container [data-amplify-authenticator] .amplify-input:focus {
+  [data-amplify-authenticator] .amplify-button[data-variation='primary']:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  }
+  
+  [data-amplify-authenticator] .amplify-input {
+    border-radius: 8px;
+    padding: 12px 16px;
+    transition: all 0.2s ease;
+  }
+  
+  [data-amplify-authenticator] .amplify-input:focus {
     border-color: #3B82F6;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
   }
   
-  .login-form-container [data-amplify-authenticator] .amplify-label {
+  [data-amplify-authenticator] .amplify-label {
     color: #4b5563;
     font-weight: 500;
+    margin-bottom: 0.5rem;
   }
   
-  /* Error message styling */
-  .login-form-container [data-amplify-authenticator] .amplify-alert {
+  [data-amplify-authenticator] .amplify-alert {
     border-radius: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 1rem;
+    border: none;
+    background-color: #FEE2E2;
+    color: #991B1B;
   }
   
-  /* Link styling */
-  .login-form-container [data-amplify-authenticator] .amplify-link {
+  [data-amplify-authenticator] .amplify-link {
     color: #3B82F6;
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.2s ease;
+  }
+  
+  [data-amplify-authenticator] .amplify-link:hover {
+    color: #2563EB;
     text-decoration: none;
   }
   
-  .login-form-container [data-amplify-authenticator] .amplify-link:hover {
-    text-decoration: underline;
+  /* Remove any margin/padding from the form wrapper */
+  [data-amplify-authenticator] form {
+    margin: 0;
+    padding: 0;
+  }
+  
+  /* Style the tabs container */
+  [data-amplify-authenticator] [data-amplify-tabs] {
+    margin: 0;
+    padding: 1rem 1rem 0;
+    border-bottom: none;
+  }
+  
+  /* Style individual tab boxes with more specific selectors */
+  [data-amplify-authenticator] [data-amplify-tabs] [data-amplify-tabs-item] {
+    font-weight: 500;
+    padding: 0.75rem 1.5rem;
+    color: rgba(255, 255, 255, 0.8) !important;
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%) !important;
+    border-radius: 8px 8px 0 0;
+    margin-right: 4px;
+    border: none !important;
+  }
+  
+  /* Style active tab with more specific selector */
+  [data-amplify-authenticator] [data-amplify-tabs] [data-amplify-tabs-item][data-state='active'] {
+    color: white !important;
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%) !important;
+    font-weight: 600;
+    border: none !important;
+  }
+  
+  /* Hover effect for tabs */
+  [data-amplify-authenticator] [data-amplify-tabs] [data-amplify-tabs-item]:hover {
+    color: white !important;
+    border: none !important;
+  }
+  
+  .auth-success-message {
+    text-align: center;
+    padding: 20px;
+  }
+  
+  .auth-success-message h1 {
+    color: #2563eb;
+    font-size: 1.5rem;
+    margin-bottom: 15px;
+  }
+  
+  .loading-spinner {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    border: 3px solid rgba(37, 99, 235, 0.2);
+    border-radius: 50%;
+    border-top-color: #2563eb;
+    animation: spin 1s ease-in-out infinite;
+    margin-top: 10px;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }

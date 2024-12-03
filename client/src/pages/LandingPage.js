@@ -34,7 +34,7 @@ const LandingPage = () => {
             <p>Learning materials for everyone</p>
           </div>
         </div>
-        <button className="get-started-btn" onClick={() => navigate('/login')}>
+        <button className="get-started-btn" onClick={() => navigate('/login?signup=true')}>
           Get Started
         </button>
       </div>
