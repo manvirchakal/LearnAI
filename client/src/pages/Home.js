@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
-import { Authenticator, useAuthenticator, View } from '@aws-amplify/ui-react';
+import { useAuthenticator, View } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
-import './Login.css';
+import './Home.css';
 import logo from '../static/logo.png';
 import NavBar from './NavBar';
 import { useNavigate } from 'react-router-dom';
@@ -27,33 +27,50 @@ const Home = () => {
     }
   }, [authStatus]);
 
+  const handleSignOut = async () => {
+    try {
+      await Auth.signOut({ global: true });
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
   return (
-    <View className="auth-wrapper">
+    <View className="home-page">
       <NavBar />
-      <div className="login-container">
-        <img src={logo} alt="LearnAI Logo" className="logo" />
+      <div className="home-content">
+        <div className="welcome-section">
+          <img src={logo} alt="LearnAI Logo" className="home-logo" />
+          <h1>Welcome back, {user?.username || 'User'}!</h1>
+          <p className="subtitle">Ready to continue your learning journey?</p>
+        </div>
+
+        <div className="quick-actions">
+          <div className="action-card" onClick={() => navigate('/questionnaire')}>
+            <div className="card-content">
+              <h3>Learning Style Quiz</h3>
+              <p>Take our quiz to personalize your learning experience</p>
+            </div>
+          </div>
+
+          <div className="action-card" onClick={() => navigate('/upload')}>
+            <div className="card-content">
+              <h3>Upload Textbook</h3>
+              <p>Add new study materials to your library</p>
+            </div>
+          </div>
+
+          <div className="action-card" onClick={() => navigate('/select-textbook')}>
+            <div className="card-content">
+              <h3>My Library</h3>
+              <p>Access your uploaded textbooks and materials</p>
+            </div>
+          </div>
+        </div>
       </div>
-      
-      {authStatus === 'authenticated' && user ? (
-        <div className="welcome-box">
-          <h2>Welcome, {user.username || 'User'}!</h2>
-          <button onClick={() => navigate('/questionnaire')}>Go to Questionnaire</button>
-          <button onClick={signOut}>Sign out</button>
-        </div>
-      ) : authStatus === 'configuring' ? (
-        <div>Loading...</div>
-      ) : (
-        <div className="login-box">
-          <Authenticator>
-            {({ signOut, user }) => (
-              <main>
-                <h1>Hello {user?.username || 'User'}</h1>
-                <button onClick={signOut}>Sign out</button>
-              </main>
-            )}
-          </Authenticator>
-        </div>
-      )}
     </View>
   );
 };
