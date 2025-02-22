@@ -49,6 +49,8 @@ from cachetools import TTLCache
 from jose import jwt, JWTError
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from yt_dlp import YoutubeDL
+from datetime import datetime
 
 MAX_RETRIES = 1
 
@@ -1686,3 +1688,151 @@ def post_process_mermaid(diagram):
         indented_lines.append('    ' + line.strip())
     
     return '\n'.join(indented_lines)
+
+@app.post("/transcribe-youtube")
+async def transcribe_youtube(
+    video_url: str = Body(...),
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        # Generate unique IDs for the files
+        job_id = str(uuid.uuid4())
+        temp_audio_path = f"/tmp/{job_id}.mp3"
+        s3_audio_key = f"temp-audio/{job_id}.mp3"
+
+        # Configure yt-dlp options
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': temp_audio_path[:-4],  # Remove .mp3 extension as yt-dlp adds it
+            'quiet': True,
+            'no_warnings': True
+        }
+
+        # Download audio using yt-dlp
+        logging.info(f"Attempting to download audio from: {video_url}")
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                video_title = info.get('title', 'untitled')
+                video_id = info.get('id', 'unknown')
+        except Exception as youtube_error:
+            logging.error(f"YouTube download error: {str(youtube_error)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to download YouTube video: {str(youtube_error)}"
+            )
+
+        # Upload audio to S3
+        s3_client.upload_file(f"{temp_audio_path[:-4]}.mp3", S3_BUCKET_NAME, s3_audio_key)
+        s3_uri = f"s3://{S3_BUCKET_NAME}/{s3_audio_key}"
+        
+        # Start transcription job
+        transcribe.start_transcription_job(
+            TranscriptionJobName=job_id,
+            Media={'MediaFileUri': s3_uri},
+            MediaFormat='mp3',
+            LanguageCode='en-US'
+        )
+        
+        # Wait for transcription to complete
+        while True:
+            status = transcribe.get_transcription_job(TranscriptionJobName=job_id)
+            if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+                break
+            await asyncio.sleep(5)
+        
+        # Clean up temporary files
+        if os.path.exists(f"{temp_audio_path[:-4]}.mp3"):
+            os.remove(f"{temp_audio_path[:-4]}.mp3")
+        s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
+        
+        if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+            transcript_uri = status['TranscriptionJob']['Transcript']['TranscriptFileUri']
+            
+            # Get the transcript JSON
+            async with httpx.AsyncClient() as client:
+                response = await client.get(transcript_uri)
+                transcript_data = response.json()
+            
+            # Create metadata and transcript objects for S3
+            metadata = {
+                "video_id": video_id,
+                "video_title": video_title,
+                "video_url": video_url,
+                "transcription_date": datetime.now().isoformat(),
+                "job_id": job_id
+            }
+            
+            transcript_text = transcript_data['results']['transcripts'][0]['transcript']
+            
+            # Save metadata to S3
+            metadata_key = f"transcriptions/{current_user}/metadata/{job_id}.json"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=metadata_key,
+                Body=json.dumps(metadata),
+                ContentType='application/json'
+            )
+            
+            # Save transcript to S3
+            transcript_key = f"transcriptions/{current_user}/content/{job_id}.txt"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=transcript_key,
+                Body=transcript_text,
+                ContentType='text/plain'
+            )
+            
+            logging.info(f"Saved transcription for video '{video_title}' to S3")
+                
+            return {
+                "transcript": transcript_text,
+                "metadata": metadata,
+                "job_id": job_id
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Transcription job failed"
+            )
+            
+    except Exception as e:
+        logging.error(f"Error transcribing YouTube video: {str(e)}")
+        # Clean up any temporary files if they exist
+        if os.path.exists(f"{temp_audio_path[:-4]}.mp3"):
+            os.remove(f"{temp_audio_path[:-4]}.mp3")
+        if 's3_audio_key' in locals():
+            s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to transcribe video: {str(e)}"
+        )
+
+@app.get("/user-transcriptions")
+async def get_user_transcriptions(current_user: str = Depends(get_current_user)):
+    try:
+        # List objects in the user's transcriptions metadata folder
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=f"transcriptions/{current_user}/metadata/"
+        )
+        
+        transcriptions = []
+        for obj in response.get('Contents', []):
+            metadata = json.loads(s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=obj['Key'])['Body'].read())
+            transcriptions.append({
+                "job_id": metadata['job_id'],
+                "video_title": metadata['video_title'],
+                "video_url": metadata['video_url'],
+                "transcription_date": metadata['transcription_date']
+            })
+        
+        return transcriptions
+    except Exception as e:
+        logging.error(f"Failed to retrieve user transcriptions from S3: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve transcriptions")
