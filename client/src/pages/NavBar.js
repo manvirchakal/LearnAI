@@ -34,7 +34,7 @@ const NavBar = () => {
           </li>
           <li>
             <Link to="/upload" className={location.pathname === '/upload' ? 'active' : ''}>
-              Textbook upload <FaFileUpload style={{ marginLeft: '5px' }} />
+              Material upload <FaFileUpload style={{ marginLeft: '5px' }} />
             </Link>
           </li>
           <li>

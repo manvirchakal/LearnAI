@@ -16,6 +16,7 @@
     "axios": "^1.7.7",
     "better-react-mathjax": "^2.0.3",
     "jsx-runtime": "^1.2.0",
+    "lucide-react": "^0.475.0",
     "mermaid": "^11.2.1",
     "prismjs": "^1.29.0",
     "react": "^18.3.1",

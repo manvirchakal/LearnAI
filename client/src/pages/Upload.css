@@ -1,44 +1,68 @@
-/* Upload page container */
-.upload-container {
+.upload-page {
+    padding: 20px;
+  }
+  
+  .upload-content {
+    text-align: center;
+  }
+  
+  .upload-buttons {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 75vh; /* Full viewport height */
-    background-color: #f4f4f9; /* Light background to make elements visible */
-}
+    justify-content: space-around;
+    margin-top: 20px;
+  }
   
-/* Blue upload box */
-.upload-box {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 400px;
-    height: 300px;
-    background-color: #cfe2ff; /* Light blue background */
-    border-radius: 20px;
-    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); /* Light shadow */
-    border: 1px solid #000; /* Thin border */
-}
-  
-/* Upload icon styling */
-.upload-icon {
-    font-size: 80px;
-    color: black;
-    margin-bottom: 20px;
-    cursor: pointer; /* Only the icon should be clickable */
-}
-  
-/* Hide the input itself */
-.file-input {
-    display: none; /* Completely hide the input element */
-}
-  
-/* Styling the label to be clickable */
-.upload-label {
+  .upload-card {
+    border: 1px dashed #ccc;
+    padding: 20px;
     cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  
+  .upload-card:hover {
+    background-color: #f0f0f0;
+  }
+
+  .modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
     display: flex;
-    align-items: center;
     justify-content: center;
-}
+    align-items: center;
+  }
+
+  .modal-content {
+    background: white;
+    padding: 20px;
+    border-radius: 5px;
+    width: 300px;
+    text-align: center;
+  }
+
+  .modal-content input {
+    margin: 10px 0;
+    width: 100%;
+  }
+
+  .modal-content label {
+    display: block;
+    margin: 10px 0;
+  }
+
+  .create-collection-btn {
+    background-color: #00aaff; /* Light blue background */
+    color: white; /* White text */
+    padding: 10px 20px; /* Padding for the button */
+    border: none; /* No border */
+    border-radius: 5px; /* Rounded corners */
+    cursor: pointer; /* Pointer cursor on hover */
+    margin-top: 20px; /* Space above the button */
+  }
+
+  .create-collection-btn:hover {
+    background-color: #0088cc; /* Darker blue on hover */
+  }
