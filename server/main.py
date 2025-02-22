@@ -1836,3 +1836,144 @@ async def get_user_transcriptions(current_user: str = Depends(get_current_user))
     except Exception as e:
         logging.error(f"Failed to retrieve user transcriptions from S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve transcriptions")
+
+@app.post("/transcribe-lecture")
+async def transcribe_lecture(audio: UploadFile = File(...), current_user: str = Depends(get_current_user)):
+    # Define supported formats
+    SUPPORTED_FORMATS = {
+        'audio': ['.mp3', '.wav', '.m4a'],
+        'video': ['.mp4']
+    }
+    
+    try:
+        # Check file extension
+        file_ext = os.path.splitext(audio.filename)[1].lower()
+        all_supported_formats = SUPPORTED_FORMATS['audio'] + SUPPORTED_FORMATS['video']
+        
+        if file_ext not in all_supported_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file format. Supported formats: {', '.join(all_supported_formats)}"
+            )
+
+        # Generate unique IDs for the files
+        job_id = str(uuid.uuid4())
+        temp_input_path = f"/tmp/{job_id}_input{file_ext}"
+        temp_output_path = f"/tmp/{job_id}.mp3"
+        s3_audio_key = f"temp-audio/{job_id}.mp3"
+        
+        # Save the uploaded file temporarily
+        with open(temp_input_path, "wb") as buffer:
+            buffer.write(await audio.read())
+        
+        # Convert to mp3 if needed
+        if file_ext != '.mp3':
+            try:
+                subprocess.run([
+                    'ffmpeg',
+                    '-i', temp_input_path,
+                    '-vn',  # Disable video if present
+                    '-acodec', 'libmp3lame',
+                    '-ab', '192k',
+                    '-ar', '44100',
+                    '-y',  # Overwrite output file if exists
+                    temp_output_path
+                ], check=True, capture_output=True)
+                
+                # Remove input file after conversion
+                os.remove(temp_input_path)
+            except subprocess.CalledProcessError as e:
+                logging.error(f"FFmpeg conversion error: {e.stderr.decode()}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to convert audio format"
+                )
+        else:
+            # If it's already MP3, just rename
+            os.rename(temp_input_path, temp_output_path)
+        
+        # Upload to S3
+        s3_client.upload_file(temp_output_path, S3_BUCKET_NAME, s3_audio_key)
+        s3_uri = f"s3://{S3_BUCKET_NAME}/{s3_audio_key}"
+        
+        # Start transcription job
+        transcribe.start_transcription_job(
+            TranscriptionJobName=job_id,
+            Media={'MediaFileUri': s3_uri},
+            MediaFormat='mp3',
+            LanguageCode='en-US'
+        )
+        
+        # Wait for transcription to complete
+        while True:
+            status = transcribe.get_transcription_job(TranscriptionJobName=job_id)
+            if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+                break
+            await asyncio.sleep(5)
+        
+        # Clean up temporary files
+        if os.path.exists(temp_output_path):
+            os.remove(temp_output_path)
+        s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
+        
+        if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+            transcript_uri = status['TranscriptionJob']['Transcript']['TranscriptFileUri']
+            
+            # Get the transcript JSON
+            async with httpx.AsyncClient() as client:
+                response = await client.get(transcript_uri)
+                transcript_data = response.json()
+            
+            # Create metadata and transcript objects for S3
+            metadata = {
+                "file_name": audio.filename,
+                "upload_date": datetime.now().isoformat(),
+                "file_type": "uploaded_audio" if file_ext in SUPPORTED_FORMATS['audio'] else "uploaded_video",
+                "job_id": job_id
+            }
+            
+            transcript_text = transcript_data['results']['transcripts'][0]['transcript']
+            
+            # Save metadata to S3
+            metadata_key = f"transcriptions/{current_user}/metadata/{job_id}.json"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=metadata_key,
+                Body=json.dumps(metadata),
+                ContentType='application/json'
+            )
+            
+            # Save transcript to S3
+            transcript_key = f"transcriptions/{current_user}/content/{job_id}.txt"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=transcript_key,
+                Body=transcript_text,
+                ContentType='text/plain'
+            )
+            
+            logging.info(f"Saved transcription for file '{audio.filename}' to S3")
+                
+            return {
+                "transcript": transcript_text,
+                "metadata": metadata,
+                "job_id": job_id
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Transcription job failed"
+            )
+            
+    except Exception as e:
+        logging.error(f"Error transcribing audio file: {str(e)}")
+        # Clean up any temporary files
+        for path in [temp_input_path, temp_output_path]:
+            if 'path' in locals() and os.path.exists(path):
+                os.remove(path)
+        if 's3_audio_key' in locals():
+            s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to transcribe audio: {str(e)}"
+        )
