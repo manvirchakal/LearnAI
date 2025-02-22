@@ -2,7 +2,7 @@ import chardet
 import os
 import re
 import logging 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter, Form, Path
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request, APIRouter, Form, Path, Query
 import threading
 from fastapi.responses import StreamingResponse
 import json
@@ -51,6 +51,8 @@ from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from yt_dlp import YoutubeDL
 from datetime import datetime
+from pptx import Presentation
+from typing import List, Dict
 
 MAX_RETRIES = 1
 
@@ -1976,4 +1978,528 @@ async def transcribe_lecture(audio: UploadFile = File(...), current_user: str = 
         raise HTTPException(
             status_code=500,
             detail=f"Failed to transcribe audio: {str(e)}"
+        )
+
+@app.post("/process-presentation")
+async def process_presentation(
+    presentation: UploadFile = File(...),
+    current_user: str = Depends(get_current_user)
+):
+    if not presentation.filename.endswith('.pptx'):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .pptx files are supported"
+        )
+
+    try:
+        # Generate unique ID for this presentation
+        presentation_id = str(uuid.uuid4())
+        temp_path = f"/tmp/{presentation_id}.pptx"
+
+        # Save the uploaded file temporarily
+        with open(temp_path, "wb") as buffer:
+            buffer.write(await presentation.read())
+
+        # Parse the presentation
+        prs = Presentation(temp_path)
+        
+        # Extract content and structure
+        slides_content = []
+        for slide_number, slide in enumerate(prs.slides, 1):
+            slide_content = {
+                "number": slide_number,
+                "title": "",
+                "content": [],
+                "notes": "",
+            }
+
+            # Get slide title if it exists
+            if slide.shapes.title:
+                slide_content["title"] = slide.shapes.title.text
+
+            # Extract text from all shapes
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    slide_content["content"].append(shape.text.strip())
+
+            # Get speaker notes if they exist
+            if slide.notes_slide and slide.notes_slide.notes_text_frame:
+                slide_content["notes"] = slide.notes_slide.notes_text_frame.text
+
+            slides_content.append(slide_content)
+
+        # Create metadata
+        metadata = {
+            "presentation_id": presentation_id,
+            "original_filename": presentation.filename,
+            "upload_date": datetime.now().isoformat(),
+            "total_slides": len(slides_content),
+            "has_speaker_notes": any(slide["notes"] for slide in slides_content),
+            "slide_titles": [slide["title"] for slide in slides_content if slide["title"]]
+        }
+
+        # Save metadata to S3
+        metadata_key = f"presentations/{current_user}/metadata/{presentation_id}.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=metadata_key,
+            Body=json.dumps(metadata),
+            ContentType='application/json'
+        )
+
+        # Save each slide's content separately
+        for slide in slides_content:
+            # Combine all text content
+            full_content = {
+                "title": slide["title"],
+                "content": slide["content"],
+                "notes": slide["notes"]
+            }
+            
+            slide_key = f"presentations/{current_user}/content/{presentation_id}/slide_{slide['number']}.json"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=slide_key,
+                Body=json.dumps(full_content),
+                ContentType='application/json'
+            )
+
+        # Clean up temporary file
+        os.remove(temp_path)
+
+        logging.info(f"Successfully processed presentation: {presentation.filename}")
+        
+        return {
+            "message": "Presentation processed successfully",
+            "presentation_id": presentation_id,
+            "metadata": metadata
+        }
+
+    except Exception as e:
+        logging.error(f"Error processing presentation: {str(e)}")
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process presentation: {str(e)}"
+        )
+
+@app.get("/list-presentations/{user_id}")
+async def list_presentations(
+    user_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    if user_id != current_user:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to access this data"
+        )
+    
+    try:
+        # List all presentation metadata files for the user
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=f"presentations/{user_id}/metadata/"
+        )
+        
+        presentations = []
+        for obj in response.get('Contents', []):
+            metadata = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=obj['Key']
+                )['Body'].read()
+            )
+            presentations.append(metadata)
+        
+        return presentations
+    
+    except Exception as e:
+        logging.error(f"Error listing presentations: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list presentations"
+        )
+
+@app.get("/get-presentation/{user_id}/{presentation_id}")
+async def get_presentation(
+    user_id: str,
+    presentation_id: str,
+    current_user: str = Depends(get_current_user),
+    format: str = Query("separate", enum=["separate", "consolidated"])  # New query parameter
+):
+    if user_id != current_user:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to access this data"
+        )
+    
+    try:
+        # Get metadata
+        metadata_key = f"presentations/{user_id}/metadata/{presentation_id}.json"
+        metadata = json.loads(
+            s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=metadata_key
+            )['Body'].read()
+        )
+        
+        # Get all slides
+        slides = []
+        for slide_num in range(1, metadata['total_slides'] + 1):
+            slide_key = f"presentations/{user_id}/content/{presentation_id}/slide_{slide_num}.json"
+            slide_content = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=slide_key
+                )['Body'].read()
+            )
+            slides.append(slide_content)
+        
+        if format == "consolidated":
+            # Create consolidated format
+            consolidated_content = {
+                "metadata": metadata,
+                "content": {}
+            }
+            
+            for slide_num, slide in enumerate(slides, 1):
+                consolidated_content["content"][f"slide_{slide_num}"] = {
+                    "title": slide["title"],
+                    "content": slide["content"],
+                    "notes": slide["notes"]
+                }
+            
+            return consolidated_content
+        else:
+            # Return original separate format
+            return {
+                "metadata": metadata,
+                "slides": slides
+            }
+        
+    except Exception as e:
+        logging.error(f"Error retrieving presentation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve presentation"
+        )
+
+@app.post("/collections")
+async def create_collection(
+    name: str = Body(...),
+    materials: Dict = Body(...),  # Will contain textbook_sections, transcriptions, presentations
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        collection_id = str(uuid.uuid4())
+        collection = {
+            "collection_id": collection_id,
+            "name": name,
+            "created_date": datetime.now().isoformat(),
+            "user_id": current_user,
+            "materials": materials
+        }
+        
+        # Save to S3
+        collection_key = f"collections/{current_user}/{collection_id}.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=collection_key,
+            Body=json.dumps(collection),
+            ContentType='application/json'
+        )
+        
+        return collection
+
+    except Exception as e:
+        logging.error(f"Error creating collection: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create collection"
+        )
+
+@app.get("/collections")
+async def list_collections(current_user: str = Depends(get_current_user)):
+    try:
+        # List all collections for the user
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=f"collections/{current_user}/"
+        )
+        
+        collections = []
+        for obj in response.get('Contents', []):
+            collection = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=obj['Key']
+                )['Body'].read()
+            )
+            collections.append(collection)
+        
+        return collections
+
+    except Exception as e:
+        logging.error(f"Error listing collections: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list collections"
+        )
+
+@app.put("/collections/{collection_id}/materials")
+async def update_collection_materials(
+    collection_id: str,
+    materials: Dict = Body(...),
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        # Get existing collection
+        collection_key = f"collections/{current_user}/{collection_id}.json"
+        collection = json.loads(
+            s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=collection_key
+            )['Body'].read()
+        )
+        
+        # Verify ownership
+        if collection['user_id'] != current_user:
+            raise HTTPException(status_code=403, detail="Not authorized to modify this collection")
+        
+        # Update materials
+        collection['materials'] = materials
+        
+        # Save back to S3
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=collection_key,
+            Body=json.dumps(collection),
+            ContentType='application/json'
+        )
+        
+        return collection
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(status_code=404, detail="Collection not found")
+        raise HTTPException(status_code=500, detail="S3 error")
+    except Exception as e:
+        logging.error(f"Error updating collection: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update collection")
+
+@app.get("/collections/{collection_id}")
+async def get_collection(
+    collection_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        collection_key = f"collections/{current_user}/{collection_id}.json"
+        collection = json.loads(
+            s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=collection_key
+            )['Body'].read()
+        )
+        
+        if collection['user_id'] != current_user:
+            raise HTTPException(status_code=403, detail="Not authorized to access this collection")
+            
+        return collection
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(status_code=404, detail="Collection not found")
+        raise HTTPException(status_code=500, detail="S3 error")
+    except Exception as e:
+        logging.error(f"Error retrieving collection: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve collection")
+
+@app.post("/process-notes")
+async def process_notes(
+    notes: UploadFile = File(...),
+    current_user: str = Depends(get_current_user)
+):
+    SUPPORTED_FORMATS = ['.pdf', '.jpg', '.jpeg', '.png']
+    
+    try:
+        # Check file format
+        file_ext = os.path.splitext(notes.filename)[1].lower()
+        if file_ext not in SUPPORTED_FORMATS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file format. Supported formats: {', '.join(SUPPORTED_FORMATS)}"
+            )
+
+        # Generate unique ID
+        notes_id = str(uuid.uuid4())
+        temp_path = f"/tmp/{notes_id}{file_ext}"
+        
+        # Save file temporarily
+        with open(temp_path, "wb") as buffer:
+            buffer.write(await notes.read())
+        
+        # Upload to S3
+        s3_key = f"notes/{current_user}/original/{notes_id}{file_ext}"
+        s3_client.upload_file(temp_path, S3_BUCKET_NAME, s3_key)
+        
+        # Start Textract job
+        if file_ext == '.pdf':
+            textract_response = textract.start_document_analysis(
+                DocumentLocation={'S3Object': {'Bucket': S3_BUCKET_NAME, 'Name': s3_key}},
+                FeatureTypes=['TABLES', 'FORMS']
+            )
+            job_id = textract_response['JobId']
+            
+            # Wait for Textract job to complete
+            while True:
+                response = textract.get_document_analysis(JobId=job_id)
+                if response['JobStatus'] in ['SUCCEEDED', 'FAILED']:
+                    break
+                await asyncio.sleep(5)
+                
+            if response['JobStatus'] == 'FAILED':
+                raise Exception("Textract processing failed")
+                
+            textract_results = response
+        else:
+            # For images, use synchronous Textract
+            with open(temp_path, 'rb') as image:
+                textract_results = textract.detect_document_text(
+                    Document={'Bytes': image.read()}
+                )
+
+        # Process with Rekognition for diagrams
+        with open(temp_path, 'rb') as image:
+            rekognition_results = rekognition.detect_labels(
+                Image={'Bytes': image.read()},
+                MaxLabels=10,
+                MinConfidence=70
+            )
+
+        # Combine results
+        processed_content = {
+            "text_content": [],
+            "diagrams": [],
+            "tables": []
+        }
+
+        # Process Textract results
+        if file_ext == '.pdf':
+            for block in textract_results['Blocks']:
+                if block['BlockType'] == 'LINE':
+                    processed_content["text_content"].append({
+                        "text": block['Text'],
+                        "confidence": block['Confidence'],
+                        "position": block['Geometry']
+                    })
+                elif block['BlockType'] == 'TABLE':
+                    processed_content["tables"].append({
+                        "position": block['Geometry'],
+                        "confidence": block['Confidence']
+                    })
+        else:
+            for item in textract_results['Blocks']:
+                if item['BlockType'] == 'LINE':
+                    processed_content["text_content"].append({
+                        "text": item['Text'],
+                        "confidence": item['Confidence'],
+                        "position": item['Geometry']
+                    })
+
+        # Process Rekognition results
+        for label in rekognition_results['Labels']:
+            if label['Name'].lower() in ['diagram', 'chart', 'graph', 'drawing']:
+                processed_content["diagrams"].append({
+                    "type": label['Name'],
+                    "confidence": label['Confidence'],
+                    "position": label['Instances'][0]['BoundingBox'] if label['Instances'] else None
+                })
+
+        # Create metadata
+        metadata = {
+            "notes_id": notes_id,
+            "original_filename": notes.filename,
+            "upload_date": datetime.now().isoformat(),
+            "file_type": file_ext,
+            "processing_status": "completed",
+            "has_diagrams": len(processed_content["diagrams"]) > 0,
+            "has_tables": len(processed_content["tables"]) > 0
+        }
+
+        # Save metadata to S3
+        metadata_key = f"notes/{current_user}/metadata/{notes_id}.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=metadata_key,
+            Body=json.dumps(metadata),
+            ContentType='application/json'
+        )
+
+        # Save processed content to S3
+        content_key = f"notes/{current_user}/processed/{notes_id}.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=content_key,
+            Body=json.dumps(processed_content),
+            ContentType='application/json'
+        )
+
+        # Clean up temporary file
+        os.remove(temp_path)
+
+        return {
+            "message": "Notes processed successfully",
+            "notes_id": notes_id,
+            "metadata": metadata,
+            "content": processed_content
+        }
+
+    except Exception as e:
+        logging.error(f"Error processing notes: {str(e)}")
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process notes: {str(e)}"
+        )
+
+@app.get("/notes/{notes_id}")
+async def get_notes(
+    notes_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        # Get metadata
+        metadata_key = f"notes/{current_user}/metadata/{notes_id}.json"
+        metadata = json.loads(
+            s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=metadata_key
+            )['Body'].read()
+        )
+
+        # Get processed content
+        content_key = f"notes/{current_user}/processed/{notes_id}.json"
+        content = json.loads(
+            s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=content_key
+            )['Body'].read()
+        )
+
+        return {
+            "metadata": metadata,
+            "content": content
+        }
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(status_code=404, detail="Notes not found")
+        raise HTTPException(status_code=500, detail="S3 error")
+    except Exception as e:
+        logging.error(f"Error retrieving notes: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve notes"
         )
