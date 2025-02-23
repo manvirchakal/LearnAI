@@ -52,7 +52,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from yt_dlp import YoutubeDL
 from datetime import datetime
 from pptx import Presentation
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 MAX_RETRIES = 1
 
@@ -101,6 +101,9 @@ s3_client = boto3.client('s3',
 
 # Initialize AWS Textract client
 textract_client = boto3.client('textract')  # Add this line
+
+# Initialize AWS Rekognition client
+rekognition = boto3.client('rekognition')  # Add this line
 
 # Initialize logging
 logging.basicConfig(level=logging.DEBUG)
@@ -349,6 +352,107 @@ def upload_file_to_s3(file_name, bucket, object_name=None):
         return False
     return True
 
+async def create_textbook_collections(
+    file_id: str,
+    book_title: str,
+    toc_structure: List[Dict],
+    s3_key: str,
+    current_user: str
+) -> Dict:
+    try:
+        collections = {
+            "book_id": file_id,
+            "section_collections": [],
+            "chapter_collections": []
+        }
+
+        # Create collections for each section
+        for chapter in toc_structure:
+            chapter_sections = chapter.get('sections', [])
+            chapter_collection_id = str(uuid.uuid4())
+            
+            # Create collections for individual sections
+            section_collection_ids = []
+            for section in chapter_sections:
+                section_id = str(uuid.uuid4())
+                section_collection = {
+                    "collection_id": section_id,
+                    "name": f"{book_title} - {section['title']}",
+                    "created_date": datetime.now().isoformat(),
+                    "user_id": current_user,
+                    "parent_chapter": chapter['number'],
+                    "materials": {
+                        "textbook_sections": [{
+                            "section_id": section_id,
+                            "title": section['title'],
+                            "page": section['page'],
+                            "s3_key": s3_key,
+                            "added_date": datetime.now().isoformat()
+                        }],
+                        "transcriptions": [],
+                        "presentations": [],
+                        "notes": []
+                    }
+                }
+                
+                # Save section collection
+                section_collection_key = f"collections/{current_user}/{section_id}.json"
+                s3_client.put_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=section_collection_key,
+                    Body=json.dumps(section_collection),
+                    ContentType='application/json'
+                )
+                
+                section_collection_ids.append(section_id)
+                collections["section_collections"].append(section_collection)
+
+            # Create collection for the chapter
+            chapter_collection = {
+                "collection_id": chapter_collection_id,
+                "name": f"{book_title} - {chapter['number']}: {chapter['title']}",
+                "created_date": datetime.now().isoformat(),
+                "user_id": current_user,
+                "chapter_number": chapter['number'],
+                "materials": {
+                    "textbook_sections": [],
+                    "transcriptions": [],
+                    "presentations": [],
+                    "notes": [],
+                    "subcollections": section_collection_ids  # Reference to section collections
+                }
+            }
+            
+            # Add all sections to the chapter collection
+            for section in chapter_sections:
+                chapter_collection["materials"]["textbook_sections"].append({
+                    "section_id": str(uuid.uuid4()),
+                    "title": section['title'],
+                    "page": section['page'],
+                    "s3_key": s3_key,
+                    "added_date": datetime.now().isoformat()
+                })
+            
+            # Save chapter collection
+            chapter_collection_key = f"collections/{current_user}/{chapter_collection_id}.json"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=chapter_collection_key,
+                Body=json.dumps(chapter_collection),
+                ContentType='application/json'
+            )
+            
+            collections["chapter_collections"].append(chapter_collection)
+
+        return collections
+
+    except Exception as e:
+        logging.error(f"Error creating textbook collections: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create textbook collections"
+        )
+
 @app.post("/upload-pdf")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -382,13 +486,23 @@ async def upload_pdf(
             "table_of_contents": []  # Initialize with an empty list
         }
         
+        collections_info = None
         if documentType == 'textbook' and tocPages:
             logging.info(f"Processing textbook TOC pages: {tocPages}")
             file_id = unique_filename.split('_')[0]
             start_page, end_page = map(int, tocPages.split('-'))
             toc_structure = process_toc_pages(S3_BUCKET_NAME, s3_key, start_page, end_page, file_id, file.filename, current_user, unique_filename)
             metadata["table_of_contents"] = toc_structure
-            logging.info(f"TOC structure extracted: {toc_structure}")
+            
+            # Create collections for chapters and sections
+            collections_info = await create_textbook_collections(
+                file_id=file_id,
+                book_title=file.filename,
+                toc_structure=toc_structure,
+                s3_key=s3_key,
+                current_user=current_user
+            )
+            logging.info(f"Created collections for textbook: {collections_info}")
         
         # Save metadata in S3
         metadata_key = f"metadata/{current_user}/{unique_filename}.json"
@@ -398,11 +512,15 @@ async def upload_pdf(
             Body=json.dumps(metadata),
             ContentType='application/json'
         )
-        logging.info(f"Metadata saved to S3: {metadata_key}")
         
         # Clean up the temporary file
         os.remove(temp_file_path)
-        return {"message": "PDF uploaded successfully", "s3_key": s3_key}
+        
+        response = {"message": "PDF uploaded successfully", "s3_key": s3_key}
+        if collections_info:
+            response["collections"] = collections_info
+        return response
+        
     except Exception as e:
         logging.error(f"Failed to upload PDF to S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to upload PDF")
@@ -563,18 +681,19 @@ async def download_book(s3_key: str, current_user: str = Depends(get_current_use
         raise HTTPException(status_code=500, detail="Failed to download PDF")
 
 def generate_game_idea(text: str, learning_profile: str, max_attempts=1, max_tokens=4096):
-    prompt = f"""Based on the following chapter content and the user's learning profile, suggest a simple interactive game idea that reinforces the key concepts. The game should:
+    prompt = f"""Based on the following materials and the user's learning profile, suggest a simple interactive game idea that reinforces the key concepts. The game should:
     1. Be implementable in JavaScript
-    2. Reinforce one or more key concepts from the chapter
+    2. Reinforce one or more key concepts from the materials
     3. Be engaging and educational for students
     4. Not be resource intensive and be able to run on a web browser that is using React for frontend
     5. Be tailored to the user's learning style as described in their profile
 
-    Chapter content: {text}
+    Primary Content from Collection:
+    {text}
 
     User's learning profile: {learning_profile}
 
-    Now, provide a game idea:"""
+    Now, provide a game idea that integrates concepts from the available materials."""
 
     full_response = ""
     for i in range(max_attempts):
@@ -625,97 +744,70 @@ def translate_text(text, target_language):
         logging.error(f"Error translating text: {e}")
         return None
 
-@app.post("/generate-narrative")
-async def generate_narrative_endpoint(request: Request, current_user: str = Depends(get_current_user)):
+@app.post("/generate-narrative/{collection_id}")
+async def generate_narrative_endpoint(
+    collection_id: str,
+    current_user: str = Depends(get_current_user)
+):
     try:
-        data = await request.json()
-        chapter_content = data.get('chapter_content', '')
-        force_regenerate = data.get('force_regenerate', False)
-
-        user_id = current_user  # This is now fetched from the token
-
-        if not user_id:
-            logging.error("user_id is empty in generate_narrative_endpoint")
-            raise HTTPException(status_code=400, detail="User authentication failed")
-
-        # Fetch the user's learning profile
-        learning_profile = get_learning_profile(user_id)
-
-        logging.info("Received learning_profile: {learning_profile}")
-
-        # Query the knowledge base
-        relevant_info = await query_knowledge_base(chapter_content[:2000])
-
-        # Check if relevant_info is an error message
-        if relevant_info.startswith("Error") or relevant_info.startswith("Unexpected error"):
-            logging.warning(f"Knowledge base query failed: {relevant_info}")
-            relevant_info = "No additional information available."
-
-        # Generate narrative
+        # Get collection content and learning profile
+        content = await get_collection_content(collection_id, current_user)
+        learning_profile = get_learning_profile(current_user)
+        
+        # Query knowledge base using existing function
+        relevant_info = await query_knowledge_base(format_content_for_prompt(content))
+        
+        # Build prompt with dynamically formatted content
         narrative_prompt = f"""
-        You are LearnAI, a GenAI powered learning assistant that adjusts textbook content to the user's learning profile. Generate an extensive, in-depth summary for the following chapter content, making sure to cover all the key concepts and details while incorporating the provided relevant information from the knowledge base and tailoring it to the user's learning profile:
+        You are LearnAI, a GenAI powered learning assistant that adjusts content to the user's learning profile. 
+        Generate an extensive, in-depth summary for the following materials, making sure to cover all key concepts 
+        while incorporating the provided relevant information and tailoring it to the user's learning profile:
 
-        Chapter content: {chapter_content}
+        Primary Content from Collection:
+        {format_content_for_prompt(content)}
 
-        Relevant information from knowledge base: {relevant_info}
+        Additional Relevant Information from Knowledge Base:
+        {relevant_info}
 
         Learning profile: {learning_profile}
 
-        Please create a comprehensive, detailed walkthrough and summary that:
-
-        1. Thoroughly explains all key concepts, formulas, and theorems presented in the chapter, providing step-by-step derivations where applicable.
-        2. Elaborates on each subtopic within the chapter, ensuring no important detail is omitted.
-        3. Provides multiple examples for each concept, ranging from simple to complex, to illustrate the application of the ideas.
-        4. Draws connections between different concepts within the chapter and to broader contexts in the field of study.
-        5. Uses rich, vivid analogies and real-world examples to make complex ideas more accessible and relatable.
-        6. Integrates the relevant information from the knowledge base to provide additional context, historical background, or advanced applications of the concepts.
-        7. Discusses the significance and practical applications of the topic in various fields (e.g., physics, engineering, economics, etc., as appropriate for the subject matter).
-        8. Addresses common misconceptions, potential areas of confusion, and frequently asked questions related to the topic.
-        9. Includes thought-provoking questions and prompts throughout the narrative to encourage active engagement with the material.
-        10. Adjusts the chapter content to cater to the user's learning profile.
-        11. Provides a detailed explanation of any graphs, charts, or diagrams mentioned in the chapter, describing their features and significance.
-        12. Discusses any historical context or the development of the concepts over time, if relevant.
-        13. Explains the implications and importance of the concepts for future topics in the subject.
-        14. Summarizes key points at the end of each major section to aid in retention and review.
-        15. For any practice questions or excercises in the chapter content, provide a detailed solution with a thorough step by step explanation.
-        16. Use Markdown formatting for the summary.
-        17. Simply use the learning profile to tailor the narrative to the user's learning style but do not make it the focus of the narrative or explicitly mention it.
-
-        The summary should be highly informative, engaging, and comprehensive. Aim for a length that thoroughly covers all aspects of the chapter content. Ensure that the explanation is not only extensive but also clear and accessible, breaking down complex ideas into understandable parts.
+        Please create a comprehensive, detailed walkthrough that:
+        1. Thoroughly explains all key concepts from all materials
+        2. Integrates information across different content types
+        3. Provides multiple examples and applications
+        4. Draws connections between different sources
+        5. Uses rich analogies and real-world examples
+        6. Addresses common misconceptions
+        7. Includes thought-provoking questions
+        8. Adjusts content to cater to the user's learning profile
         """
 
+        # Generate narrative
         narrative = generate_narrative(narrative_prompt)
 
         # Generate game idea
-        game_response = generate_game_idea(chapter_content, learning_profile)
+        game_response = generate_game_idea(format_content_for_prompt(content), learning_profile)
         
         # Generate game code
         game_code_response = await generate_game_code(GameIdeaRequest(game_idea=game_response))
         game_code = game_code_response.get("code", "")
-
+        
         # Generate diagrams
-        diagrams = await generate_diagrams(chapter_content, narrative, learning_profile)
+        diagrams = await generate_diagrams(format_content_for_prompt(content), narrative, learning_profile)
 
-        narrative_result = {
-            "narrative": narrative
-        }
-
-        game_result = {
+        return {
+            "narrative": narrative,
             "game_idea": game_response,
-            "game_code": game_code
-        }
-
-        diagram_result = {
+            "game_code": game_code,
             "diagrams": diagrams
         }
 
-        logging.info(f"Generated narrative: {narrative_result}")
-
-        return {**narrative_result, **game_result, **diagram_result}
-
     except Exception as e:
-        logging.exception("Error in generate_narrative_endpoint")
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Error generating narrative: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate narrative: {str(e)}"
+        )
 
 @app.post("/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
@@ -823,7 +915,7 @@ class GameIdeaRequest(BaseModel):
 async def generate_game_code(request: GameIdeaRequest):
     game_idea = request.game_idea
     
-    prompt = f"""Create a fully functional React component for the following game idea:
+    prompt = f"""Create a fully functional React component for the following game idea that integrates concepts from multiple learning materials:
 
     {game_idea}
 
@@ -870,34 +962,34 @@ async def generate_game_code(request: GameIdeaRequest):
                 1. Use React hooks (useState, useEffect, useRef, useCallback) without React. prefix
                 2. Use React.createElement for all element creation (no JSX)
                 3. Return a single root element (usually a div) containing all other elements 
-                5. Ensure all variables and functions are properly declared
-                6. Do not use any external libraries or components not provided
-                7. Provide ONLY the JavaScript code, without any explanations or markdown formatting
-                8. Do not include 'return function Game() {{' at the beginning or '}}' at the end
-                9. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
-                10. Do not use 'function' as a variable name, as it is a reserved keyword in JavaScript. Use 'func' or 'mathFunction' instead
-                11. Create instructions for the user on how to play the game in the game component and how it relates to the chapter content
-                12. When evaluating mathematical expressions or functions, use a safe evaluation method instead of 'eval'. For example:
+                4. Ensure all variables and functions are properly declared
+                5. Do not use any external libraries or components not provided
+                6. Provide ONLY the JavaScript code, without any explanations or markdown formatting
+                7. Do not include 'return function Game() {{' at the beginning or '}}' at the end
+                8. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
+                9. Do not use 'function' as a variable name, as it is a reserved keyword in JavaScript. Use 'func' or 'mathFunction' instead
+                10. Create instructions for the user on how to play the game in the game component and how it relates to the chapter content
+                11. When evaluating mathematical expressions or functions, use a safe evaluation method instead of 'eval'. For example:
                     - For simple arithmetic, use basic JavaScript operations
                     - For more complex functions, define them explicitly (e.g., Math.sin, Math.cos, etc.)
-                13. Ensure all variables used in calculations are properly defined and initialized
-                14. Use try-catch blocks when performing calculations to handle potential errors gracefully
-                15. For keyboard input:
+                12. Ensure all variables used in calculations are properly defined and initialized
+                13. Use try-catch blocks when performing calculations to handle potential errors gracefully
+                14. For keyboard input:
                     - Use the useEffect hook to add and remove event listeners for keyboard events
                     - In the event listener, call e.preventDefault() to prevent default browser behavior (like scrolling)
                     - Focus on a game element (like the canvas) when the component mounts to ensure it captures keyboard events
-                16. Add a button to start/restart the game, and only capture keyboard input when the game is active
-                17. Ensure that the current equation is always visible and properly rendered using plain text or another method
-                18. To prevent scrolling when using arrow keys:
+                15. Add a button to start/restart the game, and only capture keyboard input when the game is active
+                16. Ensure that the current equation is always visible and properly rendered using plain text or another method
+                17. To prevent scrolling when using arrow keys:
                     - Add 'tabIndex={0}' to the game container div to make it focusable
                     - In the useEffect for keyboard events, check if the game container has focus before handling key presses
-                19. Display the current function prominently using plain text, and update it whenever it changes
-                20. Use requestAnimationFrame for the game loop to ensure smooth animation
-                21. Add error checking before accessing array elements or object properties
-                22. Use optional chaining (?.) when accessing nested properties to prevent errors
-                23. The background color of the dynamic game component is white keep this as the background color of the game.
-                24. Do not forget to include instructions for the user on how to play the game in the game component and how it relates to the chapter content as text in the game component.
-                25. Container Sizing Requirements:
+                18. Display the current function prominently using plain text, and update it whenever it changes
+                19. Use requestAnimationFrame for the game loop to ensure smooth animation
+                20. Add error checking before accessing array elements or object properties
+                21. Use optional chaining (?.) when accessing nested properties to prevent errors
+                22. The background color of the dynamic game component is white keep this as the background color of the game.
+                23. Do not forget to include instructions for the user on how to play the game in the game component and how it relates to the chapter content as text in the game component.
+                24. Container Sizing Requirements:
                     - The container is the parent of the game component and is in a portrait orientation occupying vertically the right half of the screen(it's aspect ratio is 5:6)
                     - The game must automatically scale to fit its container width without scrollbars
                     - Use relative units (%, vh, vw) instead of fixed pixel values
@@ -911,8 +1003,7 @@ async def generate_game_code(request: GameIdeaRequest):
                     - Use getBoundingClientRect() to get accurate container dimensions
                     - Apply CSS transform-origin: top left when scaling
                                                                 
-            Generate the game code now, remember to not include any explanations or comments, just the code:
-            """
+            Generate the game code now, remember to not include any explanations or comments, just the code:"""
 
     try:
         body = json.dumps({
@@ -939,7 +1030,6 @@ async def generate_game_code(request: GameIdeaRequest):
             if chunk['type'] == 'content_block_delta':
                 generated_code += chunk['delta'].get('text', '')
 
-        # Log the generated code for debugging
         logging.debug(f"Generated game code:\n{generated_code}")
 
         return {"code": generated_code.strip()}
@@ -1586,14 +1676,17 @@ def extract_text_and_tables(textract_response):
             extracted_content += "\n"
     return extracted_content
 
-async def generate_diagrams(chapter_content: str, generated_summary: str, learning_profile: str):
-    prompt = f"""Based on the following chapter content, generated summary, and the user's learning profile, create a set of diagrams that illustrate the key concepts:
+async def generate_diagrams(content: str, narrative: str, learning_profile: str):
+    prompt = f"""Based on the following materials, generated summary, and the user's learning profile, create a set of diagrams that illustrate the key concepts:
 
-    Chapter content: {chapter_content}
+    Primary Content from Collection:
+    {content}
 
-    Generated summary: {generated_summary}
+    Generated Summary:
+    {narrative}
 
-    User's learning profile: {learning_profile}
+    User's Learning Profile:
+    {learning_profile}
 
     Please create diagrams that:
     1. Illustrate the main concepts and their relationships
@@ -1622,36 +1715,37 @@ async def generate_diagrams(chapter_content: str, generated_summary: str, learni
         B --> E[Fifth Concept]
     ```
 
-    Provide 2-3 diagrams in correct Mermaid syntax, each enclosed in ```mermaid and ``` tags.
-    """
+    Provide 2-3 diagrams in correct Mermaid syntax, each enclosed in ```mermaid and ``` tags."""
 
     try:
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 2000,
-            "messages": [
+        native_request = {
+            'anthropic_version': 'bedrock-2023-05-31',
+            'max_tokens': 4096,
+            'temperature': 0.7,
+            'top_p': 0.9,
+            'messages': [
                 {
-                    "role": "user",
-                    "content": [{"type": "text", "text": prompt}]
+                    'role': 'user',
+                    'content': [{'type': 'text', 'text': prompt}],
                 }
             ],
-            "temperature": 0.7,
-            "top_p": 0.9,
-        })
+        }
+
+        request = json.dumps(native_request)
 
         response = bedrock.invoke_model_with_response_stream(
             modelId="us.anthropic.claude-3-5-haiku-20241022-v1:0",
-            body=body
+            body=request
         )
 
-        generated_diagrams = ""
+        full_response = ""
         for event in response['body']:
             chunk = json.loads(event['chunk']['bytes'])
             if chunk['type'] == 'content_block_delta':
-                generated_diagrams += chunk['delta'].get('text', '')
+                full_response += chunk['delta'].get('text', '')
 
         # Extract Mermaid diagrams from the response
-        mermaid_diagrams = re.findall(r'```mermaid\n(.*?)\n```', generated_diagrams, re.DOTALL)
+        mermaid_diagrams = re.findall(r'```mermaid\n(.*?)\n```', full_response, re.DOTALL)
         
         # Post-process each diagram
         processed_diagrams = [post_process_mermaid(diagram) for diagram in mermaid_diagrams]
@@ -1697,6 +1791,17 @@ async def transcribe_youtube(
     current_user: str = Depends(get_current_user)
 ):
     try:
+        # Get video info using yt-dlp
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            video_info = ydl.extract_info(video_url, download=False)
+            video_title = video_info.get('title', 'Untitled Video')
+            video_id = video_info.get('id', '')
+
         # Generate unique IDs for the files
         job_id = str(uuid.uuid4())
         temp_audio_path = f"/tmp/{job_id}.mp3"
@@ -1764,10 +1869,11 @@ async def transcribe_youtube(
             # Create metadata and transcript objects for S3
             metadata = {
                 "video_id": video_id,
-                "video_title": video_title,
+                "title": video_title,
                 "video_url": video_url,
                 "transcription_date": datetime.now().isoformat(),
-                "job_id": job_id
+                "job_id": job_id,
+                "original_filename": video_title  # Use video title for collection naming
             }
             
             transcript_text = transcript_data['results']['transcripts'][0]['transcript']
@@ -1792,10 +1898,20 @@ async def transcribe_youtube(
             
             logging.info(f"Saved transcription for video '{video_title}' to S3")
                 
+            # Create default collection
+            collection_id = await create_default_collection(
+                material_type="transcriptions",
+                material_id=job_id,
+                material_metadata=metadata,
+                current_user=current_user
+            )
+                
             return {
                 "transcript": transcript_text,
                 "metadata": metadata,
-                "job_id": job_id
+                "job_id": job_id,
+                "collection_id": collection_id,
+                "video_title": video_title
             }
         else:
             raise HTTPException(
@@ -1814,6 +1930,20 @@ async def transcribe_youtube(
             status_code=500,
             detail=f"Failed to transcribe video: {str(e)}"
         )
+
+def extract_video_id(url: str) -> Optional[str]:
+    """Extract YouTube video ID from various URL formats."""
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',  # Standard and shortened URLs
+        r'(?:embed\/)([0-9A-Za-z_-]{11})',   # Embed URLs
+        r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})'  # Shortened URLs
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
 
 @app.get("/user-transcriptions")
 async def get_user_transcriptions(current_user: str = Depends(get_current_user)):
@@ -1840,135 +1970,164 @@ async def get_user_transcriptions(current_user: str = Depends(get_current_user))
         raise HTTPException(status_code=500, detail="Failed to retrieve transcriptions")
 
 @app.post("/transcribe-lecture")
-async def transcribe_lecture(audio: UploadFile = File(...), current_user: str = Depends(get_current_user)):
-    # Define supported formats
-    SUPPORTED_FORMATS = {
-        'audio': ['.mp3', '.wav', '.m4a'],
-        'video': ['.mp4']
-    }
-    
+async def transcribe_lecture(
+    audio: UploadFile = File(...),
+    title: str = Form(...),  # Make title a required field
+    current_user: str = Depends(get_current_user)
+):
     try:
-        # Check file extension
-        file_ext = os.path.splitext(audio.filename)[1].lower()
-        all_supported_formats = SUPPORTED_FORMATS['audio'] + SUPPORTED_FORMATS['video']
+        # Define supported formats
+        SUPPORTED_FORMATS = {
+            'audio': ['.mp3', '.wav', '.m4a'],
+            'video': ['.mp4']
+        }
         
-        if file_ext not in all_supported_formats:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file format. Supported formats: {', '.join(all_supported_formats)}"
-            )
+        try:
+            # Check file extension
+            file_ext = os.path.splitext(audio.filename)[1].lower()
+            all_supported_formats = SUPPORTED_FORMATS['audio'] + SUPPORTED_FORMATS['video']
+            
+            if file_ext not in all_supported_formats:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file format. Supported formats: {', '.join(all_supported_formats)}"
+                )
 
-        # Generate unique IDs for the files
-        job_id = str(uuid.uuid4())
-        temp_input_path = f"/tmp/{job_id}_input{file_ext}"
-        temp_output_path = f"/tmp/{job_id}.mp3"
-        s3_audio_key = f"temp-audio/{job_id}.mp3"
-        
-        # Save the uploaded file temporarily
-        with open(temp_input_path, "wb") as buffer:
-            buffer.write(await audio.read())
-        
-        # Convert to mp3 if needed
-        if file_ext != '.mp3':
-            try:
-                subprocess.run([
-                    'ffmpeg',
-                    '-i', temp_input_path,
-                    '-vn',  # Disable video if present
-                    '-acodec', 'libmp3lame',
-                    '-ab', '192k',
-                    '-ar', '44100',
-                    '-y',  # Overwrite output file if exists
-                    temp_output_path
-                ], check=True, capture_output=True)
+            # Generate unique IDs for the files
+            job_id = str(uuid.uuid4())
+            temp_input_path = f"/tmp/{job_id}_input{file_ext}"
+            temp_output_path = f"/tmp/{job_id}.mp3"
+            s3_audio_key = f"temp-audio/{job_id}.mp3"
+            
+            # Save the uploaded file temporarily
+            with open(temp_input_path, "wb") as buffer:
+                buffer.write(await audio.read())
+            
+            # Convert to mp3 if needed
+            if file_ext != '.mp3':
+                try:
+                    subprocess.run([
+                        'ffmpeg',
+                        '-i', temp_input_path,
+                        '-vn',  # Disable video if present
+                        '-acodec', 'libmp3lame',
+                        '-ab', '192k',
+                        '-ar', '44100',
+                        '-y',  # Overwrite output file if exists
+                        temp_output_path
+                    ], check=True, capture_output=True)
+                    
+                    # Remove input file after conversion
+                    os.remove(temp_input_path)
+                except subprocess.CalledProcessError as e:
+                    logging.error(f"FFmpeg conversion error: {e.stderr.decode()}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to convert audio format"
+                    )
+            else:
+                # If it's already MP3, just rename
+                os.rename(temp_input_path, temp_output_path)
+            
+            # Upload to S3
+            s3_client.upload_file(temp_output_path, S3_BUCKET_NAME, s3_audio_key)
+            s3_uri = f"s3://{S3_BUCKET_NAME}/{s3_audio_key}"
+            
+            # Start transcription job
+            transcribe.start_transcription_job(
+                TranscriptionJobName=job_id,
+                Media={'MediaFileUri': s3_uri},
+                MediaFormat='mp3',
+                LanguageCode='en-US'
+            )
+            
+            # Wait for transcription to complete
+            while True:
+                status = transcribe.get_transcription_job(TranscriptionJobName=job_id)
+                if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+                    break
+                await asyncio.sleep(5)
+            
+            # Clean up temporary files
+            if os.path.exists(temp_output_path):
+                os.remove(temp_output_path)
+            s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
+            
+            if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+                transcript_uri = status['TranscriptionJob']['Transcript']['TranscriptFileUri']
                 
-                # Remove input file after conversion
-                os.remove(temp_input_path)
-            except subprocess.CalledProcessError as e:
-                logging.error(f"FFmpeg conversion error: {e.stderr.decode()}")
+                # Get the transcript JSON
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(transcript_uri)
+                    transcript_data = response.json()
+                
+                # Create metadata and transcript objects for S3
+                metadata = {
+                    "file_name": audio.filename,
+                    "title": title,  # Use provided title
+                    "upload_date": datetime.now().isoformat(),
+                    "file_type": "uploaded_audio" if file_ext in SUPPORTED_FORMATS['audio'] else "uploaded_video",
+                    "job_id": job_id,
+                    "original_filename": title  # Use title for collection naming
+                }
+                
+                transcript_text = transcript_data['results']['transcripts'][0]['transcript']
+                
+                # Save metadata to S3
+                metadata_key = f"transcriptions/{current_user}/metadata/{job_id}.json"
+                s3_client.put_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=metadata_key,
+                    Body=json.dumps(metadata),
+                    ContentType='application/json'
+                )
+                
+                # Save transcript to S3
+                transcript_key = f"transcriptions/{current_user}/content/{job_id}.txt"
+                s3_client.put_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=transcript_key,
+                    Body=transcript_text,
+                    ContentType='text/plain'
+                )
+                
+                logging.info(f"Saved transcription for file '{audio.filename}' to S3")
+                    
+                # Create default collection
+                collection_id = await create_default_collection(
+                    material_type="transcriptions",
+                    material_id=job_id,
+                    material_metadata=metadata,
+                    current_user=current_user
+                )
+                    
+                return {
+                    "transcript": transcript_text,
+                    "metadata": metadata,
+                    "job_id": job_id,
+                    "collection_id": collection_id
+                }
+            else:
                 raise HTTPException(
                     status_code=500,
-                    detail="Failed to convert audio format"
+                    detail="Transcription job failed"
                 )
-        else:
-            # If it's already MP3, just rename
-            os.rename(temp_input_path, temp_output_path)
-        
-        # Upload to S3
-        s3_client.upload_file(temp_output_path, S3_BUCKET_NAME, s3_audio_key)
-        s3_uri = f"s3://{S3_BUCKET_NAME}/{s3_audio_key}"
-        
-        # Start transcription job
-        transcribe.start_transcription_job(
-            TranscriptionJobName=job_id,
-            Media={'MediaFileUri': s3_uri},
-            MediaFormat='mp3',
-            LanguageCode='en-US'
-        )
-        
-        # Wait for transcription to complete
-        while True:
-            status = transcribe.get_transcription_job(TranscriptionJobName=job_id)
-            if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
-                break
-            await asyncio.sleep(5)
-        
-        # Clean up temporary files
-        if os.path.exists(temp_output_path):
-            os.remove(temp_output_path)
-        s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
-        
-        if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
-            transcript_uri = status['TranscriptionJob']['Transcript']['TranscriptFileUri']
-            
-            # Get the transcript JSON
-            async with httpx.AsyncClient() as client:
-                response = await client.get(transcript_uri)
-                transcript_data = response.json()
-            
-            # Create metadata and transcript objects for S3
-            metadata = {
-                "file_name": audio.filename,
-                "upload_date": datetime.now().isoformat(),
-                "file_type": "uploaded_audio" if file_ext in SUPPORTED_FORMATS['audio'] else "uploaded_video",
-                "job_id": job_id
-            }
-            
-            transcript_text = transcript_data['results']['transcripts'][0]['transcript']
-            
-            # Save metadata to S3
-            metadata_key = f"transcriptions/{current_user}/metadata/{job_id}.json"
-            s3_client.put_object(
-                Bucket=S3_BUCKET_NAME,
-                Key=metadata_key,
-                Body=json.dumps(metadata),
-                ContentType='application/json'
-            )
-            
-            # Save transcript to S3
-            transcript_key = f"transcriptions/{current_user}/content/{job_id}.txt"
-            s3_client.put_object(
-                Bucket=S3_BUCKET_NAME,
-                Key=transcript_key,
-                Body=transcript_text,
-                ContentType='text/plain'
-            )
-            
-            logging.info(f"Saved transcription for file '{audio.filename}' to S3")
                 
-            return {
-                "transcript": transcript_text,
-                "metadata": metadata,
-                "job_id": job_id
-            }
-        else:
+        except Exception as e:
+            logging.error(f"Error transcribing audio file: {str(e)}")
+            # Clean up any temporary files
+            for path in [temp_input_path, temp_output_path]:
+                if 'path' in locals() and os.path.exists(path):
+                    os.remove(path)
+            if 's3_audio_key' in locals():
+                s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
             raise HTTPException(
                 status_code=500,
-                detail="Transcription job failed"
+                detail=f"Failed to transcribe audio: {str(e)}"
             )
-            
+
     except Exception as e:
-        logging.error(f"Error transcribing audio file: {str(e)}")
+        logging.error(f"Error transcribing lecture: {str(e)}")
         # Clean up any temporary files
         for path in [temp_input_path, temp_output_path]:
             if 'path' in locals() and os.path.exists(path):
@@ -1977,7 +2136,7 @@ async def transcribe_lecture(audio: UploadFile = File(...), current_user: str = 
             s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_audio_key)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to transcribe audio: {str(e)}"
+            detail=f"Failed to transcribe lecture: {str(e)}"
         )
 
 @app.post("/process-presentation")
@@ -2064,6 +2223,14 @@ async def process_presentation(
                 ContentType='application/json'
             )
 
+        # After successful processing, create a default collection
+        collection_id = await create_default_collection(
+            material_type="presentations",
+            material_id=presentation_id,
+            material_metadata=metadata,
+            current_user=current_user
+        )
+
         # Clean up temporary file
         os.remove(temp_path)
 
@@ -2072,7 +2239,8 @@ async def process_presentation(
         return {
             "message": "Presentation processed successfully",
             "presentation_id": presentation_id,
-            "metadata": metadata
+            "metadata": metadata,
+            "collection_id": collection_id  # Return the collection ID
         }
 
     except Exception as e:
@@ -2236,7 +2404,15 @@ async def list_collections(current_user: str = Depends(get_current_user)):
                     Key=obj['Key']
                 )['Body'].read()
             )
-            collections.append(collection)
+            
+            # Count total materials in collection
+            total_materials = sum(
+                len(materials) for materials in collection['materials'].values()
+            )
+            
+            # Only include collections with more than one material
+            if total_materials > 1:
+                collections.append(collection)
         
         return collections
 
@@ -2345,7 +2521,7 @@ async def process_notes(
         
         # Start Textract job
         if file_ext == '.pdf':
-            textract_response = textract.start_document_analysis(
+            textract_response = textract_client.start_document_analysis(
                 DocumentLocation={'S3Object': {'Bucket': S3_BUCKET_NAME, 'Name': s3_key}},
                 FeatureTypes=['TABLES', 'FORMS']
             )
@@ -2353,7 +2529,7 @@ async def process_notes(
             
             # Wait for Textract job to complete
             while True:
-                response = textract.get_document_analysis(JobId=job_id)
+                response = textract_client.get_document_analysis(JobId=job_id)
                 if response['JobStatus'] in ['SUCCEEDED', 'FAILED']:
                     break
                 await asyncio.sleep(5)
@@ -2365,7 +2541,7 @@ async def process_notes(
         else:
             # For images, use synchronous Textract
             with open(temp_path, 'rb') as image:
-                textract_results = textract.detect_document_text(
+                textract_results = textract_client.detect_document_text(
                     Document={'Bytes': image.read()}
                 )
 
@@ -2448,11 +2624,20 @@ async def process_notes(
         # Clean up temporary file
         os.remove(temp_path)
 
+        # Create default collection
+        collection_id = await create_default_collection(
+            material_type="notes",
+            material_id=notes_id,
+            material_metadata=metadata,
+            current_user=current_user
+        )
+
         return {
             "message": "Notes processed successfully",
             "notes_id": notes_id,
             "metadata": metadata,
-            "content": processed_content
+            "content": processed_content,
+            "collection_id": collection_id
         }
 
     except Exception as e:
@@ -2502,4 +2687,203 @@ async def get_notes(
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve notes"
+        )
+
+async def get_collection_content(collection_id: str, current_user: str):
+    try:
+        # Get collection metadata
+        collection = json.loads(
+            s3_client.get_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=f"collections/{current_user}/{collection_id}.json"
+            )['Body'].read()
+        )
+        
+        content = {
+            "textbook_content": [],
+            "transcriptions": [],
+            "presentations": [],
+            "notes": []
+        }
+        
+        # Gather textbook sections
+        for section in collection['materials'].get('textbook_sections', []):
+            section_content = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=f"textbooks/{current_user}/content/{section['book_id']}/section_{section['section_id']}.json"
+                )['Body'].read()
+            )
+            content["textbook_content"].append(section_content)
+        
+        # Gather transcriptions
+        for trans in collection['materials'].get('transcriptions', []):
+            trans_content = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=f"transcriptions/{current_user}/content/{trans['transcription_id']}.txt"
+                )['Body'].read()
+            )
+            content["transcriptions"].append(trans_content)
+        
+        # Gather presentations
+        for pres in collection['materials'].get('presentations', []):
+            pres_content = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=f"presentations/{current_user}/content/{pres['presentation_id']}"
+                )['Body'].read()
+            )
+            content["presentations"].append(pres_content)
+            
+        # Gather notes
+        for note in collection['materials'].get('notes', []):
+            note_content = json.loads(
+                s3_client.get_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=f"notes/{current_user}/processed/{note['notes_id']}.json"
+                )['Body'].read()
+            )
+            content["notes"].append(note_content)
+            
+        return content
+        
+    except Exception as e:
+        logging.error(f"Error gathering collection content: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to gather collection content"
+        )
+
+def generate_dynamic_prompt(content: Dict, task: str) -> str:
+    # Base prompts for each task
+    base_prompts = {
+        "summary": """Generate a comprehensive summary that synthesizes information from multiple learning materials. 
+                     Focus on key concepts, relationships between ideas, and important takeaways.""",
+        
+        "game": """Create an interactive learning game concept that tests understanding of the material. 
+                  Include specific questions and scenarios based on the content.""",
+        
+        "diagrams": """Generate clear, informative diagrams that visualize key concepts and relationships 
+                      from the learning materials."""
+    }
+    
+    prompt_parts = [base_prompts[task]]
+    
+    # Add content-specific instructions
+    if content["textbook_content"]:
+        prompt_parts.append(
+            "From the textbook sections, incorporate key definitions, concepts, and theoretical frameworks."
+        )
+    
+    if content["transcriptions"]:
+        prompt_parts.append(
+            "From the lecture transcriptions, include practical examples, explanations, and real-world applications."
+        )
+    
+    if content["presentations"]:
+        prompt_parts.append(
+            "From the presentation slides, use the main points, visual concepts, and structured progression of ideas."
+        )
+    
+    if content["notes"]:
+        prompt_parts.append(
+            "From the handwritten notes, include additional insights, annotations, and supplementary examples."
+        )
+    
+    # Add task-specific modifications
+    if task == "summary":
+        prompt_parts.append(
+            "Create a coherent narrative that flows naturally between different source materials."
+        )
+    elif task == "game":
+        prompt_parts.append(
+            "Design interactions that test understanding across all available materials."
+        )
+    elif task == "diagrams":
+        prompt_parts.append(
+            "Create visualizations that show relationships between concepts from different sources."
+        )
+    
+    # Combine all parts
+    full_prompt = "\n\n".join(prompt_parts)
+    
+    # Add the actual content
+    content_text = format_content_for_prompt(content)
+    
+    return f"{full_prompt}\n\nContent to work with:\n\n{content_text}"
+
+def format_content_for_prompt(content: Dict) -> str:
+    formatted_parts = []
+    
+    if content["textbook_content"]:
+        formatted_parts.append("TEXTBOOK SECTIONS:")
+        for section in content["textbook_content"]:
+            formatted_parts.append(f"- {section['text']}")
+    
+    if content["transcriptions"]:
+        formatted_parts.append("\nLECTURE TRANSCRIPTIONS:")
+        for trans in content["transcriptions"]:
+            formatted_parts.append(f"- {trans}")
+    
+    if content["presentations"]:
+        formatted_parts.append("\nPRESENTATIONS:")
+        for pres in content["presentations"]:
+            slides = [f"Slide {i+1}: {slide['content']}" 
+                     for i, slide in enumerate(pres['slides'])]
+            formatted_parts.extend(slides)
+    
+    if content["notes"]:
+        formatted_parts.append("\nHANDWRITTEN NOTES:")
+        for note in content["notes"]:
+            formatted_parts.append(f"- {note['text_content']}")
+            if note['diagrams']:
+                formatted_parts.append("  (Includes diagrams)")
+    
+    return "\n".join(formatted_parts)
+
+# Helper function to create a default collection
+async def create_default_collection(
+    material_type: str,
+    material_id: str,
+    material_metadata: Dict,
+    current_user: str
+) -> str:
+    try:
+        collection_id = str(uuid.uuid4())
+        collection = {
+            "collection_id": collection_id,
+            "name": f"{material_metadata.get('original_filename', 'Untitled')} Collection",
+            "created_date": datetime.now().isoformat(),
+            "user_id": current_user,
+            "materials": {
+                "textbook_sections": [],
+                "transcriptions": [],
+                "presentations": [],
+                "notes": []
+            }
+        }
+        
+        # Add the material to its appropriate type in the collection
+        collection["materials"][material_type].append({
+            f"{material_type[:-1]}_id": material_id,  # Remove 's' from type for ID
+            "added_date": datetime.now().isoformat()
+        })
+        
+        # Save to S3
+        collection_key = f"collections/{current_user}/{collection_id}.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=collection_key,
+            Body=json.dumps(collection),
+            ContentType='application/json'
+        )
+        
+        return collection_id
+        
+    except Exception as e:
+        logging.error(f"Error creating default collection: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create default collection"
         )
