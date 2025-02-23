@@ -12,16 +12,15 @@
   
   .upload-title {
     font-size: 2.5rem;
-    color: #2563eb;
+    color: #3B82F6;
     text-align: center;
     margin-bottom: 40px;
   }
   
   .upload-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 24px;
-    margin-bottom: 40px;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
   }
   
   .upload-card-new {
@@ -37,7 +36,7 @@
   
   .upload-card-new:hover {
     transform: translateY(-4px);
-    border-color: #2563eb;
+    border-color: #3B82F6;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   }
   
@@ -50,12 +49,12 @@
     align-items: center;
     justify-content: center;
     margin: 0 auto 16px;
-    color: #2563eb;
+    color: #3B82F6;
     transition: all 0.3s ease;
   }
   
   .upload-card-new:hover .icon-container {
-    background-color: #2563eb;
+    background-color: #3B82F6;
     color: white;
   }
   
@@ -66,7 +65,7 @@
   }
   
   .create-collection-btn {
-    background-color: #2563eb;
+    background-color: #3B82F6;
     color: white;
     padding: 12px 24px;
     border: none;
@@ -77,12 +76,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 0 auto;
-    transition: background-color 0.3s ease;
+    transition: background-color 0.3s ease, transform 0.2s ease;
   }
   
   .create-collection-btn:hover {
-    background-color: #1d4ed8;
+    background-color: #2563eb;
+  }
+  
+  .create-collection-btn:active {
+    transform: scale(0.95);
   }
   
   .btn-icon {
@@ -202,5 +204,67 @@
   .file-input {
     display: none;
   }
+  .upload-page {
+    padding: 20px;
+    text-align: center;
+  }
   
+  .upload-title {
+    font-size: 24px;
+    margin-bottom: 20px;
+  }
+  
+  .upload-grid {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 20px;
+  }
+  
+  .upload-card {
+    background-color: #f0f0f0;
+    border-radius: 8px;
+    padding: 20px;
+    width: 220px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  
+  .upload-card:hover {
+    background-color: #e0e0e0;
+  }
+  
+  .uploaded-files-container {
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 10px;
+    margin: 20px auto;
+    width: 85%;
+    max-width: 700px;
+  }
+  
+  .uploaded-files-container ul {
+    list-style-type: none;
+    padding: 0;
+    text-align: left;
+  }
+  
+  .uploaded-files-container li {
+    padding: 5px 0;
+  }
+  
+  .create-collection-btn {
+    background-color: #007bff;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    display: block;
+    margin: 0 auto;
+  }
+  
+  .create-collection-btn:hover {
+    background-color: #0056b3;
+  }
   

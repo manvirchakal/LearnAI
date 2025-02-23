@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import NavBar from './NavBar';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -17,39 +17,60 @@ const Upload = () => {
   const [isLectureModalOpen, setIsLectureModalOpen] = useState(false);
   const [isPowerPointModalOpen, setIsPowerPointModalOpen] = useState(false);
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
-  const [file, setFile] = useState(null);
+  const [textbookFile, setTextbookFile] = useState(null);
+  const [lectureFile, setLectureFile] = useState(null);
+  const [powerPointFile, setPowerPointFile] = useState(null);
+  const [notesFile, setNotesFile] = useState(null);
   const [pageRange, setPageRange] = useState('');
   const [lectureTitle, setLectureTitle] = useState('');
   const [powerPointTitle, setPowerPointTitle] = useState('');
   const [notesTitle, setNotesTitle] = useState('');
   const [isTextbook, setIsTextbook] = useState(true);
+  const [tempPowerPointTitle, setTempPowerPointTitle] = useState('');
   const navigate = useNavigate();
+  const notesInputRef = useRef(null);
+  const powerPointInputRef = useRef(null);
 
-  const handleFileChange = (event) => {
-    setFile(event.target.files[0]);
+  const handleFileChange = (event, type) => {
+    const selectedFile = event.target.files[0];
+    switch (type) {
+      case 'textbook':
+        setTextbookFile(selectedFile);
+        break;
+      case 'lecture':
+        setLectureFile(selectedFile);
+        break;
+      case 'powerPoint':
+        setPowerPointFile(selectedFile);
+        break;
+      case 'notes':
+        setNotesFile(selectedFile);
+        break;
+      default:
+        break;
+    }
   };
 
   const handleSubmit = () => {
-    console.log('File:', file);
+    console.log('File:', textbookFile);
     console.log('Page Range:', pageRange);
     setIsModalOpen(false);
   };
 
   const handleLectureSubmit = () => {
     console.log('Lecture Title:', lectureTitle);
-    console.log('Lecture File:', file);
+    console.log('Lecture File:', lectureFile);
     setIsLectureModalOpen(false);
   };
 
   const handlePowerPointSubmit = () => {
-    console.log('PowerPoint Title:', powerPointTitle);
-    console.log('PowerPoint File:', file);
+    setPowerPointTitle(tempPowerPointTitle);
     setIsPowerPointModalOpen(false);
   };
 
   const handleNotesSubmit = () => {
     console.log('Notes Title:', notesTitle);
-    console.log('Notes File:', file);
+    console.log('Notes File:', notesFile);
     setIsNotesModalOpen(false);
   };
 
@@ -71,43 +92,54 @@ const Upload = () => {
     );
   };
 
+  useEffect(() => {
+    if (isPowerPointModalOpen && powerPointInputRef.current) {
+      powerPointInputRef.current.focus();
+    }
+  }, [isPowerPointModalOpen]);
+
+  useEffect(() => {
+    if (isNotesModalOpen && notesInputRef.current) {
+      notesInputRef.current.focus();
+    }
+  }, [isNotesModalOpen]);
+
   return (
     <>
       <NavBar />
       <div className="upload-page">
-        <div className="upload-content">
-          <h1 className="upload-title">Upload Your Materials</h1>
-          <div className="upload-grid">
-            <div className="upload-card-new" onClick={() => setIsModalOpen(true)}>
-              <div className="icon-container">
-                <FaBook size={32} />
-              </div>
-              <h3>Upload Textbook</h3>
-            </div>
-            <div className="upload-card-new" onClick={() => setIsLectureModalOpen(true)}>
-              <div className="icon-container">
-                <FaVideo size={32} />
-              </div>
-              <h3>Upload Lecture</h3>
-            </div>
-            <div className="upload-card-new" onClick={() => setIsPowerPointModalOpen(true)}>
-              <div className="icon-container">
-                <FaFilePowerpoint size={32} />
-              </div>
-              <h3>Upload PowerPoint</h3>
-            </div>
-            <div className="upload-card-new" onClick={() => setIsNotesModalOpen(true)}>
-              <div className="icon-container">
-                <FaFileAlt size={32} />
-              </div>
-              <h3>Upload Notes</h3>
-            </div>
+        <h1 className="upload-title">Upload Your Materials</h1>
+        <div className="upload-grid">
+          <div className="upload-card" onClick={() => setIsModalOpen(true)}>
+            <FaBook size={48} />
+            <h3>Upload Textbook</h3>
           </div>
-          <button className="create-collection-btn">
-            <FaFolderPlus className="btn-icon" size={20} />
-            Create a collection
-          </button>
+          <div className="upload-card" onClick={() => setIsLectureModalOpen(true)}>
+            <FaVideo size={48} />
+            <h3>Upload Lecture</h3>
+          </div>
+          <div className="upload-card" onClick={() => setIsPowerPointModalOpen(true)}>
+            <FaFilePowerpoint size={48} />
+            <h3>Upload PowerPoint</h3>
+          </div>
+          <div className="upload-card" onClick={() => setIsNotesModalOpen(true)}>
+            <FaFileAlt size={48} />
+            <h3>Upload Notes</h3>
+          </div>
         </div>
+        <div className="uploaded-files-container">
+          <h2>Uploaded Files</h2>
+          <ul>
+            {textbookFile && <li>Textbook: {textbookFile.name}</li>}
+            {lectureFile && <li>Lecture: {lectureFile.name}</li>}
+            {powerPointFile && <li>PowerPoint: {powerPointFile.name}</li>}
+            {notesFile && <li>Notes: {notesFile.name}</li>}
+          </ul>
+        </div>
+        <button className="create-collection-btn">
+          <FaFolderPlus className="btn-icon" size={20} />
+          Create a collection
+        </button>
 
         {/* Textbook Modal */}
         <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Upload Textbook">
@@ -134,9 +166,9 @@ const Upload = () => {
               <label className="file-input-label">
                 <FaUpload size={24} />
                 <span>Choose File</span>
-                <input type="file" onChange={handleFileChange} className="file-input" />
+                <input type="file" onChange={(e) => handleFileChange(e, 'textbook')} className="file-input" />
               </label>
-              {file && <p className="file-name">{file.name}</p>}
+              {textbookFile && <p className="file-name">{textbookFile.name}</p>}
             </div>
             {isTextbook && (
               <div className="input-group">
@@ -174,9 +206,9 @@ const Upload = () => {
               <label className="file-input-label">
                 <FaUpload size={24} />
                 <span>Upload Media</span>
-                <input type="file" onChange={handleFileChange} className="file-input" />
+                <input type="file" onChange={(e) => handleFileChange(e, 'lecture')} className="file-input" />
               </label>
-              {file && <p className="file-name">{file.name}</p>}
+              {lectureFile && <p className="file-name">{lectureFile.name}</p>}
               <p className="file-type-hint">(.mp3, .mp4, .m4a, .wav files only)</p>
             </div>
             <div className="modal-actions">
@@ -193,19 +225,21 @@ const Upload = () => {
               <label>PowerPoint Title</label>
               <input
                 type="text"
-                value={powerPointTitle}
-                onChange={(e) => setPowerPointTitle(e.target.value)}
+                value={tempPowerPointTitle}
+                onChange={(e) => setTempPowerPointTitle(e.target.value)}
                 placeholder="Enter PowerPoint title"
                 className="text-input"
+                ref={powerPointInputRef}
+                onFocus={() => powerPointInputRef.current.select()}
               />
             </div>
             <div className="file-upload-container">
               <label className="file-input-label">
                 <FaUpload size={24} />
                 <span>Upload PowerPoint</span>
-                <input type="file" onChange={handleFileChange} className="file-input" />
+                <input type="file" onChange={(e) => handleFileChange(e, 'powerPoint')} className="file-input" />
               </label>
-              {file && <p className="file-name">{file.name}</p>}
+              {powerPointFile && <p className="file-name">{powerPointFile.name}</p>}
               <p className="file-type-hint">(.ppt, .pptx files only)</p>
             </div>
             <div className="modal-actions">
@@ -226,15 +260,16 @@ const Upload = () => {
                 onChange={(e) => setNotesTitle(e.target.value)}
                 placeholder="Enter notes title"
                 className="text-input"
+                ref={notesInputRef}
               />
             </div>
             <div className="file-upload-container">
               <label className="file-input-label">
                 <FaUpload size={24} />
                 <span>Upload Notes</span>
-                <input type="file" onChange={handleFileChange} className="file-input" />
+                <input type="file" onChange={(e) => handleFileChange(e, 'notes')} className="file-input" />
               </label>
-              {file && <p className="file-name">{file.name}</p>}
+              {notesFile && <p className="file-name">{notesFile.name}</p>}
               <p className="file-type-hint">(.jpg, .jpeg, .png files only)</p>
             </div>
             <div className="modal-actions">

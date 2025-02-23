@@ -39,7 +39,7 @@ const NavBar = () => {
           </li>
           <li>
             <Link to="/select-textbook" className={location.pathname === '/select-textbook' ? 'active' : ''}>
-              Textbooks <FaBook style={{ marginLeft: '5px' }} />
+              Library <FaBook style={{ marginLeft: '5px' }} />
             </Link>
           </li>
           <li>

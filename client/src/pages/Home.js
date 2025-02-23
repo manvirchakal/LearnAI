@@ -58,7 +58,7 @@ const Home = () => {
 
           <div className="action-card" onClick={() => navigate('/upload')}>
             <div className="card-content">
-              <h3>Upload Textbook</h3>
+              <h3>Upload Material</h3>
               <p>Add new study materials to your library</p>
             </div>
           </div>
