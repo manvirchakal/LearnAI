@@ -36,3 +36,4 @@ node_modules/
 .env
 
 launch.json
+create_inference_profile.py

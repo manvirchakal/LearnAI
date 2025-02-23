@@ -53,6 +53,9 @@ from yt_dlp import YoutubeDL
 from datetime import datetime
 from pptx import Presentation
 from typing import List, Dict, Optional
+from PIL import Image
+import math
+import base64
 
 MAX_RETRIES = 1
 
@@ -491,7 +494,19 @@ async def upload_pdf(
             logging.info(f"Processing textbook TOC pages: {tocPages}")
             file_id = unique_filename.split('_')[0]
             start_page, end_page = map(int, tocPages.split('-'))
-            toc_structure = process_toc_pages(S3_BUCKET_NAME, s3_key, start_page, end_page, file_id, file.filename, current_user, unique_filename)
+            
+            # Await the TOC processing
+            toc_structure = await process_toc_pages(
+                S3_BUCKET_NAME, 
+                s3_key, 
+                start_page, 
+                end_page, 
+                file_id, 
+                file.filename, 
+                current_user, 
+                unique_filename
+            )
+            
             metadata["table_of_contents"] = toc_structure
             
             # Create collections for chapters and sections
@@ -525,11 +540,179 @@ async def upload_pdf(
         logging.error(f"Failed to upload PDF to S3: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to upload PDF")
 
-def process_toc_pages(bucket, document_key, start_page, end_page, file_id, book_title, current_user, unique_filename):
-    logging.info(f"Starting Textract processing for document: {document_key}")
-    logging.info(f"TOC pages to process: {start_page}-{end_page}")
+async def prepare_toc_images(pdf_path: str, start_page: int, end_page: int) -> List[bytes]:
+    """Convert PDF pages to 1152x1152 images."""
+    try:
+        images = []
+        with fitz.open(pdf_path) as pdf:
+            for page_num in range(start_page - 1, end_page):
+                page = pdf[page_num]
+                # Get the page's pixmap
+                pix = page.get_pixmap()
+                
+                # Convert to PIL Image
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                
+                # Resize to 1152x1152 maintaining aspect ratio
+                target_size = (1152, 1152)
+                
+                # Calculate dimensions maintaining aspect ratio
+                aspect_ratio = img.width / img.height
+                if aspect_ratio > 1:
+                    new_width = 1152
+                    new_height = int(1152 / aspect_ratio)
+                else:
+                    new_height = 1152
+                    new_width = int(1152 * aspect_ratio)
+                
+                # Resize image
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Create new white background image
+                background = Image.new('RGB', target_size, (255, 255, 255))
+                
+                # Calculate position to paste resized image
+                paste_x = (target_size[0] - new_width) // 2
+                paste_y = (target_size[1] - new_height) // 2
+                
+                # Paste resized image onto white background
+                background.paste(img, (paste_x, paste_y))
+                
+                # Convert to bytes
+                img_byte_arr = io.BytesIO()
+                background.save(img_byte_arr, format='JPEG')
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                images.append(img_byte_arr)
+        
+        return images
     
-    all_blocks = []
+    except Exception as e:
+        logging.error(f"Error preparing TOC images: {str(e)}")
+        raise
+
+async def process_toc_with_claude(images: List[bytes]) -> Dict:
+    """Process TOC images with Claude 3 Sonnet vision model."""
+    try:
+        # Start with initial instruction
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": """Analyze this table of contents and output ONLY a JSON object with this exact structure:
+                        {
+                            "chapters": [
+                                {
+                                    "number": "Chapter 1",
+                                    "title": "To deliver you from the Preliminary Terrors",
+                                    "page": 1,
+                                    "sections": []
+                                }
+                            ]
+                        }
+                        
+                        Important rules:
+                        1. For each chapter:
+                           - "number" should be "Chapter X" (or "Prologue" for the prologue)
+                           - Include the full title after the chapter number
+                           - "page" should be the integer page number from the right column
+                        2. Convert Roman numerals (I, II, III, etc) to regular numbers in the chapter titles
+                        3. Include the Prologue as a chapter with "number": "Prologue"
+                        4. Make sure all page numbers are integers
+                        5. Do not include any explanatory text in your response, only the JSON object
+                        6. Keep the exact key names shown in the example ("number", "title", "page", "sections")
+                        
+                        Example chapter entry:
+                        {
+                            "number": "Chapter 1",
+                            "title": "To deliver you from the Preliminary Terrors",
+                            "page": 1,
+                            "sections": []
+                        }"""
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "I understand. I'll analyze the table of contents and output only the JSON object with the specified structure, maintaining the exact format for chapter numbers, titles, and page numbers."
+            }
+        ]
+
+        # Combine all images into a single user message
+        image_content = []
+        for i, img_bytes in enumerate(images, 1):
+            image_content.extend([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64.b64encode(img_bytes).decode('utf-8')
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": f"This is page {i} of the table of contents."
+                }
+            ])
+        
+        # Add all images in a single user message
+        messages.append({
+            "role": "user",
+            "content": image_content
+        })
+
+        # Make the API request
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 2048,
+            "messages": messages,
+            "temperature": 0.7,
+            "top_p": 0.9
+        })
+
+        # Create a new bedrock client with proper configuration
+        bedrock = boto3.client(
+            'bedrock-runtime',
+            config=Config(
+                retries={'max_attempts': 3},
+                connect_timeout=30,
+                read_timeout=30,
+                user_agent_extra=f"inference_profile={os.getenv('CLAUDE_INFERENCE_PROFILE_ARN')}"
+            )
+        )
+
+        response = bedrock.invoke_model(
+            modelId="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+            body=body,
+            contentType="application/json",
+            accept="application/json"
+        )
+
+        # Parse the response
+        response_body = json.loads(response['body'].read())
+        
+        # Extract the content from Claude's response
+        assistant_message = response_body.get('content', [{}])[0].get('text', '{}')
+        
+        # Parse the JSON from the text response
+        toc_data = json.loads(assistant_message)
+        
+        logging.debug(f"Parsed TOC data: {toc_data}")  # Add debug logging
+        return toc_data
+
+    except Exception as e:
+        logging.error(f"Error processing TOC with Claude: {str(e)}")
+        logging.error(f"Full error: {str(e)}")
+        raise
+
+# Update the process_toc_pages function to use Claude instead of Llama
+async def process_toc_pages(bucket: str, document_key: str, start_page: int, end_page: int, file_id: str, book_title: str, current_user: str, unique_filename: str) -> List[Dict]:
+    """Process TOC pages and convert to chapter/section structure."""
+    logging.info(f"Starting TOC processing for document: {document_key}")
+    logging.info(f"TOC pages to process: {start_page}-{end_page}")
     
     try:
         # Download the PDF from S3
@@ -541,39 +724,27 @@ def process_toc_pages(bucket, document_key, start_page, end_page, file_id, book_
             temp_file.write(pdf_content)
             temp_path = temp_file.name
 
-        # Process each page individually
-        for page_num in range(start_page, end_page + 1):
-            logging.info(f"Processing page {page_num}")
-            
-            # Extract and compress the single page
-            with pikepdf.Pdf.open(temp_path) as pdf:
-                new_pdf = pikepdf.Pdf.new()
-                new_pdf.pages.append(pdf.pages[page_num - 1])
-                
-                # Save the compressed page to a BytesIO object
-                output = io.BytesIO()
-                new_pdf.save(output, compress_streams=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
-                output.seek(0)
-                file_bytes = output.getvalue()
+        # Prepare images for Claude model
+        toc_images = await prepare_toc_images(temp_path, start_page, end_page)
+        
+        # Process images with Claude model
+        toc_data = await process_toc_with_claude(toc_images)
+        
+        # The response from Claude is already in the correct format
+        chapters = []
+        for chapter in toc_data['chapters']:
+            chapter_info = {
+                'number': chapter['number'],  # Already in correct format "Chapter X"
+                'title': chapter['title'],
+                'page': chapter['page'],
+                'sections': chapter.get('sections', [])  # Use get() with default empty list
+            }
+            chapters.append(chapter_info)
 
-            logging.info(f"Compressed PDF size for page {page_num}: {len(file_bytes)} bytes")
-            
-            # Process with Textract
-            response = textract_client.analyze_document(
-                Document={'Bytes': file_bytes},
-                FeatureTypes=['TABLES', 'FORMS']
-            )
-            
-            all_blocks.extend(response['Blocks'])
-
-        # Extract chapters and sections with adjusted page numbers
-        toc_structure = extract_chapters_from_textract({'Blocks': all_blocks}, end_page + 1)
-
-        logging.info(f"TOC structure extracted: {toc_structure}")
-        return toc_structure
+        return chapters
 
     except Exception as e:
-        logging.error(f"Error processing TOC pages with Textract: {str(e)}")
+        logging.error(f"Error processing TOC pages: {str(e)}")
         logging.error(f"Error type: {type(e).__name__}")
         logging.error(f"Error args: {e.args}")
         return []
