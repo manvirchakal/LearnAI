@@ -5,12 +5,12 @@
   margin: 0;
 }
 
-/* Navigation bar styling */
+/* Navigation bar styling - reduced vertical padding for a smaller height */
 .navbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 50px;
+  padding: 10px 30px; /* Reduced padding */
   background-color: white;
   border-bottom: 2px solid #3B82F6;
 }
@@ -25,7 +25,7 @@
   height: auto;
 }
 
-/* Update nav-links styling */
+/* Nav-links styling with increased font size */
 .nav-links {
   list-style-type: none;
   display: flex;
@@ -45,6 +45,7 @@
   color: black;
   font-weight: 600;
   padding: 10px 0;
+  font-size: 1.2rem; /* Increased font size */
   display: flex;
   align-items: center;
 }
@@ -69,13 +70,13 @@
 .sign-out-btn {
   background-color: #ef4444;
   color: white;
-  padding: 10px 20px;
+  padding: 8px 16px; /* Reduced padding for a smaller button */
   border: none;
   border-radius: 20px;
   cursor: pointer;
   font-weight: 600;
   text-decoration: none;
-  height: 40px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;

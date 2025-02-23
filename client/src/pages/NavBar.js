@@ -22,7 +22,7 @@ const NavBar = () => {
     <header className="navbar">
       <div className="logo-container">
         <Link to="/home">
-          <img src={logo} alt="LearnAI logo" className="logo-img" style={{ width: '100px', height: 'auto' }} />
+          <img src={logo} alt="LearnAI logo" className="logo-img" style={{ width: '125px', height: 'auto' }} />
         </Link>
       </div>
       <nav>
@@ -34,7 +34,7 @@ const NavBar = () => {
           </li>
           <li>
             <Link to="/upload" className={location.pathname === '/upload' ? 'active' : ''}>
-              Material upload <FaFileUpload style={{ marginLeft: '5px' }} />
+              Material Upload <FaFileUpload style={{ marginLeft: '5px' }} />
             </Link>
           </li>
           <li>
