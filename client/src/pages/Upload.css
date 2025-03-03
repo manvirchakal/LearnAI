@@ -94,15 +94,10 @@
   /* Modal Styles */
   .modal {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 0;
   }
   
   .modal-content-new {
@@ -113,13 +108,14 @@
     max-width: 500px;
     position: relative;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    margin: 0;
   }
   
   .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 24px;
+    margin-bottom: 5px;
     padding-bottom: 16px;
     border-bottom: 1px solid #e5e7eb;
   }
@@ -227,6 +223,7 @@
     width: 220px;
     cursor: pointer;
     transition: background-color 0.3s;
+    margin: 20px;
   }
   
   .upload-card:hover {
@@ -238,7 +235,7 @@
     border: 1px solid #ccc;
     border-radius: 8px;
     padding: 10px;
-    margin: 20px auto;
+    margin: 70px auto;
     width: 85%;
     max-width: 700px;
   }
@@ -266,5 +263,9 @@
   
   .create-collection-btn:hover {
     background-color: #0056b3;
+  }
+  
+  .modal-actions {
+    margin-top: 10px;
   }
   

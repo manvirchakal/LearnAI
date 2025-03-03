@@ -48,6 +48,11 @@ const NavBar = () => {
             </Link>
           </li>
           <li>
+            <Link to="/study" className={location.pathname === '/study' ? 'active' : ''}>
+              Study <FaBook style={{ marginLeft: '5px' }} />
+            </Link>
+          </li>
+          <li>
             <button onClick={handleSignOut} className="sign-out-btn">Sign out</button>
           </li>
         </ul>

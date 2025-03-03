@@ -86,7 +86,13 @@ const Upload = () => {
               <FaTimes size={20} />
             </button>
           </div>
-          {children}
+          <div className="modal-form" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+            {children}
+          </div>
+          <div className="modal-actions" style={{ marginTop: '10px' }}>
+            <button className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
+            <button className="btn-primary" onClick={handleSubmit}>Submit</button>
+          </div>
         </div>
       </div>
     );
@@ -182,10 +188,6 @@ const Upload = () => {
                 />
               </div>
             )}
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleSubmit}>Submit</button>
-            </div>
           </div>
         </Modal>
 
@@ -210,10 +212,6 @@ const Upload = () => {
               </label>
               {lectureFile && <p className="file-name">{lectureFile.name}</p>}
               <p className="file-type-hint">(.mp3, .mp4, .m4a, .wav files only)</p>
-            </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setIsLectureModalOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleLectureSubmit}>Submit</button>
             </div>
           </div>
         </Modal>
@@ -242,10 +240,6 @@ const Upload = () => {
               {powerPointFile && <p className="file-name">{powerPointFile.name}</p>}
               <p className="file-type-hint">(.ppt, .pptx files only)</p>
             </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setIsPowerPointModalOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handlePowerPointSubmit}>Submit</button>
-            </div>
           </div>
         </Modal>
 
@@ -271,10 +265,6 @@ const Upload = () => {
               </label>
               {notesFile && <p className="file-name">{notesFile.name}</p>}
               <p className="file-type-hint">(.jpg, .jpeg, .png files only)</p>
-            </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setIsNotesModalOpen(false)}>Cancel</button>
-              <button className="btn-primary" onClick={handleNotesSubmit}>Submit</button>
             </div>
           </div>
         </Modal>

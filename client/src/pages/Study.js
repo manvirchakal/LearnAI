@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem, Button, Tabs, Tab } from '@mui/material';
+import { Box, Typography, Paper, InputBase, Divider, IconButton, Collapse, CircularProgress, Select, MenuItem, Button, Tabs, Tab, TextField, Grid, Card, CardContent } from '@mui/material';
 import Sidebar from '../components/Sidebar';
 import SendIcon from '@mui/icons-material/Send';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -780,15 +780,45 @@ const Study = () => {
     setCurrentDiagramIndex(0);
   }, [diagrams]);
 
+  // Set initial widths to percentages
+  const [leftPanelWidth, setLeftPanelWidth] = useState('50%'); // Default width for left panel
+  const [rightPanelWidth, setRightPanelWidth] = useState('50%'); // Default width for right panel
+
+  const handleDrag = (e) => {
+    const newLeftWidth = e.clientX / window.innerWidth * 100; // Convert to percentage
+    setLeftPanelWidth(`${newLeftWidth}%`);
+    setRightPanelWidth(`${100 - newLeftWidth}%`); // Adjust right panel width
+  };
+
+  // State management for flashcards
+  const [flashcardQuestion, setFlashcardQuestion] = useState('');
+  const [flashcardAnswer, setFlashcardAnswer] = useState('');
+  const [flashcards, setFlashcards] = useState([]);
+
+  // Function to handle creating a flashcard
+  const handleCreateFlashcard = (event) => {
+    event.preventDefault();
+    if (flashcardQuestion && flashcardAnswer) {
+      setFlashcards(prev => [...prev, { question: flashcardQuestion, answer: flashcardAnswer, showAnswer: false }]);
+      setFlashcardQuestion('');
+      setFlashcardAnswer('');
+    }
+  };
+
+  // Function to flip the flashcard to show/hide the answer
+  const handleFlipFlashcard = (index) => {
+    setFlashcards(prev => {
+      const newFlashcards = [...prev];
+      newFlashcards[index].showAnswer = !newFlashcards[index].showAnswer;
+      return newFlashcards;
+    });
+  };
+
   return (
     <ErrorBoundary>
       <MathJaxContext>
         <Box sx={{ 
-          marginLeft: sidebarOpen ? '240px' : '60px', // Adjust based on your sidebar width
-          marginRight: chatExpanded ? '300px' : '60px', 
-          transition: 'margin 0.3s ease',
           display: 'flex',
-          flexDirection: 'column',
           height: '100vh',
           overflow: 'hidden'
         }}>
@@ -800,15 +830,18 @@ const Study = () => {
             bookStructure={bookStructure || { chapters: [] }}
             bookTitle={title}
             currentSection={currentSection?.id}
+            sx={{ width: leftPanelWidth }} // Set width dynamically
           />
           <Box display="flex" flexGrow={1} overflow="hidden">
             {/* Left Container */}
-            <Box flex={1} p={2} overflow="auto" mr={1}>
+            <Box sx={{ width: leftPanelWidth, p: 2, overflow: 'auto' }}>
               <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
                   <Tabs value={leftActiveTab} onChange={(e, newValue) => setLeftActiveTab(newValue)}>
-                    <Tab label="Chapter Content" value="content" />
-                    <Tab label="Summary" value="summary" />
+                    <Tab label="Textbook Content" value="content" />
+                    <Tab label="LECTURE" value="lecture" />
+                    <Tab label="POWERPOINT" value="powerpoint" />
+                    <Tab label="NOTES" value="notes" />
                   </Tabs>
                 </Box>
                 <Box flex={1} overflow="auto" p={2}>
@@ -837,7 +870,45 @@ const Study = () => {
                       )}
                     </ErrorBoundary>
                   )}
-                  {leftActiveTab === 'summary' && (
+                </Box>
+              </Paper>
+            </Box>
+
+            {/* Draggable Slider */}
+            <Box
+              sx={{
+                width: '10px',
+                cursor: 'ew-resize',
+                backgroundColor: '#3B82F6',
+                height: '100%',
+                position: 'relative',
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const onMouseMove = (event) => handleDrag(event);
+                const onMouseUp = () => {
+                  window.removeEventListener('mousemove', onMouseMove);
+                  window.removeEventListener('mouseup', onMouseUp);
+                };
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', onMouseUp);
+              }}
+            />
+
+            {/* Right Container */}
+            <Box sx={{ width: rightPanelWidth, p: 2, overflow: 'auto' }}>
+              <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                  <Tabs value={rightActiveTab} onChange={(e, newValue) => setRightActiveTab(newValue)}>
+                    <Tab label="Summary" value="summary" />
+                    <Tab label="Game" value="game" />
+                    <Tab label="Diagrams" value="diagrams" />
+                    <Tab label="Quiz" value="quiz" />
+                    <Tab label="Flashcards" value="flashcards" />
+                  </Tabs>
+                </Box>
+                <Box flex={1} overflow="auto" p={2}>
+                  {rightActiveTab === 'summary' && (
                     <>
                       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                         <Box display="flex" alignItems="center">
@@ -885,20 +956,6 @@ const Study = () => {
                       )}
                     </>
                   )}
-                </Box>
-              </Paper>
-            </Box>
-
-            {/* Right Container */}
-            <Box flex={1} p={2} overflow="auto" ml={1}>
-              <Paper elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                  <Tabs value={rightActiveTab} onChange={(e, newValue) => setRightActiveTab(newValue)}>
-                    <Tab label="Interactive Game" value="game" />
-                    <Tab label="Concept Diagrams" value="diagrams" />
-                  </Tabs>
-                </Box>
-                <Box flex={1} overflow="auto" p={2}>
                   {rightActiveTab === 'game' && (
                     <>
                       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
@@ -1028,6 +1085,64 @@ const Study = () => {
                         <Typography>No diagrams available.</Typography>
                       )}
                     </>
+                  )}
+                  {rightActiveTab === 'quiz' && (
+                    <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-start' }}>
+                      <Button 
+                        variant="contained" 
+                        color="primary" 
+                        onClick={() => {/* Add your AI generation logic here */}} 
+                        sx={{ mt: 0 }}
+                      >
+                        GENERATE WITH AI
+                      </Button>
+                    </Box>
+                  )}
+                  {rightActiveTab === 'flashcards' && (
+                    <Box sx={{ p: 2 }}>
+                      <Typography variant="h5" gutterBottom>Create Flashcard</Typography>
+                      <Box component="form" onSubmit={handleCreateFlashcard} sx={{ mb: 4 }}>
+                        <TextField
+                          label="Question"
+                          value={flashcardQuestion}
+                          onChange={(e) => setFlashcardQuestion(e.target.value)}
+                          fullWidth
+                          required
+                          sx={{ mb: 2 }}
+                        />
+                        <TextField
+                          label="Answer"
+                          value={flashcardAnswer}
+                          onChange={(e) => setFlashcardAnswer(e.target.value)}
+                          fullWidth
+                          required
+                          sx={{ mb: 2 }}
+                        />
+                        <Button type="submit" variant="contained" color="primary">Add Flashcard</Button>
+                        <Button type="button" variant="contained" color="primary" onClick={handleCreateFlashcard} sx={{ ml: 2 }}>
+                          GENERATE WITH AI
+                        </Button>
+                      </Box>
+
+                      <Typography variant="h5" gutterBottom>Your Flashcards</Typography>
+                      <Grid container spacing={2}>
+                        {flashcards.map((flashcard, index) => (
+                          <Grid item xs={12} sm={6} md={4} key={index}>
+                            <Card>
+                              <CardContent>
+                                <Typography variant="h6">{flashcard.question}</Typography>
+                                <Button onClick={() => handleFlipFlashcard(index)} variant="outlined" sx={{ mt: 1 }}>
+                                  {flashcard.showAnswer ? 'Hide Answer' : 'Show Answer'}
+                                </Button>
+                                {flashcard.showAnswer && (
+                                  <Typography variant="body2" sx={{ mt: 1 }}>{flashcard.answer}</Typography>
+                                )}
+                              </CardContent>
+                            </Card>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </Box>
                   )}
                 </Box>
               </Paper>
