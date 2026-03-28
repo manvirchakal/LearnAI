@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "learnai-server"
+version = "2.0.0"
+requires-python = ">=3.11"
+
+dependencies = [
+    # Web framework
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+
+    # Config
+    "python-dotenv>=1.0",
+    "pydantic-settings>=2.0",
+
+    # AWS Bedrock (Claude LLM — only remaining AWS dependency)
+    "boto3>=1.35",
+    "langchain-aws>=0.2",
+
+    # LangGraph + LangChain
+    "langgraph>=0.2",
+    "langchain>=0.3",
+    "langchain-core>=0.3",
+
+    # MCP
+    "fastmcp>=0.9",
+
+    # Local AI: STT
+    "faster-whisper>=1.0",
+
+    # Local AI: TTS
+    "pyttsx3>=2.90",
+
+    # Local AI: Translation
+    "argostranslate>=1.9",
+
+    # Local AI: Embeddings + Vector store
+    "sentence-transformers>=3.0",
+    "chromadb>=0.5",
+
+    # PDF processing
+    "PyMuPDF>=1.24",
+    "PyPDF2>=3.0",
+    "pikepdf>=9.0",
+    "Pillow>=10.0",
+
+    # Document processing
+    "python-pptx>=1.0",
+    "chardet>=5.0",
+
+    # Media
+    "yt-dlp>=2024.0",
+
+    # Code validation
+    "esprima>=4.0",
+
+    # Utilities
+    "cachetools>=5.0",
+    "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
