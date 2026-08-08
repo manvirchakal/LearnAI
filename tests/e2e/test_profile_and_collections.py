@@ -12,15 +12,17 @@ import pytest
 from bson import ObjectId
 from fastapi.testclient import TestClient
 
-from learnai.config import Settings, get_settings
-from learnai.deps import get_db
+from learnai.config import LLMTask, Settings, get_settings
+from learnai.deps import get_db, get_llm_client
 from learnai.main import create_app
 from learnai.services.auth.google_verifier import GoogleIdentity
+from tests.fakes.llm import FakeLLMClient
 from tests.fakes.mongo import FakeAsyncDatabase
 
 _IDENTITY = GoogleIdentity(
     sub="google-sub-1", email="ada@example.com", name="Ada Lovelace", picture=None
 )
+_FAKE_DESCRIPTION = "You learn best through vivid diagrams and visual demonstrations."
 
 
 @pytest.fixture(scope="module")
@@ -37,6 +39,9 @@ def client(raw_client: TestClient) -> Iterator[TestClient]:
     raw_client.app.dependency_overrides[get_settings] = lambda: Settings(  # type: ignore[attr-defined]
         session_secret="a-test-secret-at-least-32-bytes-long",
         google_client_id="test-client-id",
+    )
+    raw_client.app.dependency_overrides[get_llm_client] = lambda: FakeLLMClient(  # type: ignore[attr-defined]
+        completions={LLMTask.profile_description: _FAKE_DESCRIPTION}
     )
     with patch("learnai.routers.auth.verify_google_id_token", return_value=_IDENTITY):
         login = raw_client.post("/auth/google", json={"id_token": "whatever"})
@@ -56,12 +61,11 @@ class TestProfileRouter:
         submission = {
             "answers": {"Visual": [1, 2]},
             "scores": {"visual": 0.8},
-            "description": "A visual learner.",
             "questionnaire_version": 1,
         }
         put_response = client.put("/api/v1/profile", json=submission)
         assert put_response.status_code == 200
-        assert put_response.json()["description"] == "A visual learner."
+        assert put_response.json()["description"] == _FAKE_DESCRIPTION
 
         get_response = client.get("/api/v1/profile")
         assert get_response.status_code == 200

@@ -1,0 +1,12 @@
+You are writing a short, encouraging description of a student's learning
+style for their personal dashboard, based on their questionnaire results.
+
+Learning style scores (1-5 scale, higher means stronger preference):
+{% for category, score in scores.items() %}
+- {{ category }}: {{ "%.1f"|format(score) }}
+{% endfor %}
+
+Write 2-3 sentences describing their learning style in second person ("You
+learn best when..."). Mention their strongest one or two preferences by
+name. Keep it warm and specific, not generic. Plain prose only — no bullet
+points, no headers.

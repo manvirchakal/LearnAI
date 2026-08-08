@@ -14,6 +14,8 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+import anthropic
+import openai
 import redis.asyncio as redis
 import structlog
 from fastapi import FastAPI, Request, Response
@@ -30,6 +32,9 @@ from learnai.logging import bind_request_id, configure_logging, get_logger, new_
 from learnai.routers.auth import router as auth_router
 from learnai.routers.collections import router as collections_router
 from learnai.routers.profile import router as profile_router
+from learnai.services.llm.anthropic_client import AnthropicLLMClient
+from learnai.services.llm.client import LLMClient
+from learnai.services.llm.openai_compat_client import OpenAICompatLLMClient
 from learnai.services.storage.base import StorageBackend
 from learnai.services.storage.local import LocalFilesystemStorage
 
@@ -43,6 +48,29 @@ def _build_storage(settings: Settings) -> StorageBackend:
     raise NotImplementedError(
         f"storage_backend={settings.storage_backend!r} is not implemented yet"
     )
+
+
+def _build_llm_client(
+    settings: Settings,
+) -> tuple[LLMClient, anthropic.AsyncAnthropic | openai.AsyncOpenAI]:
+    """The generation client (narrative, game idea/code, diagrams, chat,
+    translation) — provider-agnostic per ``settings.llm_backend``. Ingestion
+    (native PDF reading) is a separate, always-Anthropic concern and isn't
+    built yet; this is only the text-in/text-out generation path.
+
+    Returns the adapter plus the raw SDK client, so ``lifespan`` can close
+    the latter on shutdown without the adapter needing to expose that.
+    """
+    if settings.llm_backend == "anthropic":
+        sdk_client = anthropic.AsyncAnthropic(
+            api_key=settings.generation_api_key(), base_url=settings.llm_base_url
+        )
+        return AnthropicLLMClient(sdk_client, settings), sdk_client
+    openai_client = openai.AsyncOpenAI(
+        api_key=settings.generation_api_key() or "not-needed",
+        base_url=settings.llm_base_url,
+    )
+    return OpenAICompatLLMClient(openai_client, settings), openai_client
 
 
 logger = structlog.get_logger(__name__)
@@ -80,6 +108,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.storage = _build_storage(settings)
 
+    llm_client, llm_sdk_client = _build_llm_client(settings)
+    app.state.llm_client = llm_client
+
     log.info("startup_complete")
     try:
         yield
@@ -88,6 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await mongo_client.close()
         await app.state.qdrant_client.close()
         await app.state.redis_client.aclose()
+        await llm_sdk_client.close()
         log.info("shutdown_complete")
 
 

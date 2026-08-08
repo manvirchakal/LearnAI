@@ -20,6 +20,7 @@ from learnai.repositories.learning_profiles import LearningProfileRepository
 from learnai.repositories.sessions import SessionRepository
 from learnai.repositories.users import UserRepository
 from learnai.services.auth.session import SessionService
+from learnai.services.llm.client import LLMClient
 from learnai.services.storage.base import StorageBackend
 
 # Cookie names, shared between the auth router (which sets/clears them) and
@@ -39,8 +40,14 @@ def get_storage(request: Request) -> StorageBackend:
     return storage
 
 
+def get_llm_client(request: Request) -> LLMClient:
+    llm_client: LLMClient = request.app.state.llm_client
+    return llm_client
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StorageDep = Annotated[StorageBackend, Depends(get_storage)]
+LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
 
 # Internal building block for repository/service providers below. Routers
 # should depend on a repository/service type, never on DbDep directly — that

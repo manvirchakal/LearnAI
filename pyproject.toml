@@ -21,6 +21,9 @@ dependencies = [
     # generation endpoint (OpenRouter, LM Studio, vLLM, Ollama).
     "anthropic>=0.40.0",
     "openai>=1.55.0",
+    # structured-output fallback: repairs near-valid JSON from backends that
+    # don't guarantee schema-constrained output (see OpenAICompatLLMClient)
+    "json-repair>=0.29.0",
     # data. pymongo>=4.9 ships AsyncMongoClient; motor reached end-of-life 2025-05-14.
     "pymongo>=4.9.0",
     "qdrant-client>=1.12.0",

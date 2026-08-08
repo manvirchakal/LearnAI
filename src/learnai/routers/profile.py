@@ -1,9 +1,10 @@
 """Learning-profile API: submit/retrieve the questionnaire result.
 
 One document per user (see ``LearningProfileRepository`` — an upsert
-against a unique ``owner_id`` index). ``description`` is client-supplied for
-now; Phase 2 replaces it with an LLM-generated one over the same schema,
-without touching this router's shape.
+against a unique ``owner_id`` index). ``description`` is generated
+server-side by the configured LLM backend from the submitted scores —
+never client-supplied, so it can't be spoofed and stays consistent
+regardless of which frontend build submitted the questionnaire.
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from learnai.deps import LearningProfileRepoDep
+from learnai.config import LLMTask
+from learnai.deps import LearningProfileRepoDep, LLMClientDep
+from learnai.services.llm.prompts import render
 
 router = APIRouter(prefix="/api/v1/profile", tags=["profile"])
 
@@ -22,7 +25,6 @@ router = APIRouter(prefix="/api/v1/profile", tags=["profile"])
 class ProfileSubmission(BaseModel):
     answers: dict[str, list[int]]
     scores: dict[str, float]
-    description: str
     questionnaire_version: int = 1
 
 
@@ -53,11 +55,17 @@ async def get_profile(repo: LearningProfileRepoDep) -> ProfileOut | None:
 
 
 @router.put("", response_model=ProfileOut)
-async def submit_profile(body: ProfileSubmission, repo: LearningProfileRepoDep) -> ProfileOut:
+async def submit_profile(
+    body: ProfileSubmission, repo: LearningProfileRepoDep, llm: LLMClientDep
+) -> ProfileOut:
+    description = await llm.complete(
+        task=LLMTask.profile_description,
+        prompt=render("profile_description.j2", scores=body.scores),
+    )
     await repo.upsert(
         answers=body.answers,
         scores=body.scores,
-        description=body.description,
+        description=description,
         questionnaire_version=body.questionnaire_version,
     )
     doc = await repo.get()

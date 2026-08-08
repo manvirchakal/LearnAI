@@ -24,7 +24,7 @@ from tests.fakes.mongo import FakeAsyncDatabase
 PROTECTED_ROUTES: list[tuple[str, str, dict[str, object] | None]] = [
     ("GET", "/auth/me", None),
     ("GET", "/api/v1/profile", None),
-    ("PUT", "/api/v1/profile", {"answers": {}, "scores": {}, "description": "x"}),
+    ("PUT", "/api/v1/profile", {"answers": {}, "scores": {}}),
     ("GET", "/api/v1/collections", None),
     ("POST", "/api/v1/collections", {"name": "x", "kind": "manual"}),
     ("GET", "/api/v1/collections/000000000000000000000000", None),
