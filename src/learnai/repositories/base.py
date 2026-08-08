@@ -76,8 +76,14 @@ class ScopedRepository(Generic[T]):
         inserted_id: ObjectId = result.inserted_id
         return inserted_id
 
-    async def update_one(self, query: Mapping[str, Any], update: Mapping[str, Any]) -> UpdateResult:
-        return await self._collection.update_one(self._scope(query), dict(update))
+    async def update_one(
+        self, query: Mapping[str, Any], update: Mapping[str, Any], *, upsert: bool = False
+    ) -> UpdateResult:
+        # Safe with upsert=True: the query always includes {"owner_id": self._owner_id}
+        # (via _scope), and Mongo builds an upserted document from the query's
+        # equality conditions — so a newly-created document is correctly owned
+        # without any extra work here.
+        return await self._collection.update_one(self._scope(query), dict(update), upsert=upsert)
 
     async def delete_one(self, query: Mapping[str, Any]) -> DeleteResult:
         return await self._collection.delete_one(self._scope(query))

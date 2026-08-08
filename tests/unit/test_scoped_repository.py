@@ -84,6 +84,35 @@ async def test_update_one_cannot_touch_another_owners_document(db: FakeAsyncData
     assert still_original["name"] == "original"
 
 
+async def test_update_one_upsert_creates_a_correctly_owned_document(
+    db: FakeAsyncDatabase,
+) -> None:
+    owner = ObjectId()
+    repo = _WidgetRepo(db, owner)  # type: ignore[arg-type]
+
+    await repo.update_one({}, {"$set": {"name": "created-via-upsert"}}, upsert=True)
+
+    doc = await repo.find_one({})
+    assert doc is not None
+    assert doc["owner_id"] == owner
+    assert doc["name"] == "created-via-upsert"
+
+
+async def test_update_one_upsert_does_not_duplicate_on_second_call(
+    db: FakeAsyncDatabase,
+) -> None:
+    owner = ObjectId()
+    repo = _WidgetRepo(db, owner)  # type: ignore[arg-type]
+
+    await repo.update_one({}, {"$set": {"name": "v1"}}, upsert=True)
+    await repo.update_one({}, {"$set": {"name": "v2"}}, upsert=True)
+
+    assert await repo.count({}) == 1
+    doc = await repo.find_one({})
+    assert doc is not None
+    assert doc["name"] == "v2"
+
+
 async def test_delete_one_cannot_touch_another_owners_document(db: FakeAsyncDatabase) -> None:
     owner_a, owner_b = ObjectId(), ObjectId()
     repo_a = _WidgetRepo(db, owner_a)  # type: ignore[arg-type]

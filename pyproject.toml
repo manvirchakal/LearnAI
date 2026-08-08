@@ -107,12 +107,12 @@ ignore = [
 ]
 
 # BLE001 (bare `except Exception`) is the rule that replaces the 41 blind excepts in the
-# old server/main.py. Services raise typed AppErrors; only the two global exception
-# handlers and the worker task boundary are allowed to catch broadly.
+# old server/main.py. Services raise typed AppErrors; ruff doesn't flag an except that
+# actually logs/handles what it caught (e.g. http_errors.py's catch-all, which logs
+# exc_info) — this ignore is only for spots that deliberately swallow silently.
 [tool.ruff.lint.per-file-ignores]
-"src/learnai/errors.py" = ["BLE001"]
 "src/learnai/worker/tasks.py" = ["BLE001"]
-"tests/**" = ["S101"]  # assert is the point of a test
+"tests/**" = ["S101", "S106"]  # assert is the point of a test; test tokens aren't secrets
 
 [tool.ruff.lint.isort]
 known-first-party = ["learnai"]

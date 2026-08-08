@@ -35,6 +35,8 @@ from learnai.config import get_settings
 from learnai.db.migrations import ALL_MIGRATIONS, apply_pending
 from learnai.db.mongo import Database
 from learnai.repositories.base import ScopedRepository
+from learnai.repositories.collections import CollectionRepository
+from learnai.repositories.users import UserRepository
 
 pytestmark = pytest.mark.integration
 
@@ -122,3 +124,46 @@ async def test_concurrent_appends_produce_no_lost_updates(db: Database) -> None:
 
     seqs = sorted([doc["seq"] async for doc in repo.find({})])
     assert seqs == list(range(20))
+
+
+async def test_collection_list_all_is_newest_first_against_real_index(db: Database) -> None:
+    """The fake collection doesn't implement sort at all, so this — the
+    {owner_id, created_at} index actually producing newest-first order —
+    can only be verified here."""
+    await apply_pending(db, ALL_MIGRATIONS)
+    repo = CollectionRepository(db, ObjectId())
+
+    # Small gaps guarantee strictly increasing created_at — without them,
+    # three inserts this close together could tie at microsecond resolution
+    # and make the asserted order flaky.
+    first_id = await repo.create(name="first", kind="manual")
+    await asyncio.sleep(0.01)
+    second_id = await repo.create(name="second", kind="manual")
+    await asyncio.sleep(0.01)
+    third_id = await repo.create(name="third", kind="manual")
+
+    ids_in_order = [doc["_id"] for doc in await repo.list_all()]
+    assert ids_in_order == [third_id, second_id, first_id]
+
+
+async def test_user_upsert_from_google_is_idempotent_against_real_mongo(db: Database) -> None:
+    repo = UserRepository(db)
+
+    first = await repo.upsert_from_google(
+        google_sub="sub-real-1",
+        email="a@example.com",
+        email_verified=True,
+        name="Ada",
+        picture=None,
+    )
+    second = await repo.upsert_from_google(
+        google_sub="sub-real-1",
+        email="a@example.com",
+        email_verified=True,
+        name="Ada Lovelace",
+        picture="https://example.com/pic.jpg",
+    )
+
+    assert second["_id"] == first["_id"]
+    assert second["created_at"] == first["created_at"]
+    assert second["name"] == "Ada Lovelace"
