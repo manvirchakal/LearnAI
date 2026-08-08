@@ -3,15 +3,15 @@ import { Link, useLocation } from 'react-router-dom';
 import './NavBar.css';
 import { FaFileUpload, FaBook, FaHome, FaQuestion } from 'react-icons/fa';
 import logo from '../static/logo.png';
-import { useAuthenticator } from '@aws-amplify/ui-react';
+import { useAuth } from '../context/AuthContext';
 
 const NavBar = () => {
   const location = useLocation();
-  const { signOut } = useAuthenticator((context) => [context.signOut]);
-  
+  const { logout } = useAuth();
+
   const handleSignOut = async () => {
     try {
-      await signOut();
+      await logout();
       window.location.href = '/';
     } catch (error) {
       console.error('Error signing out:', error);
@@ -38,8 +38,8 @@ const NavBar = () => {
             </Link>
           </li>
           <li>
-            <Link to="/select-textbook" className={location.pathname === '/select-textbook' ? 'active' : ''}>
-              Library <FaBook style={{ marginLeft: '5px' }} />
+            <Link to="/collections" className={location.pathname === '/collections' ? 'active' : ''}>
+              Collections <FaBook style={{ marginLeft: '5px' }} />
             </Link>
           </li>
           <li>

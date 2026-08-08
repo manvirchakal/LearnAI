@@ -1,8 +1,7 @@
 // src/pages/Questionnaire.js
 import React, { useState } from 'react';
-import { Auth } from 'aws-amplify';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios'; // Add this import
+import apiClient from '../api/client';
 import './Questionnaire.css'; // Import your styles
 import { calculateLearningProfile } from '../utils/learningProfile';
 import NavBar from './NavBar';
@@ -46,48 +45,67 @@ const options = [
   "Strongly Agree"
 ];
 
+// Answers arrive from the form as { [category]: { [questionIndex]: "1".."5" } }.
+// The API wants { [category]: [1, 2, ...] } — numeric-string object keys are
+// always iterated in ascending order in JS, so Object.values already comes
+// back in question order.
+function toAnswerLists(answers) {
+  const result = {};
+  for (const category of Object.keys(learningCategories)) {
+    result[category] = Object.values(answers[category] || {}).map(Number);
+  }
+  return result;
+}
+
+function isComplete(answers) {
+  return Object.entries(learningCategories).every(
+    ([category, questions]) => Object.keys(answers[category] || {}).length === questions.length
+  );
+}
+
+// A placeholder until Phase 2 replaces this with an LLM-generated
+// description over the same submission shape — see routers/profile.py.
+function describeProfile(scores) {
+  const ranked = Object.entries(scores).sort(([, a], [, b]) => b - a);
+  const [topCategory] = ranked[0];
+  const label = topCategory.replace(/([A-Z])/g, ' $1').trim();
+  return `Shows the strongest preference for ${label} learning, based on the questionnaire responses.`;
+}
+
 const Questionnaire = () => {
   const [answers, setAnswers] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    try {
-      const user = await Auth.currentAuthenticatedUser();
-      
-      console.log('Sending questionnaire answers:', answers);
+    setError(null);
 
-      // Save questionnaire answers to your backend
-      const response = await axios.post('http://localhost:8000/save-learning-profile', {
-        answers: answers
-      }, {
-        headers: {
-          'Authorization': `Bearer ${(await Auth.currentSession()).getIdToken().getJwtToken()}`
-        }
+    if (!isComplete(answers)) {
+      setError('Please answer every question before submitting.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const answerLists = toAnswerLists(answers);
+      const scores = calculateLearningProfile(answers);
+      const description = describeProfile(scores);
+
+      await apiClient.put('/api/v1/profile', {
+        answers: answerLists,
+        scores,
+        description,
+        questionnaire_version: 1,
       });
 
-      console.log('Backend response:', response);
-
-      if (response.status === 200) {
-        console.log('Learning profile saved successfully');
-        console.log('Generated description:', response.data.description);
-        // You can store the description in local storage or state if needed
-        localStorage.setItem('learningProfileDescription', response.data.description);
-        navigate('/study');
-      } else {
-        console.error('Error saving learning profile:', response);
-      }
-    } catch (error) {
-      console.error('Error saving learning profile:', error);
-      if (error.response) {
-        console.error('Error data:', error.response.data);
-        console.error('Error status:', error.response.status);
-        console.error('Error headers:', error.response.headers);
-      } else if (error.request) {
-        console.error('Error request:', error.request);
-      } else {
-        console.error('Error message:', error.message);
-      }
+      navigate('/study');
+    } catch (err) {
+      console.error('Error saving learning profile:', err);
+      setError('Something went wrong saving your profile. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -116,10 +134,10 @@ const Questionnaire = () => {
                 <div className="options">
                   {options.map((option, idx) => (
                     <label key={idx}>
-                      <input 
-                        type="radio" 
-                        name={`question-${categoryIndex}-${questionIndex}`} 
-                        value={idx + 1} 
+                      <input
+                        type="radio"
+                        name={`question-${categoryIndex}-${questionIndex}`}
+                        value={idx + 1}
                         onChange={(e) => handleAnswerChange(category, questionIndex, e.target.value)}
                       />
                       {option}
@@ -130,7 +148,10 @@ const Questionnaire = () => {
             ))}
           </div>
         ))}
-        <button type="submit">Submit</button>
+        {error && <p className="questionnaire-error">{error}</p>}
+        <button type="submit" disabled={submitting}>
+          {submitting ? 'Saving…' : 'Submit'}
+        </button>
         </form>
       </div>
     </>

@@ -1,16 +1,20 @@
-import React, { useEffect } from 'react';
-import { useAuthenticator } from '@aws-amplify/ui-react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 export function RequireAuth({ children }) {
-  const { authStatus } = useAuthenticator((context) => [context.authStatus]);
+  const { isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (authStatus !== 'authenticated') {
+    if (!loading && !isAuthenticated) {
       navigate('/');
     }
-  }, [authStatus, navigate]);
+  }, [loading, isAuthenticated, navigate]);
 
-  return authStatus === 'authenticated' ? children : null;
+  if (loading) {
+    return null;
+  }
+
+  return isAuthenticated ? children : null;
 }

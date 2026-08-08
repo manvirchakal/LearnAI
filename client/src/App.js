@@ -1,25 +1,18 @@
 import React from 'react';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
-import { Authenticator } from '@aws-amplify/ui-react';
-import { Amplify } from 'aws-amplify';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import Home from './pages/Home';
 import Study from './pages/Study';
 import Questionnaire from './pages/Questionnaire';
 import Upload from './pages/Upload';
 import SelectTextbook from './pages/SelectTextbook';
+import Collections from './pages/Collections';
 import { RequireAuth } from './components/Auth';
+import { AuthProvider } from './context/AuthContext';
 import './latex-styles.css';
 import { MathJaxContext } from 'better-react-mathjax';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
-
-Amplify.configure({
-    Auth: {
-        region: process.env.REACT_APP_AWS_REGION,
-        userPoolId: process.env.REACT_APP_USER_POOL_ID,
-        userPoolWebClientId: process.env.REACT_APP_USER_POOL_WEB_CLIENT_ID,
-    }
-});
 
 function App() {
   return (
@@ -38,19 +31,22 @@ function App() {
         }
       }}
     >
-      <Authenticator.Provider>
-        <Router>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
-            <Route path="/study" element={<RequireAuth><Study /></RequireAuth>} />
-            <Route path="/questionnaire" element={<RequireAuth><Questionnaire /></RequireAuth>} />
-            <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
-            <Route path="/select-textbook" element={<RequireAuth><SelectTextbook /></RequireAuth>} />
-          </Routes>
-        </Router>
-      </Authenticator.Provider>
+      <GoogleOAuthProvider clientId={process.env.REACT_APP_GOOGLE_CLIENT_ID || ''}>
+        <AuthProvider>
+          <Router>
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
+              <Route path="/study" element={<RequireAuth><Study /></RequireAuth>} />
+              <Route path="/questionnaire" element={<RequireAuth><Questionnaire /></RequireAuth>} />
+              <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
+              <Route path="/select-textbook" element={<RequireAuth><SelectTextbook /></RequireAuth>} />
+              <Route path="/collections" element={<RequireAuth><Collections /></RequireAuth>} />
+            </Routes>
+          </Router>
+        </AuthProvider>
+      </GoogleOAuthProvider>
     </MathJaxContext>
   );
 }

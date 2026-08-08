@@ -18,7 +18,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import Webcam from 'react-webcam';
 import MermaidDiagram from '../components/MermaidDiagram';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Auth } from 'aws-amplify';
+import { useAuth } from '../context/AuthContext';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ChatIcon from '@mui/icons-material/Chat';
 import ReactMarkdown from 'react-markdown';
@@ -27,22 +27,11 @@ import remarkGfm from 'remark-gfm';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 
-// Set the base URL for Axios
-axios.defaults.baseURL = 'http://localhost:8000';
-
-// Add a request interceptor
-axios.interceptors.request.use(
-  config => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    return config;
-  },
-  error => {
-    return Promise.reject(error);
-  }
-);
+// Session auth is an HttpOnly cookie now (see AuthContext), not a bearer
+// token — nothing is ever read from localStorage. withCredentials is what
+// actually sends it.
+axios.defaults.baseURL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+axios.defaults.withCredentials = true;
 
 // Add this function inside your component file, but outside of the component function
 const preprocessLatex = (content) => {
@@ -72,6 +61,7 @@ const Study = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { bookStructure, s3Key, title, file_id, filename } = location.state || {};
+  const { user, loading: authLoading, isAuthenticated } = useAuth();
 
   const [userId, setUserId] = useState(location.state?.userId || null);
   const [currentSection, setCurrentSection] = useState(null);
@@ -243,15 +233,8 @@ const Study = () => {
   const fetchAndSetPDF = async (sectionId) => {
     try {
       console.log('Fetching PDF:', { userId, file_id, filename, sectionId });
-      const token = localStorage.getItem('authToken');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
       const response = await axios.get(`/get-section-pdf/${userId}/${file_id}/${filename}/${sectionId}`, {
         responseType: 'blob',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
       const pdfBlob = new Blob([response.data], { type: 'application/pdf' });
       const pdfUrl = URL.createObjectURL(pdfBlob);
@@ -675,33 +658,16 @@ const Study = () => {
   }, [currentSection, userId, file_id, filename]);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        await Auth.currentAuthenticatedUser();
-      } catch (error) {
-        console.error('User not authenticated', error);
-        navigate('/login');
-      }
-    };
-    checkAuth();
-  }, []);
+    if (!authLoading && !isAuthenticated) {
+      navigate('/login');
+    }
+  }, [authLoading, isAuthenticated, navigate]);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (!userId) {
-        try {
-          const user = await Auth.currentAuthenticatedUser();
-          const currentUserId = user.attributes.sub; // or however you get the user ID from Cognito
-          setUserId(currentUserId);
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-          navigate('/login');
-        }
-      }
-    };
-
-    fetchUserData();
-  }, [userId, navigate]);
+    if (!userId && user?.id) {
+      setUserId(user.id);
+    }
+  }, [userId, user]);
 
   const [leftActiveTab, setLeftActiveTab] = useState('content');
   const [rightActiveTab, setRightActiveTab] = useState('game');

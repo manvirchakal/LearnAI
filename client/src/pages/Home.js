@@ -1,50 +1,21 @@
-import React, { useEffect } from 'react';
-import { useAuthenticator, View } from '@aws-amplify/ui-react';
-import '@aws-amplify/ui-react/styles.css';
+import React from 'react';
 import './Home.css';
 import logo from '../static/logo.png';
 import NavBar from './NavBar';
 import { useNavigate } from 'react-router-dom';
-import { Auth } from 'aws-amplify';
+import { useAuth } from '../context/AuthContext';
 
 const Home = () => {
   const navigate = useNavigate();
-  const { authStatus, user, signOut } = useAuthenticator((context) => [context.authStatus, context.user]);
-
-  useEffect(() => {
-    const setAuthToken = async () => {
-      try {
-        const session = await Auth.currentSession();
-        const token = session.getIdToken().getJwtToken();
-        localStorage.setItem('authToken', token);
-      } catch (error) {
-        console.error('Error setting auth token:', error);
-      }
-    };
-
-    if (authStatus === 'authenticated') {
-      setAuthToken();
-    }
-  }, [authStatus]);
-
-  const handleSignOut = async () => {
-    try {
-      await Auth.signOut({ global: true });
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.href = '/';
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-  };
+  const { user } = useAuth();
 
   return (
-    <View className="home-page">
+    <div className="home-page">
       <NavBar />
       <div className="home-content">
         <div className="welcome-section">
           <img src={logo} alt="LearnAI Logo" className="home-logo" />
-          <h1>Welcome back, {user?.username || 'User'}!</h1>
+          <h1>Welcome back, {user?.name || 'User'}!</h1>
           <p className="subtitle">Ready to continue your learning journey?</p>
         </div>
 
@@ -63,15 +34,15 @@ const Home = () => {
             </div>
           </div>
 
-          <div className="action-card" onClick={() => navigate('/select-textbook')}>
+          <div className="action-card" onClick={() => navigate('/collections')}>
             <div className="card-content">
-              <h3>My Library</h3>
-              <p>Access your uploaded textbooks and materials</p>
+              <h3>My Collections</h3>
+              <p>Browse and create your study collections</p>
             </div>
           </div>
         </div>
       </div>
-    </View>
+    </div>
   );
 };
 

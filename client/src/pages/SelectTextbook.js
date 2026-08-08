@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import { Auth } from 'aws-amplify';
+import apiClient from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { Box, Typography, List, ListItem, ListItemText, Button, CircularProgress } from '@mui/material';
 import NavBar from './NavBar';
 
+// This page predates the collections-based library (see pages/Collections.js)
+// and still targets the old S3-keyed textbook endpoints, which no longer
+// exist on the new backend — out of scope to rewrite here (that's the
+// ingestion/materials work in a later phase). Only patched enough to drop
+// the removed aws-amplify dependency and use the cookie-authenticated API
+// client instead of a Cognito bearer token.
 const SelectTextbook = () => {
   const [textbooks, setTextbooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchTextbooks();
@@ -17,13 +24,7 @@ const SelectTextbook = () => {
 
   const fetchTextbooks = async () => {
     try {
-      const session = await Auth.currentSession();
-      const token = session.getIdToken().getJwtToken();
-      const response = await axios.get('/user-textbooks', {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const response = await apiClient.get('/user-textbooks');
       setTextbooks(response.data);
       setLoading(false);
     } catch (err) {
@@ -36,21 +37,17 @@ const SelectTextbook = () => {
   const handleSelectTextbook = async (s3Key, title) => {
     try {
       console.log("Selected textbook S3 key:", s3Key);
-      const session = await Auth.currentSession();
-      const token = session.getIdToken().getJwtToken();
-      const userId = session.getIdToken().payload.sub; // Get the user ID from the token
+      const userId = user?.id;
 
       // Split the S3 key into its components
       const [, , fileIdAndName] = s3Key.split('/');
       const [fileId, ...fileNameParts] = fileIdAndName.split('_');
       const fileName = fileNameParts.join('_');
 
-      const response = await axios.get(`/textbook-structure/${userId}/${fileId}/${encodeURIComponent(fileName)}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      
+      const response = await apiClient.get(
+        `/textbook-structure/${userId}/${fileId}/${encodeURIComponent(fileName)}`
+      );
+
       console.log("Textbook structure:", response.data);
       
       navigate('/study', { 

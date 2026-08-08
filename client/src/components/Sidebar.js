@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Drawer, List, ListItem, ListItemIcon, ListItemText, IconButton, Box, Collapse } from '@mui/material';
 import { Home as HomeIcon, MenuBook as BookIcon, Person as PersonIcon, ExitToApp as LogoutIcon, ExpandLess, ExpandMore, Menu as MenuIcon } from '@mui/icons-material';
-import { Auth } from 'aws-amplify';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import logo from '../static/logo.png';
 
 const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStructure, bookTitle, currentSection }) => {
   const [expandedChapter, setExpandedChapter] = useState(null);
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const collapsedWidth = 60; // Width of the collapsed sidebar
 
   const toggleDrawer = () => {
@@ -25,7 +26,7 @@ const Sidebar = ({ onChapterSelect, onSectionSelect, setOpen, isOpen, bookStruct
 
   const handleLogout = async () => {
     try {
-      await Auth.signOut();
+      await logout();
       navigate('/');
     } catch (error) {
       console.error('Error signing out: ', error);

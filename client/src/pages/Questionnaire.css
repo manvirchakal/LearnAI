@@ -39,4 +39,10 @@ body {
     margin-right: 5px;
   }
 
-  
+  .questionnaire-error {
+    color: #991B1B;
+    background-color: #FEE2E2;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+  }
