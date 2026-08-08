@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from learnai.schemas.documents import Citation, SectionContent, TOCResult, TreeNode, find_node
+from learnai.schemas.documents import (
+    Citation,
+    SectionContent,
+    TOCResult,
+    TreeNode,
+    find_node,
+    find_node_path,
+)
 
 
 def _sample_tree() -> list[TreeNode]:
@@ -36,6 +43,18 @@ def test_find_node_locates_a_top_level_node() -> None:
 
 def test_find_node_returns_none_for_unknown_id() -> None:
     assert find_node(_sample_tree(), "9.9") is None
+
+
+def test_find_node_path_of_nested_node_includes_ancestors() -> None:
+    assert find_node_path(_sample_tree(), "1.2") == ["1", "1.2"]
+
+
+def test_find_node_path_of_top_level_node_is_itself() -> None:
+    assert find_node_path(_sample_tree(), "2") == ["2"]
+
+
+def test_find_node_path_returns_none_for_unknown_id() -> None:
+    assert find_node_path(_sample_tree(), "9.9") is None
 
 
 def test_toc_result_round_trips_through_json() -> None:

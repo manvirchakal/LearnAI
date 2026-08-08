@@ -61,3 +61,16 @@ def find_node(nodes: list[TreeNode], node_id: str) -> TreeNode | None:
         if found is not None:
             return found
     return None
+
+
+def find_node_path(nodes: list[TreeNode], node_id: str) -> list[str] | None:
+    """Ancestor chain from root to ``node_id``, inclusive — e.g. ``["3",
+    "3.2"]`` for node ``"3.2"``. Feeds the ``node_path`` payload field
+    tree-scoped vector search filters on (see ``services/retrieval``)."""
+    for node in nodes:
+        if node.node_id == node_id:
+            return [node.node_id]
+        found = find_node_path(node.nodes, node_id)
+        if found is not None:
+            return [node.node_id, *found]
+    return None
