@@ -58,7 +58,7 @@ async def db() -> AsyncIterator[Database]:
 
 async def test_migrations_create_expected_indexes(db: Database) -> None:
     applied = await apply_pending(db, ALL_MIGRATIONS)
-    assert applied == ["0001_initial_indexes"]
+    assert applied == ["0001_initial_indexes", "0002_materials_and_sections_indexes"]
 
     users_indexes = await db["users"].index_information()
     assert users_indexes["google_sub_1"]["unique"] is True
@@ -75,12 +75,18 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
     assert session_indexes["token_hash_1"]["unique"] is True
     assert session_indexes["expires_at_1"]["expireAfterSeconds"] == 0
 
+    materials_indexes = await db["materials"].index_information()
+    assert "owner_id_1_created_at_-1" in materials_indexes
+
+    section_indexes = await db["sections"].index_information()
+    assert section_indexes["owner_id_1_material_id_1_node_id_1"]["unique"] is True
+
 
 async def test_migrations_are_idempotent(db: Database) -> None:
     first = await apply_pending(db, ALL_MIGRATIONS)
     second = await apply_pending(db, ALL_MIGRATIONS)
 
-    assert first == ["0001_initial_indexes"]
+    assert first == ["0001_initial_indexes", "0002_materials_and_sections_indexes"]
     assert second == []  # already recorded applied — apply() not re-run
 
 
