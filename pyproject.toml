@@ -141,7 +141,7 @@ module = [
     "faster_whisper.*",
     "piper.*",
     "esprima.*",
-    "fitz.*",
+    "pymupdf.*",
     "pptx.*",
     "aiofiles.*",
 ]
