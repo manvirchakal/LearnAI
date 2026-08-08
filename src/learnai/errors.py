@@ -67,6 +67,17 @@ class RateLimited(AppError):
     code = "rate_limited"
 
 
+class Conflict(AppError):
+    """The resource exists but isn't in a state the request can act on yet —
+    e.g. reading a material's document tree before its TOC job has finished.
+    Distinct from ``ValidationError``: the request itself is well-formed,
+    the resource's current state just isn't ready for it. The client's
+    correct response is to poll (see ``GET /api/v1/jobs/{id}``) and retry."""
+
+    status_code = 409
+    code = "conflict"
+
+
 class UpstreamError(AppError):
     """A downstream dependency (Anthropic, Qdrant, Mongo, an OpenAI-compatible
     endpoint) failed in a way the caller can potentially retry."""

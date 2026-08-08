@@ -33,6 +33,7 @@ from learnai.logging import bind_request_id, configure_logging, get_logger, new_
 from learnai.routers.auth import router as auth_router
 from learnai.routers.collections import router as collections_router
 from learnai.routers.jobs import router as jobs_router
+from learnai.routers.materials import router as materials_router
 from learnai.routers.profile import router as profile_router
 from learnai.services.extraction.anthropic_pdf import AnthropicPDFExtractor
 from learnai.services.extraction.base import DocumentExtractor
@@ -211,6 +212,7 @@ def create_app() -> FastAPI:
     app.include_router(profile_router)
     app.include_router(collections_router)
     app.include_router(jobs_router)
+    app.include_router(materials_router)
 
     @app.get("/health/live", tags=["health"])
     async def health_live() -> dict[str, str]:
