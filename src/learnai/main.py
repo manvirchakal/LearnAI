@@ -28,6 +28,8 @@ from learnai.db.mongo import ping as mongo_ping
 from learnai.http_errors import register_exception_handlers
 from learnai.logging import bind_request_id, configure_logging, get_logger, new_request_id
 from learnai.routers.auth import router as auth_router
+from learnai.routers.collections import router as collections_router
+from learnai.routers.profile import router as profile_router
 from learnai.services.storage.base import StorageBackend
 from learnai.services.storage.local import LocalFilesystemStorage
 
@@ -146,6 +148,8 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(auth_router)
+    app.include_router(profile_router)
+    app.include_router(collections_router)
 
     @app.get("/health/live", tags=["health"])
     async def health_live() -> dict[str, str]:
