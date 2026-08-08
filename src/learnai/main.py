@@ -18,6 +18,7 @@ import anthropic
 import openai
 import redis.asyncio as redis
 import structlog
+from arq.connections import ArqRedis
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -31,7 +32,10 @@ from learnai.http_errors import register_exception_handlers
 from learnai.logging import bind_request_id, configure_logging, get_logger, new_request_id
 from learnai.routers.auth import router as auth_router
 from learnai.routers.collections import router as collections_router
+from learnai.routers.jobs import router as jobs_router
 from learnai.routers.profile import router as profile_router
+from learnai.services.extraction.anthropic_pdf import AnthropicPDFExtractor
+from learnai.services.extraction.base import DocumentExtractor
 from learnai.services.llm.anthropic_client import AnthropicLLMClient
 from learnai.services.llm.client import LLMClient
 from learnai.services.llm.openai_compat_client import OpenAICompatLLMClient
@@ -73,6 +77,17 @@ def _build_llm_client(
     return OpenAICompatLLMClient(openai_client, settings), openai_client
 
 
+def _build_extractor(
+    settings: Settings,
+) -> tuple[DocumentExtractor, anthropic.AsyncAnthropic]:
+    """Document extraction (native PDF reading) is always Anthropic —
+    independent of ``settings.llm_backend``, which only governs the
+    provider-agnostic generation client above. Its own client because the
+    generation backend may not even be Anthropic."""
+    sdk_client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+    return AnthropicPDFExtractor(sdk_client, settings), sdk_client
+
+
 logger = structlog.get_logger(__name__)
 
 
@@ -111,6 +126,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     llm_client, llm_sdk_client = _build_llm_client(settings)
     app.state.llm_client = llm_client
 
+    extractor, extractor_sdk_client = _build_extractor(settings)
+    app.state.extractor = extractor
+
+    # The job queue this process enqueues into (see routers/jobs.py and
+    # deps.py) — the ARQ worker process is what actually runs the tasks,
+    # sharing nothing with this process except Redis. Built lazily like
+    # ``redis_client`` above (no eager ping) — unlike ``arq.connections.
+    # create_pool``, which blocks startup retrying a connection for several
+    # seconds and then raises if Redis isn't up yet.
+    app.state.arq_pool = ArqRedis.from_url(settings.redis_url)
+
     log.info("startup_complete")
     try:
         yield
@@ -120,6 +146,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.qdrant_client.close()
         await app.state.redis_client.aclose()
         await llm_sdk_client.close()
+        await extractor_sdk_client.close()
+        await app.state.arq_pool.aclose()
         log.info("shutdown_complete")
 
 
@@ -182,6 +210,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(profile_router)
     app.include_router(collections_router)
+    app.include_router(jobs_router)
 
     @app.get("/health/live", tags=["health"])
     async def health_live() -> dict[str, str]:

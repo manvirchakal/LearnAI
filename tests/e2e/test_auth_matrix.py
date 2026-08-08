@@ -29,6 +29,7 @@ PROTECTED_ROUTES: list[tuple[str, str, dict[str, object] | None]] = [
     ("POST", "/api/v1/collections", {"name": "x", "kind": "manual"}),
     ("GET", "/api/v1/collections/000000000000000000000000", None),
     ("PUT", "/api/v1/collections/000000000000000000000000/materials", {"material_refs": []}),
+    ("GET", "/api/v1/jobs/000000000000000000000000", None),
 ]
 
 

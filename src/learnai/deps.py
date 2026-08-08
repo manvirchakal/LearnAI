@@ -10,16 +10,21 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from arq import ArqRedis
 from fastapi import Cookie, Depends, Request
 
 from learnai.config import Settings, get_settings
 from learnai.db.mongo import Database
 from learnai.errors import Unauthenticated
 from learnai.repositories.collections import CollectionRepository
+from learnai.repositories.jobs import JobRepository
 from learnai.repositories.learning_profiles import LearningProfileRepository
+from learnai.repositories.materials import MaterialRepository
+from learnai.repositories.sections import SectionRepository
 from learnai.repositories.sessions import SessionRepository
 from learnai.repositories.users import UserRepository
 from learnai.services.auth.session import SessionService
+from learnai.services.extraction.base import DocumentExtractor
 from learnai.services.llm.client import LLMClient
 from learnai.services.storage.base import StorageBackend
 
@@ -45,9 +50,21 @@ def get_llm_client(request: Request) -> LLMClient:
     return llm_client
 
 
+def get_extractor(request: Request) -> DocumentExtractor:
+    extractor: DocumentExtractor = request.app.state.extractor
+    return extractor
+
+
+def get_arq_pool(request: Request) -> ArqRedis:
+    pool: ArqRedis = request.app.state.arq_pool
+    return pool
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StorageDep = Annotated[StorageBackend, Depends(get_storage)]
 LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
+ExtractorDep = Annotated[DocumentExtractor, Depends(get_extractor)]
+ArqPoolDep = Annotated[ArqRedis, Depends(get_arq_pool)]
 
 # Internal building block for repository/service providers below. Routers
 # should depend on a repository/service type, never on DbDep directly — that
@@ -109,3 +126,24 @@ def get_learning_profile_repo(user: CurrentUser, db: DbDep) -> LearningProfileRe
 
 
 LearningProfileRepoDep = Annotated[LearningProfileRepository, Depends(get_learning_profile_repo)]
+
+
+def get_material_repo(user: CurrentUser, db: DbDep) -> MaterialRepository:
+    return MaterialRepository(db, user["_id"])
+
+
+MaterialRepoDep = Annotated[MaterialRepository, Depends(get_material_repo)]
+
+
+def get_section_repo(user: CurrentUser, db: DbDep) -> SectionRepository:
+    return SectionRepository(db, user["_id"])
+
+
+SectionRepoDep = Annotated[SectionRepository, Depends(get_section_repo)]
+
+
+def get_job_repo(user: CurrentUser, db: DbDep) -> JobRepository:
+    return JobRepository(db, user["_id"])
+
+
+JobRepoDep = Annotated[JobRepository, Depends(get_job_repo)]
