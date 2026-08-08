@@ -40,6 +40,12 @@ from learnai.services.extraction.base import DocumentExtractor
 from learnai.services.llm.anthropic_client import AnthropicLLMClient
 from learnai.services.llm.client import LLMClient
 from learnai.services.llm.openai_compat_client import OpenAICompatLLMClient
+from learnai.services.retrieval.embedder import Embedder, FastEmbedEmbedder
+from learnai.services.retrieval.vector_store import (
+    QdrantVectorStore,
+    VectorStore,
+    ensure_collection,
+)
 from learnai.services.storage.base import StorageBackend
 from learnai.services.storage.local import LocalFilesystemStorage
 
@@ -118,6 +124,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Same reasoning as the Mongo client above: fail fast, don't hang requests
     # (or readiness probes) for a default client timeout when a dependency is down.
     app.state.qdrant_client = AsyncQdrantClient(url=settings.qdrant_url, timeout=5)
+    try:
+        await ensure_collection(
+            app.state.qdrant_client,
+            name=settings.qdrant_collection,
+            vector_size=settings.embedding_dim,
+        )
+    except Exception:
+        log.error("qdrant_collection_bootstrap_failed", exc_info=True)
+    vector_store: VectorStore = QdrantVectorStore(
+        app.state.qdrant_client, collection_name=settings.qdrant_collection
+    )
+    app.state.vector_store = vector_store
+    # Model load (a real fetch, cached after) is deferred to the first
+    # embed() call — see FastEmbedEmbedder — so constructing this here can
+    # never fail startup itself.
+    embedder: Embedder = FastEmbedEmbedder(settings.embedding_model)
+    app.state.embedder = embedder
+
     # redis-py's `from_url` lacks a return-type annotation upstream.
     app.state.redis_client = redis.from_url(  # type: ignore[no-untyped-call]
         settings.redis_url, socket_connect_timeout=5, socket_timeout=5

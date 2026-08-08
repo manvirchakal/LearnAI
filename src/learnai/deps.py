@@ -26,6 +26,8 @@ from learnai.repositories.users import UserRepository
 from learnai.services.auth.session import SessionService
 from learnai.services.extraction.base import DocumentExtractor
 from learnai.services.llm.client import LLMClient
+from learnai.services.retrieval.embedder import Embedder
+from learnai.services.retrieval.vector_store import VectorStore
 from learnai.services.storage.base import StorageBackend
 
 # Cookie names, shared between the auth router (which sets/clears them) and
@@ -60,11 +62,23 @@ def get_arq_pool(request: Request) -> ArqRedis:
     return pool
 
 
+def get_vector_store(request: Request) -> VectorStore:
+    vector_store: VectorStore = request.app.state.vector_store
+    return vector_store
+
+
+def get_embedder(request: Request) -> Embedder:
+    embedder: Embedder = request.app.state.embedder
+    return embedder
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StorageDep = Annotated[StorageBackend, Depends(get_storage)]
 LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
 ExtractorDep = Annotated[DocumentExtractor, Depends(get_extractor)]
 ArqPoolDep = Annotated[ArqRedis, Depends(get_arq_pool)]
+VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
+EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
 
 # Internal building block for repository/service providers below. Routers
 # should depend on a repository/service type, never on DbDep directly — that

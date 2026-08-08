@@ -129,6 +129,7 @@ class Settings(BaseSettings):
     # --- retrieval ----------------------------------------------------------
     chunk_tokens: int = 512
     chunk_overlap_tokens: int = 64
+    qdrant_collection: str = "chunks"
 
     @model_validator(mode="after")
     def _production_guards(self) -> Settings:
