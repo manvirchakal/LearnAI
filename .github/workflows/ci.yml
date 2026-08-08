@@ -23,6 +23,12 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy src/learnai
+      # learnai ships a py.typed marker (PEP 561) so mypy can resolve real
+      # types for it here even though tests/ imports it as an installed
+      # package rather than sibling source — without that marker this
+      # silently no-ops (everything from learnai resolves to Any) instead
+      # of catching anything.
+      - run: uv run mypy tests
       - name: Architecture boundaries (routers -> services -> repositories -> db)
         run: uv run lint-imports
 
@@ -59,12 +65,15 @@ jobs:
           enable-cache: true
       - run: uv python install 3.11
       - run: uv sync --all-extras --dev
-      # `-m 'not live'` is already the pytest default (pyproject.toml addopts)
-      # and skips real-Anthropic-API contract tests. Coverage upload to an
+      # pyproject.toml's addopts defaults to `-m 'not live and not
+      # integration'` so a bare local `pytest` stays fast and needs nothing
+      # running. This job has real Mongo/Qdrant/Redis service containers
+      # above, so re-include `integration` here; `live` (real Anthropic API
+      # calls) stays deselected — no key to spend here. Coverage upload to an
       # external service is deliberately not wired up yet — add one only once
       # there's an account/token to point it at; the terminal report below is
       # enough to catch a regression in CI in the meantime.
-      - run: uv run pytest -v --cov --cov-report=term-missing
+      - run: uv run pytest -v -m "not live" --cov --cov-report=term-missing
 
   docker:
     name: Build images and smoke-test the compose stack

@@ -21,11 +21,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from qdrant_client import AsyncQdrantClient
 
-from learnai.config import get_settings
+from learnai.config import Settings, get_settings
+from learnai.db.migrations import ALL_MIGRATIONS, apply_pending
 from learnai.db.mongo import create_mongo_client, get_database
 from learnai.db.mongo import ping as mongo_ping
-from learnai.errors import register_exception_handlers
+from learnai.http_errors import register_exception_handlers
 from learnai.logging import bind_request_id, configure_logging, get_logger, new_request_id
+from learnai.services.storage.base import StorageBackend
+from learnai.services.storage.local import LocalFilesystemStorage
+
+
+def _build_storage(settings: Settings) -> StorageBackend:
+    if settings.storage_backend == "local":
+        return LocalFilesystemStorage(settings.storage_root)
+    # MinIOStorage is the documented escape hatch for clusters with no
+    # ReadWriteMany PVC (see the plan) but isn't built yet — fail loudly at
+    # startup rather than silently falling back to local storage.
+    raise NotImplementedError(
+        f"storage_backend={settings.storage_backend!r} is not implemented yet"
+    )
+
 
 logger = structlog.get_logger(__name__)
 
@@ -42,6 +57,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mongo_client = mongo_client
     app.state.mongo_db = get_database(mongo_client, settings)
 
+    # Best-effort, not fatal: if Mongo isn't reachable yet (e.g. mid rolling
+    # restart), the process still starts — /health/ready correctly reports
+    # mongo=false until it recovers, and the orchestrator's restart-on-failed-
+    # readiness handles retrying, rather than this crash-looping the pod.
+    try:
+        applied = await apply_pending(app.state.mongo_db, ALL_MIGRATIONS)
+        if applied:
+            log.info("migrations_applied", migration_ids=applied)
+    except Exception:
+        log.error("migrations_failed_at_startup", exc_info=True)
+
     # Same reasoning as the Mongo client above: fail fast, don't hang requests
     # (or readiness probes) for a default client timeout when a dependency is down.
     app.state.qdrant_client = AsyncQdrantClient(url=settings.qdrant_url, timeout=5)
@@ -49,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis_client = redis.from_url(  # type: ignore[no-untyped-call]
         settings.redis_url, socket_connect_timeout=5, socket_timeout=5
     )
+    app.state.storage = _build_storage(settings)
 
     log.info("startup_complete")
     try:

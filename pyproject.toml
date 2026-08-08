@@ -36,6 +36,8 @@ dependencies = [
     "jinja2>=3.1.4",
     # document manipulation (page counts, page-range slicing) — NOT text extraction
     "pymupdf>=1.24.0",
+    # storage
+    "aiofiles>=24.1.0",
 ]
 
 [project.optional-dependencies]
@@ -62,7 +64,6 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "import-linter>=2.1",
-    "testcontainers[mongodb,redis]>=4.8.0",
     "respx>=0.21.1",
 ]
 
@@ -132,7 +133,15 @@ module = ["learnai.repositories.*", "learnai.services.*", "learnai.schemas.*"]
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["fastembed.*", "faster_whisper.*", "piper.*", "esprima.*", "fitz.*", "pptx.*"]
+module = [
+    "fastembed.*",
+    "faster_whisper.*",
+    "piper.*",
+    "esprima.*",
+    "fitz.*",
+    "pptx.*",
+    "aiofiles.*",
+]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
@@ -173,6 +182,12 @@ type = "forbidden"
 source_modules = ["learnai"]
 forbidden_modules = ["boto3", "botocore"]
 
+[[tool.importlinter.contracts]]
+name = "The typed error hierarchy stays framework-free"
+type = "forbidden"
+source_modules = ["learnai.errors"]
+forbidden_modules = ["fastapi", "starlette"]
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------
@@ -181,9 +196,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "live: hits the real Anthropic API; requires ANTHROPIC_API_KEY. Deselected by default.",
-    "integration: requires Mongo/Qdrant/Redis containers.",
+    "integration: needs a reachable MongoDB (settings.mongodb_uri) — `docker compose up -d mongo`, or CI's service container. Deselected by default.",
 ]
-addopts = "-m 'not live' --strict-markers"
+addopts = "-m 'not live and not integration' --strict-markers"
 
 [tool.coverage.run]
 source = ["src/learnai"]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -49,7 +51,7 @@ def test_generation_api_key_prefers_dedicated_key() -> None:
         {"cors_origins": ["https://example.com"]},  # missing secret/keys
     ],
 )
-def test_production_without_required_config_fails_fast(overrides: dict) -> None:
+def test_production_without_required_config_fails_fast(overrides: dict[str, Any]) -> None:
     with pytest.raises(ValidationError, match="invalid production configuration"):
         Settings(_env_file=None, environment=Environment.production, **overrides)
 

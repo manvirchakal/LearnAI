@@ -9,18 +9,19 @@ that actually need them.
 
 from __future__ import annotations
 
-import os
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-not-real")
-
 from learnai.main import create_app
 
 
-@pytest.fixture
-def client() -> TestClient:
+@pytest.fixture(scope="session")
+def client() -> Iterator[TestClient]:
+    # Session-scoped: none of these tests mutate shared state, and rebuilding
+    # the app per-test means re-running (and re-timing-out) the startup
+    # migration attempt against an unreachable Mongo on every single test.
     with TestClient(create_app()) as c:
         yield c
 

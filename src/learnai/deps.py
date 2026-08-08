@@ -18,6 +18,7 @@ from fastapi import Depends, Request
 
 from learnai.config import Settings, get_settings
 from learnai.db.mongo import Database
+from learnai.services.storage.base import StorageBackend
 
 
 def get_db(request: Request) -> Database:
@@ -25,7 +26,13 @@ def get_db(request: Request) -> Database:
     return db
 
 
+def get_storage(request: Request) -> StorageBackend:
+    storage: StorageBackend = request.app.state.storage
+    return storage
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+StorageDep = Annotated[StorageBackend, Depends(get_storage)]
 
 # Internal building block for repository providers (Phase 1), e.g.
 #   def get_material_repo(user: CurrentUser, db: DbDep) -> MaterialRepo: ...
