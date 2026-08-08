@@ -1,0 +1,193 @@
+[project]
+name = "learnai"
+version = "0.2.0"
+description = "AI-driven learning platform: ingest course materials, generate adaptive study content"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE.md" }
+
+# Core runtime. Deliberately excludes heavy inference deps — see [project.optional-dependencies].
+dependencies = [
+    # web
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-multipart>=0.0.17",
+    "httpx>=0.27.0",
+    # config & validation
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    # llm — anthropic is the ingestion path (native PDF blocks) and the default
+    # generation backend; openai is the client used for any OpenAI-compatible
+    # generation endpoint (OpenRouter, LM Studio, vLLM, Ollama).
+    "anthropic>=0.40.0",
+    "openai>=1.55.0",
+    # data. pymongo>=4.9 ships AsyncMongoClient; motor reached end-of-life 2025-05-14.
+    "pymongo>=4.9.0",
+    "qdrant-client>=1.12.0",
+    # jobs
+    "arq>=0.26.0",
+    "redis>=5.2.0",
+    # auth. google-auth verifies Google ID tokens (handles JWKS fetch + caching);
+    # pyjwt mints/verifies our own HS256 session tokens.
+    "google-auth>=2.35.0",
+    "pyjwt>=2.9.0",
+    # observability & templating
+    "structlog>=24.4.0",
+    "jinja2>=3.1.4",
+    # document manipulation (page counts, page-range slicing) — NOT text extraction
+    "pymupdf>=1.24.0",
+]
+
+[project.optional-dependencies]
+# Heavy inference deps. Installed in the worker image only, so the API image stays slim.
+ml = [
+    "fastembed>=0.4.0",
+    "faster-whisper>=1.1.0",
+    "piper-tts>=1.2.0",
+]
+# Non-PDF ingestion formats.
+media = [
+    "python-pptx>=1.0.0",
+    "pillow>=11.0.0",
+    "yt-dlp>=2024.11.0",
+]
+# Generated-game validation: esprima parses the LLM's JS so we can walk the AST.
+games = [
+    "esprima>=4.0.1",
+]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "import-linter>=2.1",
+    "testcontainers[mongodb,redis]>=4.8.0",
+    "respx>=0.21.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/learnai"]
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# server/ and client/ are the pre-rewrite hackathon code, deleted in Phase 10
+# of the modernization plan — not linted, not maintained, not the code this
+# project is building going forward.
+extend-exclude = ["server", "client"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "ASYNC",     # async antipatterns (blocking calls in async def)
+    "BLE",       # blind except — see BLE001 note below
+    "S",         # bandit security
+    "PTH",       # prefer pathlib
+    "RUF",
+]
+ignore = [
+    "E501",    # line length is ruff-format's job
+    "B008",    # FastAPI Depends() in defaults is the documented idiom
+]
+
+# BLE001 (bare `except Exception`) is the rule that replaces the 41 blind excepts in the
+# old server/main.py. Services raise typed AppErrors; only the two global exception
+# handlers and the worker task boundary are allowed to catch broadly.
+[tool.ruff.lint.per-file-ignores]
+"src/learnai/errors.py" = ["BLE001"]
+"src/learnai/worker/tasks.py" = ["BLE001"]
+"tests/**" = ["S101"]  # assert is the point of a test
+
+[tool.ruff.lint.isort]
+known-first-party = ["learnai"]
+
+# ---------------------------------------------------------------------------
+# mypy — strict where correctness is load-bearing, lenient at the edges
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["learnai.repositories.*", "learnai.services.*", "learnai.schemas.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["fastembed.*", "faster_whisper.*", "piper.*", "esprima.*", "fitz.*", "pptx.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# import-linter — the architectural boundaries, enforced in CI
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "learnai"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture: routers -> services -> repositories -> db"
+type = "layers"
+layers = [
+    "learnai.routers",
+    "learnai.services",
+    "learnai.repositories",
+    "learnai.db",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only repositories may talk to MongoDB"
+type = "forbidden"
+source_modules = [
+    "learnai.routers",
+    "learnai.services",
+]
+forbidden_modules = ["pymongo", "bson"]
+
+[[tool.importlinter.contracts]]
+name = "Services must not depend on the web framework"
+type = "forbidden"
+source_modules = ["learnai.services", "learnai.repositories"]
+forbidden_modules = ["fastapi", "starlette"]
+
+[[tool.importlinter.contracts]]
+name = "No AWS SDK anywhere"
+type = "forbidden"
+source_modules = ["learnai"]
+forbidden_modules = ["boto3", "botocore"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "live: hits the real Anthropic API; requires ANTHROPIC_API_KEY. Deselected by default.",
+    "integration: requires Mongo/Qdrant/Redis containers.",
+]
+addopts = "-m 'not live' --strict-markers"
+
+[tool.coverage.run]
+source = ["src/learnai"]
+omit = ["*/migrations/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

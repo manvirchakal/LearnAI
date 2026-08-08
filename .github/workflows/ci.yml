@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  UV_VERSION: "0.5"
+
+jobs:
+  lint:
+    name: Lint, type-check, architecture contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --all-extras --dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src/learnai
+      - name: Architecture boundaries (routers -> services -> repositories -> db)
+        run: uv run lint-imports
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports: ["6333:6333"]
+    env:
+      MONGODB_URI: mongodb://localhost:27017
+      QDRANT_URL: http://localhost:6333
+      REDIS_URL: redis://localhost:6379
+      ANTHROPIC_API_KEY: test-key-not-real
+      SESSION_SECRET: ci-only-secret-not-for-production-use-32chars
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --all-extras --dev
+      # `-m 'not live'` is already the pytest default (pyproject.toml addopts)
+      # and skips real-Anthropic-API contract tests. Coverage upload to an
+      # external service is deliberately not wired up yet — add one only once
+      # there's an account/token to point it at; the terminal report below is
+      # enough to catch a regression in CI in the meantime.
+      - run: uv run pytest -v --cov --cov-report=term-missing
+
+  docker:
+    name: Build images and smoke-test the compose stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: false
+          load: true
+          tags: learnai-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: false
+          load: true
+          tags: learnai-worker:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Bring up the full stack
+        env:
+          ANTHROPIC_API_KEY: test-key-not-real
+        run: docker compose up -d mongo qdrant redis api worker
+      - name: Wait for /health/ready
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health/ready || true)
+            if [ "$code" = "200" ]; then
+              echo "ready after ${i}0s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::stack never became ready"
+          docker compose logs
+          exit 1
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

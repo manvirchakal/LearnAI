@@ -37,3 +37,15 @@ node_modules/
 
 launch.json
 create_inference_profile.py
+
+# Test/lint/type-check caches and coverage output
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Storage/PVC-equivalent local media root (see STORAGE_ROOT in .env.example)
+/data/

@@ -1,0 +1,117 @@
+services:
+  api:
+    build:
+      context: .
+      target: api
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: development
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: learnai
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379
+      STORAGE_ROOT: /data/media
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required — ingestion always uses Anthropic}
+      LLM_BACKEND: ${LLM_BACKEND:-anthropic}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-secret-change-me-please-32chars}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173"]}
+    volumes:
+      - media:/data/media
+    depends_on:
+      mongo:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      ENVIRONMENT: development
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: learnai
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379
+      STORAGE_ROOT: /data/media
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      LLM_BACKEND: ${LLM_BACKEND:-anthropic}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      WHISPER_MODEL: ${WHISPER_MODEL:-distil-large-v3}
+      PIPER_VOICE_DIR: /data/models/piper
+    volumes:
+      - media:/data/media
+      - models:/data/models
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  client:
+    build:
+      context: ./client
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    profiles: ["full"]  # client is rewritten to Vite in a later phase; opt-in until then
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Escape hatch for deployments with no ReadWriteMany PVC for api/worker to
+  # share (see StorageBackend in the plan). Off by default — `docker compose
+  # --profile minio up` to enable, and set STORAGE_BACKEND=minio.
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-learnai}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-learnai-dev-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    profiles: ["minio"]
+
+volumes:
+  mongo-data:
+  qdrant-data:
+  media:
+  models:
+  minio-data:
