@@ -63,15 +63,6 @@ function isComplete(answers) {
   );
 }
 
-// A placeholder until Phase 2 replaces this with an LLM-generated
-// description over the same submission shape — see routers/profile.py.
-function describeProfile(scores) {
-  const ranked = Object.entries(scores).sort(([, a], [, b]) => b - a);
-  const [topCategory] = ranked[0];
-  const label = topCategory.replace(/([A-Z])/g, ' $1').trim();
-  return `Shows the strongest preference for ${label} learning, based on the questionnaire responses.`;
-}
-
 const Questionnaire = () => {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -91,12 +82,12 @@ const Questionnaire = () => {
     try {
       const answerLists = toAnswerLists(answers);
       const scores = calculateLearningProfile(answers);
-      const description = describeProfile(scores);
 
+      // description is generated server-side by the LLM from these scores —
+      // see routers/profile.py — so nothing to compute or send here.
       await apiClient.put('/api/v1/profile', {
         answers: answerLists,
         scores,
-        description,
         questionnaire_version: 1,
       });
 
