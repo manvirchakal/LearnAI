@@ -23,11 +23,14 @@ from pydantic import BaseModel
 from learnai.deps import (
     ArqPoolDep,
     CurrentUser,
+    EmbedderDep,
     ExtractorDep,
     JobRepoDep,
     MaterialRepoDep,
     SectionRepoDep,
+    SettingsDep,
     StorageDep,
+    VectorStoreDep,
 )
 from learnai.errors import Conflict, ValidationError
 from learnai.repositories.materials import MaterialStatus
@@ -143,16 +146,24 @@ async def get_material_tree(material_id: str, materials: MaterialRepoDep) -> TOC
 async def get_section(
     material_id: str,
     node_id: str,
+    user: CurrentUser,
     materials: MaterialRepoDep,
     sections: SectionRepoDep,
     storage: StorageDep,
     extractor: ExtractorDep,
+    embedder: EmbedderDep,
+    vector_store: VectorStoreDep,
+    settings: SettingsDep,
 ) -> SectionContent:
     return await get_or_extract_section(
         materials=materials,
         sections=sections,
         storage=storage,
         extractor=extractor,
+        embedder=embedder,
+        vector_store=vector_store,
+        settings=settings,
+        owner_id=user["_id"],
         material_id=_object_id(material_id),
         node_id=node_id,
     )

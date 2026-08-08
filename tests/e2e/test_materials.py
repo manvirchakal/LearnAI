@@ -23,15 +23,24 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 
 from learnai.config import Settings, get_settings
-from learnai.deps import get_arq_pool, get_db, get_extractor, get_storage
+from learnai.deps import (
+    get_arq_pool,
+    get_db,
+    get_embedder,
+    get_extractor,
+    get_storage,
+    get_vector_store,
+)
 from learnai.main import create_app
 from learnai.schemas.documents import SectionContent, TOCResult, TreeNode
 from learnai.services.auth.google_verifier import GoogleIdentity
 from learnai.worker.tasks import extract_toc_task
 from tests.fakes.arq import FakeArqPool
+from tests.fakes.embedder import FakeEmbedder
 from tests.fakes.extraction import FakeExtractor
 from tests.fakes.mongo import FakeAsyncDatabase
 from tests.fakes.storage import FakeStorage
+from tests.fakes.vector_store import FakeVectorStore
 
 _IDENTITY = GoogleIdentity(
     sub="google-sub-1", email="ada@example.com", name="Ada Lovelace", picture=None
@@ -60,6 +69,8 @@ def client(raw_client: TestClient) -> Iterator[TestClient]:
     fake_storage = FakeStorage()
     fake_extractor = FakeExtractor()
     fake_arq = FakeArqPool()
+    fake_embedder = FakeEmbedder()
+    fake_vector_store = FakeVectorStore()
 
     overrides: dict[Any, Any] = {
         get_db: lambda: fake_db,
@@ -70,6 +81,8 @@ def client(raw_client: TestClient) -> Iterator[TestClient]:
         get_storage: lambda: fake_storage,
         get_extractor: lambda: fake_extractor,
         get_arq_pool: lambda: fake_arq,
+        get_embedder: lambda: fake_embedder,
+        get_vector_store: lambda: fake_vector_store,
     }
     raw_client.app.dependency_overrides.update(overrides)  # type: ignore[attr-defined]
 
@@ -81,6 +94,8 @@ def client(raw_client: TestClient) -> Iterator[TestClient]:
     raw_client.app.state.fake_storage = fake_storage  # type: ignore[attr-defined]
     raw_client.app.state.fake_extractor = fake_extractor  # type: ignore[attr-defined]
     raw_client.app.state.fake_arq = fake_arq  # type: ignore[attr-defined]
+    raw_client.app.state.fake_embedder = fake_embedder  # type: ignore[attr-defined]
+    raw_client.app.state.fake_vector_store = fake_vector_store  # type: ignore[attr-defined]
     raw_client.app.state.owner_id = ObjectId(login.json()["id"])  # type: ignore[attr-defined]
 
     yield raw_client
@@ -224,6 +239,11 @@ class TestSections:
         # Cached — no second extraction call.
         extract_calls = [c for c in fake_extractor.calls if c["op"] == "extract_section"]
         assert len(extract_calls) == 1
+
+        fake_vector_store: FakeVectorStore = client.app.state.fake_vector_store  # type: ignore[attr-defined]
+        assert len(fake_vector_store.points) == 1
+        (point,) = fake_vector_store.points.values()
+        assert point.text == "The limit of a function..."
 
     async def test_unknown_node_id_is_404(self, client: TestClient) -> None:
         fake_extractor: FakeExtractor = client.app.state.fake_extractor  # type: ignore[attr-defined]
