@@ -1,274 +1,195 @@
-import React, { useState, useRef, useEffect } from 'react';
-import NavBar from './NavBar';
+// Real upload against POST /api/v1/materials — the old version's submit
+// handlers only console.log'd (see the modernization plan's "Ingestion is
+// dead" finding). Upload returns 202 with a job id; this polls the
+// material's own status (which mirrors the job) every 2s until the TOC
+// pass finishes, then makes it clickable into the reader.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  FaBook, 
-  FaVideo, 
-  FaFilePowerpoint, 
-  FaFileAlt, 
-  FaTimes, 
-  FaUpload, 
-  FaFolderPlus 
-} from 'react-icons/fa';
-import './Upload.css';
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  LinearProgress,
+  List,
+  ListItemButton,
+  ListItemText,
+  Typography,
+} from '@mui/material';
+import apiClient from '../api/client';
+import NavBar from './NavBar';
+
+const STATUS_LABEL = {
+  uploaded: 'Queued',
+  toc_processing: 'Extracting table of contents…',
+  toc_ready: 'Ready',
+  toc_failed: 'Failed',
+};
+
+const STATUS_COLOR = {
+  uploaded: 'default',
+  toc_processing: 'info',
+  toc_ready: 'success',
+  toc_failed: 'error',
+};
+
+const SETTLED_STATUSES = new Set(['toc_ready', 'toc_failed']);
 
 const Upload = () => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isLectureModalOpen, setIsLectureModalOpen] = useState(false);
-  const [isPowerPointModalOpen, setIsPowerPointModalOpen] = useState(false);
-  const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
-  const [textbookFile, setTextbookFile] = useState(null);
-  const [lectureFile, setLectureFile] = useState(null);
-  const [powerPointFile, setPowerPointFile] = useState(null);
-  const [notesFile, setNotesFile] = useState(null);
-  const [pageRange, setPageRange] = useState('');
-  const [lectureTitle, setLectureTitle] = useState('');
-  const [powerPointTitle, setPowerPointTitle] = useState('');
-  const [notesTitle, setNotesTitle] = useState('');
-  const [isTextbook, setIsTextbook] = useState(true);
-  const [tempPowerPointTitle, setTempPowerPointTitle] = useState('');
+  const [materials, setMaterials] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const navigate = useNavigate();
-  const notesInputRef = useRef(null);
-  const powerPointInputRef = useRef(null);
+  const pollTimers = useRef(new Set());
 
-  const handleFileChange = (event, type) => {
-    const selectedFile = event.target.files[0];
-    switch (type) {
-      case 'textbook':
-        setTextbookFile(selectedFile);
-        break;
-      case 'lecture':
-        setLectureFile(selectedFile);
-        break;
-      case 'powerPoint':
-        setPowerPointFile(selectedFile);
-        break;
-      case 'notes':
-        setNotesFile(selectedFile);
-        break;
-      default:
-        break;
-    }
-  };
+  const fetchMaterials = useCallback(async () => {
+    const { data } = await apiClient.get('/api/v1/materials');
+    setMaterials(data);
+    return data;
+  }, []);
 
-  const handleSubmit = () => {
-    console.log('File:', textbookFile);
-    console.log('Page Range:', pageRange);
-    setIsModalOpen(false);
-  };
-
-  const handleLectureSubmit = () => {
-    console.log('Lecture Title:', lectureTitle);
-    console.log('Lecture File:', lectureFile);
-    setIsLectureModalOpen(false);
-  };
-
-  const handlePowerPointSubmit = () => {
-    setPowerPointTitle(tempPowerPointTitle);
-    setIsPowerPointModalOpen(false);
-  };
-
-  const handleNotesSubmit = () => {
-    console.log('Notes Title:', notesTitle);
-    console.log('Notes File:', notesFile);
-    setIsNotesModalOpen(false);
-  };
-
-  // Modal component for reuse across different upload types.
-  const Modal = ({ isOpen, onClose, title, children }) => {
-    if (!isOpen) return null;
-    return (
-      <div className="modal" onClick={onClose}>
-        <div className="modal-content-new" onClick={e => e.stopPropagation()}>
-          <div className="modal-header">
-            <h2>{title}</h2>
-            <button className="close-button" onClick={onClose}>
-              <FaTimes size={20} />
-            </button>
-          </div>
-          <div className="modal-form" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-            {children}
-          </div>
-          <div className="modal-actions" style={{ marginTop: '10px' }}>
-            <button className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
-            <button className="btn-primary" onClick={handleSubmit}>Submit</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const pollUntilSettled = useCallback((materialId) => {
+    const poll = async () => {
+      try {
+        const { data } = await apiClient.get(`/api/v1/materials/${materialId}`);
+        setMaterials((prev) => prev.map((m) => (m.id === materialId ? data : m)));
+        if (!SETTLED_STATUSES.has(data.status)) {
+          const timer = setTimeout(poll, 2000);
+          pollTimers.current.add(timer);
+        }
+      } catch (err) {
+        console.error('Error polling material status:', err);
+      }
+    };
+    poll();
+  }, []);
 
   useEffect(() => {
-    if (isPowerPointModalOpen && powerPointInputRef.current) {
-      powerPointInputRef.current.focus();
-    }
-  }, [isPowerPointModalOpen]);
+    const timers = pollTimers.current;
+    (async () => {
+      setLoading(true);
+      try {
+        const data = await fetchMaterials();
+        data
+          .filter((m) => !SETTLED_STATUSES.has(m.status))
+          .forEach((m) => pollUntilSettled(m.id));
+      } catch (err) {
+        console.error('Error fetching materials:', err);
+        setError('Failed to load your materials.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, [fetchMaterials, pollUntilSettled]);
 
-  useEffect(() => {
-    if (isNotesModalOpen && notesInputRef.current) {
-      notesInputRef.current.focus();
+  const handleFileSelected = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+
+    setError(null);
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await apiClient.post('/api/v1/materials', formData, {
+        onUploadProgress: (evt) => {
+          if (evt.total) setUploadProgress(Math.round((evt.loaded / evt.total) * 100));
+        },
+      });
+      await fetchMaterials();
+      pollUntilSettled(data.material_id);
+    } catch (err) {
+      console.error('Error uploading material:', err);
+      setError(err.response?.data?.detail || 'Failed to upload file.');
+    } finally {
+      setUploading(false);
     }
-  }, [isNotesModalOpen]);
+  };
+
+  const openMaterial = (material) => {
+    if (material.status === 'toc_ready') {
+      navigate(`/materials/${material.id}`);
+    }
+  };
 
   return (
     <>
       <NavBar />
-      <div className="upload-page">
-        <h1 className="upload-title">Upload Your Materials</h1>
-        <div className="upload-grid">
-          <div className="upload-card" onClick={() => setIsModalOpen(true)}>
-            <FaBook size={48} />
-            <h3>Upload Textbook</h3>
-          </div>
-          <div className="upload-card" onClick={() => setIsLectureModalOpen(true)}>
-            <FaVideo size={48} />
-            <h3>Upload Lecture</h3>
-          </div>
-          <div className="upload-card" onClick={() => setIsPowerPointModalOpen(true)}>
-            <FaFilePowerpoint size={48} />
-            <h3>Upload PowerPoint</h3>
-          </div>
-          <div className="upload-card" onClick={() => setIsNotesModalOpen(true)}>
-            <FaFileAlt size={48} />
-            <h3>Upload Notes</h3>
-          </div>
-        </div>
-        <div className="uploaded-files-container">
-          <h2>Uploaded Files</h2>
-          <ul>
-            {textbookFile && <li>Textbook: {textbookFile.name}</li>}
-            {lectureFile && <li>Lecture: {lectureFile.name}</li>}
-            {powerPointFile && <li>PowerPoint: {powerPointFile.name}</li>}
-            {notesFile && <li>Notes: {notesFile.name}</li>}
-          </ul>
-        </div>
-        <button className="create-collection-btn">
-          <FaFolderPlus className="btn-icon" size={20} />
-          Create a collection
-        </button>
+      <Box sx={{ maxWidth: 700, margin: 'auto', mt: 4, px: 2 }}>
+        <Typography variant="h4" gutterBottom>
+          Upload Materials
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Upload a PDF and we'll read it directly — no OCR — building a browsable table of
+          contents in the background.
+        </Typography>
 
-        {/* Textbook Modal */}
-        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Upload Textbook">
-          <div className="modal-form">
-            <div className="radio-group">
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  checked={isTextbook}
-                  onChange={() => setIsTextbook(true)}
+        <Button variant="contained" component="label" disabled={uploading} sx={{ mb: 1 }}>
+          {uploading ? `Uploading… ${uploadProgress}%` : 'Choose PDF'}
+          <input type="file" accept="application/pdf" hidden onChange={handleFileSelected} />
+        </Button>
+        {uploading && (
+          <LinearProgress variant="determinate" value={uploadProgress} sx={{ mb: 2 }} />
+        )}
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        <Typography variant="h6" sx={{ mt: 4, mb: 1 }}>
+          Your materials
+        </Typography>
+        {loading ? (
+          <Box display="flex" justifyContent="center" mt={4}>
+            <CircularProgress />
+          </Box>
+        ) : materials.length === 0 ? (
+          <Typography>No materials yet. Upload a PDF above to get started.</Typography>
+        ) : (
+          <List>
+            {materials.map((material) => (
+              <ListItemButton
+                key={material.id}
+                onClick={() => openMaterial(material)}
+                disabled={material.status !== 'toc_ready'}
+                sx={{
+                  border: '1px solid #ddd',
+                  borderRadius: 1,
+                  mb: 1,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <ListItemText
+                  primary={material.filename}
+                  secondary={
+                    material.status === 'toc_failed'
+                      ? material.error || 'Extraction failed'
+                      : material.page_count
+                        ? `${material.page_count} pages`
+                        : null
+                  }
                 />
-                <span>Upload Textbook</span>
-              </label>
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  checked={!isTextbook}
-                  onChange={() => setIsTextbook(false)}
+                <Chip
+                  size="small"
+                  label={STATUS_LABEL[material.status] || material.status}
+                  color={STATUS_COLOR[material.status] || 'default'}
                 />
-                <span>Upload Non-Textbook PDFs</span>
-              </label>
-            </div>
-            <div className="file-upload-container">
-              <label className="file-input-label">
-                <FaUpload size={24} />
-                <span>Choose File</span>
-                <input type="file" onChange={(e) => handleFileChange(e, 'textbook')} className="file-input" />
-              </label>
-              {textbookFile && <p className="file-name">{textbookFile.name}</p>}
-            </div>
-            {isTextbook && (
-              <div className="input-group">
-                <label>Table of Contents Page Range</label>
-                <input
-                  type="text"
-                  value={pageRange}
-                  onChange={(e) => setPageRange(e.target.value)}
-                  placeholder="e.g., 1-10"
-                  className="text-input"
-                />
-              </div>
-            )}
-          </div>
-        </Modal>
-
-        {/* Lecture Modal */}
-        <Modal isOpen={isLectureModalOpen} onClose={() => setIsLectureModalOpen(false)} title="Upload Lecture">
-          <div className="modal-form">
-            <div className="input-group">
-              <label>Lecture Title</label>
-              <input
-                type="text"
-                value={lectureTitle}
-                onChange={(e) => setLectureTitle(e.target.value)}
-                placeholder="Enter lecture title"
-                className="text-input"
-              />
-            </div>
-            <div className="file-upload-container">
-              <label className="file-input-label">
-                <FaUpload size={24} />
-                <span>Upload Media</span>
-                <input type="file" onChange={(e) => handleFileChange(e, 'lecture')} className="file-input" />
-              </label>
-              {lectureFile && <p className="file-name">{lectureFile.name}</p>}
-              <p className="file-type-hint">(.mp3, .mp4, .m4a, .wav files only)</p>
-            </div>
-          </div>
-        </Modal>
-
-        {/* PowerPoint Modal */}
-        <Modal isOpen={isPowerPointModalOpen} onClose={() => setIsPowerPointModalOpen(false)} title="Upload PowerPoint">
-          <div className="modal-form">
-            <div className="input-group">
-              <label>PowerPoint Title</label>
-              <input
-                type="text"
-                value={tempPowerPointTitle}
-                onChange={(e) => setTempPowerPointTitle(e.target.value)}
-                placeholder="Enter PowerPoint title"
-                className="text-input"
-                ref={powerPointInputRef}
-                onFocus={() => powerPointInputRef.current.select()}
-              />
-            </div>
-            <div className="file-upload-container">
-              <label className="file-input-label">
-                <FaUpload size={24} />
-                <span>Upload PowerPoint</span>
-                <input type="file" onChange={(e) => handleFileChange(e, 'powerPoint')} className="file-input" />
-              </label>
-              {powerPointFile && <p className="file-name">{powerPointFile.name}</p>}
-              <p className="file-type-hint">(.ppt, .pptx files only)</p>
-            </div>
-          </div>
-        </Modal>
-
-        {/* Notes Modal */}
-        <Modal isOpen={isNotesModalOpen} onClose={() => setIsNotesModalOpen(false)} title="Upload Notes">
-          <div className="modal-form">
-            <div className="input-group">
-              <label>Notes Title</label>
-              <input
-                type="text"
-                value={notesTitle}
-                onChange={(e) => setNotesTitle(e.target.value)}
-                placeholder="Enter notes title"
-                className="text-input"
-                ref={notesInputRef}
-              />
-            </div>
-            <div className="file-upload-container">
-              <label className="file-input-label">
-                <FaUpload size={24} />
-                <span>Upload Notes</span>
-                <input type="file" onChange={(e) => handleFileChange(e, 'notes')} className="file-input" />
-              </label>
-              {notesFile && <p className="file-name">{notesFile.name}</p>}
-              <p className="file-type-hint">(.jpg, .jpeg, .png files only)</p>
-            </div>
-          </div>
-        </Modal>
-      </div>
+              </ListItemButton>
+            ))}
+          </List>
+        )}
+      </Box>
     </>
   );
 };
