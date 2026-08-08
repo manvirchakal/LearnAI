@@ -47,6 +47,16 @@ class ValidationError(AppError):
     code = "validation_error"
 
 
+class Unauthenticated(AppError):
+    """No valid credentials presented: missing/expired/invalid session, or a
+    Google ID token that fails verification. Distinct from ``Forbidden`` —
+    that's a known identity lacking permission; this is no identity at all.
+    """
+
+    status_code = 401
+    code = "unauthenticated"
+
+
 class Forbidden(AppError):
     status_code = 403
     code = "forbidden"

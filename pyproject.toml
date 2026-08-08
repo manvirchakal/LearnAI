@@ -168,7 +168,19 @@ source_modules = [
     "learnai.routers",
     "learnai.services",
 ]
-forbidden_modules = ["pymongo", "bson"]
+forbidden_modules = ["pymongo"]
+# bson is deliberately not forbidden here: ObjectId is a plain value type
+# (like a UUID) that services and routers legitimately hold and pass through
+# — e.g. a session's user_id — without that being "talking to MongoDB" in the
+# sense this contract cares about. pymongo (queries, collections, cursors)
+# is the thing confined to repositories.
+#
+# Direct imports only. Services legitimately depend on repositories (see the
+# layered-architecture contract above), and repositories themselves import
+# pymongo — without this, that allowed dependency would always trip this
+# contract transitively. What this guards against is a router or service
+# reaching past the repository layer to run queries against pymongo itself.
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "Services must not depend on the web framework"
