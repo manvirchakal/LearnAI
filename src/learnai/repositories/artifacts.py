@@ -28,6 +28,21 @@ class ArtifactRepository(ScopedRepository[dict[str, Any]]):
             {"collection_id": collection_id, "kind": kind, "fingerprint": fingerprint}
         )
 
+    async def get_latest(
+        self, collection_id: ObjectId, kind: ArtifactKind
+    ) -> dict[str, Any] | None:
+        """The most recently generated artifact of this kind, regardless of
+        fingerprint — what the chat agent's ``get_narrative`` tool reads,
+        since it wants whatever narrative already exists for the
+        collection, not one tied to a specific set of inputs."""
+        docs = [
+            doc
+            async for doc in self.find(
+                {"collection_id": collection_id, "kind": kind}, sort=[("updated_at", -1)]
+            )
+        ]
+        return docs[0] if docs else None
+
     async def upsert(
         self,
         collection_id: ObjectId,
