@@ -53,6 +53,21 @@ async def test_anthropic_adapter_completes_a_real_request() -> None:
 
 
 @pytest.mark.skipif(
+    os.environ.get("ANTHROPIC_API_KEY", "") in ("", _PLACEHOLDER_ANTHROPIC_KEY),
+    reason="no real ANTHROPIC_API_KEY set",
+)
+async def test_anthropic_adapter_streams_a_real_request() -> None:
+    settings = Settings(
+        google_client_id="live-test", session_secret="a-test-secret-at-least-32-bytes-long"
+    )
+    client = AnthropicLLMClient(anthropic.AsyncAnthropic(), settings)
+
+    chunks = [chunk async for chunk in client.stream(task=LLMTask.narrative, prompt=_PROMPT)]
+
+    assert "".join(chunks).strip()
+
+
+@pytest.mark.skipif(
     not os.environ.get("LLM_BASE_URL"),
     reason="no LLM_BASE_URL set (a local OpenAI-compatible endpoint — LM Studio, vLLM, Ollama)",
 )
@@ -72,3 +87,25 @@ async def test_openai_compatible_adapter_completes_a_real_request() -> None:
     result = await client.complete(task=LLMTask.profile_description, prompt=_PROMPT)
 
     assert result.strip()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("LLM_BASE_URL"),
+    reason="no LLM_BASE_URL set (a local OpenAI-compatible endpoint — LM Studio, vLLM, Ollama)",
+)
+async def test_openai_compatible_adapter_streams_a_real_request() -> None:
+    settings = Settings(
+        google_client_id="live-test",
+        session_secret="a-test-secret-at-least-32-bytes-long",
+        llm_backend="openai_compatible",
+        llm_base_url=os.environ["LLM_BASE_URL"],
+        llm_model_default=os.environ.get("LLM_MODEL_DEFAULT", "local-model"),
+    )
+    sdk_client = openai.AsyncOpenAI(
+        api_key=settings.generation_api_key() or "not-needed", base_url=settings.llm_base_url
+    )
+    client = OpenAICompatLLMClient(sdk_client, settings)
+
+    chunks = [chunk async for chunk in client.stream(task=LLMTask.narrative, prompt=_PROMPT)]
+
+    assert "".join(chunks).strip()
