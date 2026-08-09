@@ -1,0 +1,15 @@
+{% include "_partials/learning_profile.j2" %}
+
+Material:
+{{ content }}
+{% if narrative %}
+
+Summary already written for this material, for additional context:
+{{ narrative }}
+{% endif %}
+
+Create 2-3 Mermaid flowcharts (`graph TD`) that illustrate the key
+concepts here and how they relate to each other. Node IDs must be short
+alphanumeric identifiers; node labels must be plain words only — spell
+out mathematical notation instead of using symbols (e.g. "First
+Derivative" rather than "f'(x)"). Keep each diagram to at most 10 nodes.

@@ -1,0 +1,39 @@
+Implement this game as a single JavaScript function *body* — no function
+declaration, no imports, no markdown fences, no explanations. It will run
+as:
+
+    new Function('React', 'useState', 'useEffect', 'reportComplete', <your code>)
+
+inside an existing React tree, sandboxed in an iframe with no network or
+DOM access beyond what `React`/`useState`/`useEffect` give you.
+
+Game: {{ game_idea.title }}
+Description: {{ game_idea.description }}
+Core mechanic: {{ game_idea.mechanics }}
+Controls: {{ game_idea.controls }}
+
+{% if game_idea.controls == "arrow_keys" %}
+Read input with a `useEffect` that adds a `keydown` listener on `window`
+and removes it on cleanup; call `e.preventDefault()` on the arrow keys you
+use so the page doesn't scroll.
+{% elif game_idea.controls == "click" %}
+Read input via `onClick` handlers on the elements you create with
+`React.createElement`.
+{% elif game_idea.controls == "type_answer" %}
+Read input via a controlled text input: `React.createElement('input', {
+value, onChange })`.
+{% elif game_idea.controls == "drag_and_drop" %}
+Read input via `onDragStart`/`onDragOver`/`onDrop` handlers.
+{% endif %}
+
+Requirements:
+- Use `React.createElement` for every element — no JSX.
+- Use only `useState`/`useEffect` (both provided as arguments) for state
+  and effects. No other globals, no `fetch`, no `eval`, no `import`.
+- Return a single root element containing the whole game.
+- Include on-screen instructions: how to play, and how it reinforces
+  "{{ game_idea.title }}".
+- Call `reportComplete(score)` — `score` a number from 0 to 1 — once the
+  player finishes.
+
+Return the function body only.
