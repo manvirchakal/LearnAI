@@ -31,6 +31,7 @@ from learnai.db.mongo import ping as mongo_ping
 from learnai.http_errors import register_exception_handlers
 from learnai.logging import bind_request_id, configure_logging, get_logger, new_request_id
 from learnai.routers.auth import router as auth_router
+from learnai.routers.chat import router as chat_router
 from learnai.routers.collections import router as collections_router
 from learnai.routers.generation import router as generation_router
 from learnai.routers.jobs import router as jobs_router
@@ -237,6 +238,7 @@ def create_app() -> FastAPI:
     app.include_router(profile_router)
     app.include_router(collections_router)
     app.include_router(generation_router)
+    app.include_router(chat_router)
     app.include_router(jobs_router)
     app.include_router(materials_router)
 

@@ -34,4 +34,4 @@ class ChatMessageOut(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1)
