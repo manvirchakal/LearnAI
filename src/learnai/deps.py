@@ -17,7 +17,9 @@ from learnai.config import Settings, get_settings
 from learnai.db.mongo import Database
 from learnai.errors import Unauthenticated
 from learnai.repositories.artifacts import ArtifactRepository
+from learnai.repositories.chat_messages import ChatMessageRepository
 from learnai.repositories.collections import CollectionRepository
+from learnai.repositories.conversations import ConversationRepository
 from learnai.repositories.jobs import JobRepository
 from learnai.repositories.learning_profiles import LearningProfileRepository
 from learnai.repositories.materials import MaterialRepository
@@ -169,3 +171,17 @@ def get_artifact_repo(user: CurrentUser, db: DbDep) -> ArtifactRepository:
 
 
 ArtifactRepoDep = Annotated[ArtifactRepository, Depends(get_artifact_repo)]
+
+
+def get_conversation_repo(user: CurrentUser, db: DbDep) -> ConversationRepository:
+    return ConversationRepository(db, user["_id"])
+
+
+ConversationRepoDep = Annotated[ConversationRepository, Depends(get_conversation_repo)]
+
+
+def get_chat_message_repo(user: CurrentUser, db: DbDep) -> ChatMessageRepository:
+    return ChatMessageRepository(db, user["_id"])
+
+
+ChatMessageRepoDep = Annotated[ChatMessageRepository, Depends(get_chat_message_repo)]

@@ -35,7 +35,9 @@ from learnai.config import get_settings
 from learnai.db.migrations import ALL_MIGRATIONS, apply_pending
 from learnai.db.mongo import Database
 from learnai.repositories.base import ScopedRepository
+from learnai.repositories.chat_messages import ChatMessageRepository
 from learnai.repositories.collections import CollectionRepository
+from learnai.repositories.conversations import ConversationRepository
 from learnai.repositories.users import UserRepository
 
 pytestmark = pytest.mark.integration
@@ -63,6 +65,7 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
         "0002_materials_and_sections_indexes",
         "0003_jobs_indexes",
         "0004_artifacts_indexes",
+        "0005_chat_indexes",
     ]
 
     users_indexes = await db["users"].index_information()
@@ -92,6 +95,12 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
     artifact_indexes = await db["artifacts"].index_information()
     assert artifact_indexes["owner_id_1_collection_id_1_kind_1_fingerprint_1"]["unique"] is True
 
+    conversation_indexes = await db["conversations"].index_information()
+    assert conversation_indexes["owner_id_1_collection_id_1"]["unique"] is True
+
+    chat_message_indexes = await db["chat_messages"].index_information()
+    assert chat_message_indexes["owner_id_1_conversation_id_1_seq_1"]["unique"] is True
+
 
 async def test_migrations_are_idempotent(db: Database) -> None:
     first = await apply_pending(db, ALL_MIGRATIONS)
@@ -102,6 +111,7 @@ async def test_migrations_are_idempotent(db: Database) -> None:
         "0002_materials_and_sections_indexes",
         "0003_jobs_indexes",
         "0004_artifacts_indexes",
+        "0005_chat_indexes",
     ]
     assert second == []  # already recorded applied — apply() not re-run
 
@@ -189,3 +199,26 @@ async def test_user_upsert_from_google_is_idempotent_against_real_mongo(db: Data
     assert second["_id"] == first["_id"]
     assert second["created_at"] == first["created_at"]
     assert second["name"] == "Ada Lovelace"
+
+
+async def test_concurrent_chat_seq_allocation_has_no_gaps_or_dupes(db: Database) -> None:
+    """The exact property the old S3 chat-history blob lacked: N concurrent
+    senders each get a distinct, gapless seq, and the unique
+    (owner_id, conversation_id, seq) index makes a collision impossible to
+    persist even if the counter's atomicity were ever broken."""
+    await apply_pending(db, ALL_MIGRATIONS)
+    owner = ObjectId()
+    conversations = ConversationRepository(db, owner)
+    messages = ChatMessageRepository(db, owner)
+    conversation = await conversations.get_or_create(ObjectId())
+
+    async def send(i: int) -> None:
+        seq = await conversations.next_seq(conversation["_id"])
+        await messages.append(
+            conversation_id=conversation["_id"], seq=seq, role="user", content=f"message {i}"
+        )
+
+    await asyncio.gather(*(send(i) for i in range(20)))
+
+    stored = await messages.list_for_conversation(conversation["_id"])
+    assert sorted(doc["seq"] for doc in stored) == list(range(1, 21))

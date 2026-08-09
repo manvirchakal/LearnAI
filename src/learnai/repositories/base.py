@@ -85,5 +85,23 @@ class ScopedRepository(Generic[T]):
         # without any extra work here.
         return await self._collection.update_one(self._scope(query), dict(update), upsert=upsert)
 
+    async def find_one_and_update(
+        self,
+        query: Mapping[str, Any],
+        update: Mapping[str, Any],
+        *,
+        upsert: bool = False,
+        return_document: bool = False,
+    ) -> T | None:
+        # Same upsert safety as update_one: _scope always injects owner_id
+        # into the query, so an upserted document is correctly owned.
+        # return_document mirrors pymongo.ReturnDocument's bool values
+        # (BEFORE=False, AFTER=True) rather than importing that enum here —
+        # this method has no other reason to depend on pymongo directly.
+        result = await self._collection.find_one_and_update(
+            self._scope(query), dict(update), upsert=upsert, return_document=return_document
+        )
+        return result  # type: ignore[return-value]
+
     async def delete_one(self, query: Mapping[str, Any]) -> DeleteResult:
         return await self._collection.delete_one(self._scope(query))

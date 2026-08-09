@@ -43,6 +43,9 @@ def _matches(doc: dict[str, Any], query: Mapping[str, Any]) -> bool:
 def _apply_set(doc: dict[str, Any], update: Mapping[str, Any]) -> None:
     if "$set" in update:
         doc.update(update["$set"])
+    if "$inc" in update:
+        for key, delta in update["$inc"].items():
+            doc[key] = doc.get(key, 0) + delta
 
 
 def _seed_from_upsert(query: Mapping[str, Any], update: Mapping[str, Any]) -> dict[str, Any]:
@@ -52,6 +55,8 @@ def _seed_from_upsert(query: Mapping[str, Any], update: Mapping[str, Any]) -> di
     new_doc: dict[str, Any] = {k: v for k, v in query.items() if not k.startswith("$")}
     new_doc.update(update.get("$set", {}))
     new_doc.update(update.get("$setOnInsert", {}))
+    for key, delta in update.get("$inc", {}).items():
+        new_doc[key] = new_doc.get(key, 0) + delta
     return new_doc
 
 
