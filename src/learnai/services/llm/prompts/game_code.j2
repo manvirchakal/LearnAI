@@ -2,10 +2,12 @@ Implement this game as a single JavaScript function *body* — no function
 declaration, no imports, no markdown fences, no explanations. It will run
 as:
 
-    new Function('React', 'useState', 'useEffect', 'reportComplete', <your code>)
+    new Function('React', 'useState', 'useEffect', 'reportComplete', 'onKeyDown', <your code>)
 
-inside an existing React tree, sandboxed in an iframe with no network or
-DOM access beyond what `React`/`useState`/`useEffect` give you.
+inside a sandboxed iframe with no network access and no reference to
+`window`/`document`/`parent` at all — those identifiers are rejected by an
+automated check before this code ever runs. Every capability you need is
+one of the five provided arguments.
 
 Game: {{ game_idea.title }}
 Description: {{ game_idea.description }}
@@ -13,9 +15,11 @@ Core mechanic: {{ game_idea.mechanics }}
 Controls: {{ game_idea.controls }}
 
 {% if game_idea.controls == "arrow_keys" %}
-Read input with a `useEffect` that adds a `keydown` listener on `window`
-and removes it on cleanup; call `e.preventDefault()` on the arrow keys you
-use so the page doesn't scroll.
+Read input with `onKeyDown(handler)` — it subscribes `handler(event)` to
+keydown events and returns an unsubscribe function. Call it inside a
+`useEffect`, returning the unsubscribe function as the effect's cleanup:
+`useEffect(() => onKeyDown(handler), [])`. Never reference `window` or
+`document` directly.
 {% elif game_idea.controls == "click" %}
 Read input via `onClick` handlers on the elements you create with
 `React.createElement`.

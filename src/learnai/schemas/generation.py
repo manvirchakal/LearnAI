@@ -29,11 +29,15 @@ class GameCode(BaseModel):
     javascript: str
     """A function *body* — no wrapper declaration, no imports. Executed as
 
-        new Function('React', 'useState', 'useEffect', 'reportComplete', javascript)
+        new Function('React', 'useState', 'useEffect', 'reportComplete', 'onKeyDown', javascript)
 
     inside the sandboxed iframe shell (see the frontend's ``GameFrame``).
     Must return a ``React.createElement`` tree and may call
     ``reportComplete(score)`` (a number 0-1) when the player finishes.
+    ``onKeyDown(handler)`` is how keyboard-controlled games read input —
+    the code never references ``window``/``document`` directly (both are
+    rejected by ``services/generation/game_validator``), so this is the
+    only path to keyboard events.
     """
 
 
