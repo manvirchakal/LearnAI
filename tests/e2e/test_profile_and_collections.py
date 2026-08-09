@@ -136,6 +136,25 @@ class TestCollectionsRouter:
         assert refs[0]["material_id"] == material_id
         assert refs[0]["added_at"] is not None
 
+    def test_update_materials_section_ids_are_tree_node_ids_not_object_ids(
+        self, client: TestClient
+    ) -> None:
+        """section_ids are document-tree node_ids (e.g. "1.2" — see
+        schemas.documents.TreeNode), not ObjectIds. Regression test: an
+        earlier version of this endpoint parsed them as ObjectId, which
+        would 422 on any real section reference."""
+        created = client.post(
+            "/api/v1/collections", json={"name": "Calculus", "kind": "manual"}
+        ).json()
+        material_id = str(ObjectId())
+
+        response = client.put(
+            f"/api/v1/collections/{created['id']}/materials",
+            json={"material_refs": [{"material_id": material_id, "section_ids": ["1", "1.2"]}]},
+        )
+        assert response.status_code == 200
+        assert response.json()["material_refs"][0]["section_ids"] == ["1", "1.2"]
+
     def test_another_owners_collection_is_a_404_not_a_403(
         self, client: TestClient, raw_client: TestClient
     ) -> None:

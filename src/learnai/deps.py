@@ -16,6 +16,7 @@ from fastapi import Cookie, Depends, Request
 from learnai.config import Settings, get_settings
 from learnai.db.mongo import Database
 from learnai.errors import Unauthenticated
+from learnai.repositories.artifacts import ArtifactRepository
 from learnai.repositories.collections import CollectionRepository
 from learnai.repositories.jobs import JobRepository
 from learnai.repositories.learning_profiles import LearningProfileRepository
@@ -161,3 +162,10 @@ def get_job_repo(user: CurrentUser, db: DbDep) -> JobRepository:
 
 
 JobRepoDep = Annotated[JobRepository, Depends(get_job_repo)]
+
+
+def get_artifact_repo(user: CurrentUser, db: DbDep) -> ArtifactRepository:
+    return ArtifactRepository(db, user["_id"])
+
+
+ArtifactRepoDep = Annotated[ArtifactRepository, Depends(get_artifact_repo)]

@@ -62,6 +62,7 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
         "0001_initial_indexes",
         "0002_materials_and_sections_indexes",
         "0003_jobs_indexes",
+        "0004_artifacts_indexes",
     ]
 
     users_indexes = await db["users"].index_information()
@@ -88,6 +89,9 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
     job_indexes = await db["jobs"].index_information()
     assert "owner_id_1_created_at_-1" in job_indexes
 
+    artifact_indexes = await db["artifacts"].index_information()
+    assert artifact_indexes["owner_id_1_collection_id_1_kind_1_fingerprint_1"]["unique"] is True
+
 
 async def test_migrations_are_idempotent(db: Database) -> None:
     first = await apply_pending(db, ALL_MIGRATIONS)
@@ -97,6 +101,7 @@ async def test_migrations_are_idempotent(db: Database) -> None:
         "0001_initial_indexes",
         "0002_materials_and_sections_indexes",
         "0003_jobs_indexes",
+        "0004_artifacts_indexes",
     ]
     assert second == []  # already recorded applied — apply() not re-run
 

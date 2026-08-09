@@ -21,6 +21,12 @@ BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 class FakeLLMClient:
     completions: dict[LLMTask, str] = field(default_factory=dict)
     structured_responses: dict[LLMTask, BaseModel] = field(default_factory=dict)
+    # For a caller that makes more than one structured() call for the same
+    # task and needs a different response each time (e.g. a validate-then-
+    # repair round trip) — checked first, popped in order; falls back to
+    # structured_responses (a fixed response reused every call) once
+    # exhausted or if never set for that task.
+    structured_response_queue: dict[LLMTask, list[BaseModel]] = field(default_factory=dict)
     stream_chunks: dict[LLMTask, list[str]] = field(default_factory=dict)
     calls: list[dict[str, Any]] = field(default_factory=list)
 
@@ -32,7 +38,8 @@ class FakeLLMClient:
         self, *, task: LLMTask, prompt: str, schema: type[BaseModelT], system: str | None = None
     ) -> BaseModelT:
         self.calls.append({"task": task, "prompt": prompt, "system": system})
-        response = self.structured_responses[task]
+        queue = self.structured_response_queue.get(task)
+        response = queue.pop(0) if queue else self.structured_responses[task]
         if not isinstance(response, schema):
             raise TypeError(f"fake structured response for {task} is not a {schema.__name__}")
         return response

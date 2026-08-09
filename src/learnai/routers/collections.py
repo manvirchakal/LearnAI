@@ -33,6 +33,9 @@ def _object_id(value: str) -> ObjectId:
 
 class MaterialRefIn(BaseModel):
     material_id: str
+    # Document-tree node_ids (e.g. "1", "1.2" — see schemas.documents.TreeNode),
+    # not ObjectIds. Empty means "the whole material" — see
+    # services/generation/context.py.
     section_ids: list[str] = Field(default_factory=list)
 
 
@@ -73,7 +76,7 @@ def _collection_out(doc: dict[str, Any]) -> CollectionOut:
         material_refs=[
             MaterialRefOut(
                 material_id=str(ref["material_id"]),
-                section_ids=[str(s) for s in ref.get("section_ids", [])],
+                section_ids=list(ref.get("section_ids", [])),
                 added_at=ref.get("added_at"),
             )
             for ref in doc.get("material_refs", [])
@@ -113,7 +116,7 @@ async def update_materials(
     refs = [
         {
             "material_id": _object_id(ref.material_id),
-            "section_ids": [_object_id(s) for s in ref.section_ids],
+            "section_ids": list(ref.section_ids),
             "added_at": now,
         }
         for ref in body.material_refs
