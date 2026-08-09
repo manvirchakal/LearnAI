@@ -23,12 +23,24 @@ from pydantic import BaseModel
 
 from learnai.config import LLMTask, Settings
 from learnai.errors import UpstreamError
+from learnai.services.llm.client import AgentResult, AgentTool, AgentToolCall
 
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
 logger = structlog.get_logger(__name__)
 
 Message = dict[str, str]
+
+
+def _tool_def(tool: AgentTool) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.args_schema.model_json_schema(),
+        },
+    }
 
 
 class OpenAICompatLLMClient:
@@ -136,16 +148,102 @@ class OpenAICompatLLMClient:
                 f"{self._settings.llm_backend} connection failed for task {task}"
             ) from exc
 
+    async def agent(
+        self,
+        *,
+        task: LLMTask,
+        system: str,
+        messages: list[dict[str, str]],
+        tools: list[AgentTool],
+        max_iterations: int = 8,
+    ) -> AgentResult:
+        """A manual tool-call loop over Chat Completions ``tools``/
+        ``tool_choice`` — the graceful-degradation counterpart to the
+        Anthropic adapter's ``client.beta.messages.tool_runner``. No
+        ``pause_turn`` equivalent exists in this API: the loop only ever
+        ends on a response with no ``tool_calls``, or on ``max_iterations``.
+        """
+        tool_by_name = {tool.name: tool for tool in tools}
+        tool_defs = [_tool_def(tool) for tool in tools]
+        tool_calls: list[AgentToolCall] = []
+
+        chat_messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+        chat_messages.extend({"role": m["role"], "content": m["content"]} for m in messages)
+
+        for _ in range(max_iterations):
+            response = await self._create(task, chat_messages, tools=tool_defs)
+            message = response.choices[0].message
+
+            if not message.tool_calls:
+                return AgentResult(text=self._text(task, response), tool_calls=tool_calls)
+
+            # Every tool we declare is type="function" (see _tool_def), so
+            # the model only ever emits function tool calls back — the
+            # union with "custom" tool calls in the SDK's type is for a
+            # feature we never enable.
+            calls = [call for call in message.tool_calls if call.type == "function"]
+            chat_messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.function.name,
+                                "arguments": call.function.arguments,
+                            },
+                        }
+                        for call in calls
+                    ],
+                }
+            )
+            for call in calls:
+                result = await self._run_tool(tool_by_name, call, tool_calls)
+                chat_messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+
+        raise UpstreamError(
+            f"{self._settings.llm_backend} agent exceeded max_iterations for task {task}"
+        )
+
+    async def _run_tool(
+        self,
+        tool_by_name: dict[str, AgentTool],
+        call: openai.types.chat.ChatCompletionMessageFunctionToolCall,
+        tool_calls: list[AgentToolCall],
+    ) -> str:
+        """Executes one tool call, catching everything — a malformed
+        argument or a failing tool becomes error text fed back to the
+        model, not a crashed request. Mirrors how the Anthropic SDK's
+        ``tool_runner`` itself handles both an unknown tool name and a
+        tool that raises (see ``anthropic.lib.tools._tool_dispatch``)."""
+        tool = tool_by_name.get(call.function.name)
+        if tool is None:
+            return f"Error: Tool '{call.function.name}' not found"
+        try:
+            arguments = tool.args_schema.model_validate_json(call.function.arguments).model_dump(
+                mode="json"
+            )
+            result = await tool.handler(**arguments)
+        except Exception as exc:  # noqa: BLE001 - fed back to the model as tool output, not raised
+            return f"Error: {exc}"
+        tool_calls.append(AgentToolCall(tool_name=tool.name, arguments=arguments, result=result))
+        return result
+
     async def _create(
         self,
         task: LLMTask,
-        messages: list[Message],
+        messages: list[dict[str, Any]],
         *,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> openai.types.chat.ChatCompletion:
         kwargs: dict[str, Any] = {}
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools is not None:
+            kwargs["tools"] = tools
         try:
             response = await self._client.chat.completions.create(
                 model=self._settings.model_for(task),

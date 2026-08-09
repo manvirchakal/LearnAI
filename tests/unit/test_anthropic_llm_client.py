@@ -11,7 +11,8 @@ from pydantic import BaseModel
 
 from learnai.config import LLMTask, Settings
 from learnai.errors import UpstreamError
-from learnai.services.llm.anthropic_client import AnthropicLLMClient
+from learnai.services.llm.anthropic_client import AnthropicLLMClient, _wrap_tool
+from learnai.services.llm.client import AgentTool, AgentToolCall
 
 
 class _FakeStream:
@@ -50,8 +51,51 @@ def _text_message(
     )
 
 
+def _beta_message(
+    text: str, *, stop_reason: str = "end_turn", role: str = "assistant"
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        stop_reason=stop_reason,
+        role=role,
+        content=[SimpleNamespace(type="text", text=text)],
+        model="claude-opus-5",
+        usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+    )
+
+
+class _FakeToolRunner:
+    """Mimics ``client.beta.messages.tool_runner``'s async-iterable shape:
+    ``async for message in runner`` plus ``generate_tool_call_response()``
+    called once per yielded message — exactly the two operations
+    ``AnthropicLLMClient._agent_once`` uses to mirror history."""
+
+    def __init__(
+        self, messages: list[SimpleNamespace], tool_responses: list[dict[str, Any] | None]
+    ) -> None:
+        self._messages = messages
+        self._tool_responses = tool_responses
+        self._index = 0
+
+    def __aiter__(self) -> _FakeToolRunner:
+        return self
+
+    async def __anext__(self) -> SimpleNamespace:
+        if self._index >= len(self._messages):
+            raise StopAsyncIteration
+        message = self._messages[self._index]
+        self._index += 1
+        return message
+
+    async def generate_tool_call_response(self) -> dict[str, Any] | None:
+        return self._tool_responses[self._index - 1]
+
+
 class Answer(BaseModel):
     value: str
+
+
+class SearchArgs(BaseModel):
+    query: str
 
 
 @pytest.fixture
@@ -175,3 +219,98 @@ async def test_stream_request_failure_is_wrapped_as_upstream_error(settings: Set
     with pytest.raises(UpstreamError, match="Anthropic request failed"):
         async for _ in client.stream(task=LLMTask.narrative, prompt="hi"):
             pass
+
+
+async def test_wrap_tool_validates_arguments_and_records_the_call() -> None:
+    calls: list[str] = []
+
+    async def handler(query: str) -> str:
+        calls.append(query)
+        return f"found: {query}"
+
+    tool = AgentTool(
+        name="search", description="search stuff", args_schema=SearchArgs, handler=handler
+    )
+    tool_calls: list[AgentToolCall] = []
+    runnable = _wrap_tool(tool, tool_calls)
+
+    result = await runnable.call({"query": "derivatives"})
+
+    assert result == "found: derivatives"
+    assert calls == ["derivatives"]
+    assert tool_calls == [
+        AgentToolCall(
+            tool_name="search", arguments={"query": "derivatives"}, result="found: derivatives"
+        )
+    ]
+
+
+async def test_agent_returns_final_text_with_no_tool_calls(settings: Settings) -> None:
+    fake_sdk_client = MagicMock()
+    fake_sdk_client.beta.messages.tool_runner.return_value = _FakeToolRunner(
+        [_beta_message("The answer is 42.")], [None]
+    )
+    client = AnthropicLLMClient(fake_sdk_client, settings)
+
+    result = await client.agent(
+        task=LLMTask.chat, system="sys", messages=[{"role": "user", "content": "hi"}], tools=[]
+    )
+
+    assert result.text == "The answer is 42."
+    assert result.tool_calls == []
+
+
+async def test_agent_raises_on_refusal(settings: Settings) -> None:
+    fake_sdk_client = MagicMock()
+    fake_sdk_client.beta.messages.tool_runner.return_value = _FakeToolRunner(
+        [_beta_message("", stop_reason="refusal")], [None]
+    )
+    client = AnthropicLLMClient(fake_sdk_client, settings)
+
+    with pytest.raises(UpstreamError, match="declined"):
+        await client.agent(
+            task=LLMTask.chat, system="sys", messages=[{"role": "user", "content": "hi"}], tools=[]
+        )
+
+
+async def test_agent_restarts_with_mirrored_history_after_pause_turn(settings: Settings) -> None:
+    """The exact gotcha the tool_runner's Python implementation has: a
+    pause_turn with no tool_use silently ends iteration. This asserts the
+    documented fix — mirror history, start a *new* runner — actually
+    happens rather than truncating the answer."""
+    paused = _beta_message("partial answer, still thinking...", stop_reason="pause_turn")
+    final = _beta_message("The complete answer.", stop_reason="end_turn")
+
+    fake_sdk_client = MagicMock()
+    fake_sdk_client.beta.messages.tool_runner.side_effect = [
+        _FakeToolRunner([paused], [None]),
+        _FakeToolRunner([final], [None]),
+    ]
+    client = AnthropicLLMClient(fake_sdk_client, settings)
+
+    result = await client.agent(
+        task=LLMTask.chat, system="sys", messages=[{"role": "user", "content": "hi"}], tools=[]
+    )
+
+    assert result.text == "The complete answer."
+    assert fake_sdk_client.beta.messages.tool_runner.call_count == 2
+    restart_messages = fake_sdk_client.beta.messages.tool_runner.call_args_list[1].kwargs[
+        "messages"
+    ]
+    assert restart_messages[-1] == {"role": "assistant", "content": paused.content}
+
+
+async def test_agent_gives_up_after_max_pause_turn_restarts(settings: Settings) -> None:
+    always_paused = _beta_message("still going...", stop_reason="pause_turn")
+    fake_sdk_client = MagicMock()
+    fake_sdk_client.beta.messages.tool_runner.side_effect = [
+        _FakeToolRunner([always_paused], [None]) for _ in range(10)
+    ]
+    client = AnthropicLLMClient(fake_sdk_client, settings)
+
+    result = await client.agent(
+        task=LLMTask.chat, system="sys", messages=[{"role": "user", "content": "hi"}], tools=[]
+    )
+
+    assert result.text == "still going..."
+    assert fake_sdk_client.beta.messages.tool_runner.call_count == 4  # _MAX_PAUSE_TURN_RESTARTS + 1

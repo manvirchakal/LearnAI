@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from learnai.config import LLMTask
+from learnai.services.llm.client import AgentResult, AgentTool, AgentToolCall
 
 BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
@@ -28,6 +29,12 @@ class FakeLLMClient:
     # exhausted or if never set for that task.
     structured_response_queue: dict[LLMTask, list[BaseModel]] = field(default_factory=dict)
     stream_chunks: dict[LLMTask, list[str]] = field(default_factory=dict)
+    agent_responses: dict[LLMTask, str] = field(default_factory=dict)
+    # Tool calls the fake makes (by name, with raw arguments validated
+    # against the matching AgentTool's schema) before returning
+    # agent_responses[task] — lets a test exercise the citations-from-
+    # search_materials pipeline without a real model deciding to call one.
+    agent_tool_calls: dict[LLMTask, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def complete(self, *, task: LLMTask, prompt: str, system: str | None = None) -> str:
@@ -53,3 +60,22 @@ class FakeLLMClient:
     async def _stream(self, task: LLMTask) -> AsyncIterator[str]:
         for chunk in self.stream_chunks[task]:
             yield chunk
+
+    async def agent(
+        self,
+        *,
+        task: LLMTask,
+        system: str,
+        messages: list[dict[str, str]],
+        tools: list[AgentTool],
+        max_iterations: int = 8,
+    ) -> AgentResult:
+        self.calls.append({"task": task, "system": system, "messages": messages})
+        tool_by_name = {tool.name: tool for tool in tools}
+        tool_calls: list[AgentToolCall] = []
+        for name, raw_arguments in self.agent_tool_calls.get(task, []):
+            tool = tool_by_name[name]
+            arguments = tool.args_schema.model_validate(raw_arguments).model_dump(mode="json")
+            result = await tool.handler(**arguments)
+            tool_calls.append(AgentToolCall(tool_name=name, arguments=arguments, result=result))
+        return AgentResult(text=self.agent_responses[task], tool_calls=tool_calls)
