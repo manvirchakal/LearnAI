@@ -11,6 +11,7 @@ import NavBar from './NavBar';
 import NarrativePanel from '../features/study/NarrativePanel';
 import GamePanel from '../features/study/GamePanel';
 import DiagramPanel from '../features/study/DiagramPanel';
+import ChatPanel from '../features/study/ChatPanel';
 
 const Study = () => {
   const { collectionId } = useParams();
@@ -49,6 +50,7 @@ const Study = () => {
           <Tab label="Narrative" />
           <Tab label="Game" />
           <Tab label="Diagrams" />
+          <Tab label="Chat" />
         </Tabs>
 
         <Box sx={{ display: tab === 0 ? 'block' : 'none' }}>
@@ -59,6 +61,9 @@ const Study = () => {
         </Box>
         <Box sx={{ display: tab === 2 ? 'block' : 'none' }}>
           <DiagramPanel collectionId={collectionId} narrative={narrativeText} />
+        </Box>
+        <Box sx={{ display: tab === 3 ? 'block' : 'none' }}>
+          <ChatPanel collectionId={collectionId} />
         </Box>
       </Box>
     </>
