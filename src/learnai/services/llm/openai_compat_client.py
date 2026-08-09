@@ -13,6 +13,7 @@ plus repair via ``json_repair`` rather than refusing to run.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, TypeVar
 
 import json_repair
@@ -97,6 +98,43 @@ class OpenAICompatLLMClient:
             return schema.model_validate(repaired)
         except ValueError as exc:
             raise UpstreamError(f"could not parse structured output for task {task}") from exc
+
+    def stream(
+        self, *, task: LLMTask, prompt: str, system: str | None = None
+    ) -> AsyncIterator[str]:
+        return self._stream_text(task, self._messages(system, prompt))
+
+    async def _stream_text(self, task: LLMTask, messages: list[Message]) -> AsyncIterator[str]:
+        # Unlike _create(), no token-usage log here: getting usage on a
+        # streamed Chat Completions response needs `stream_options={
+        # "include_usage": True}`, support for which isn't universal across
+        # OpenAI-compatible backends. One more spot this adapter simply does
+        # less than the Anthropic one, per this module's docstring.
+        try:
+            chunks = await self._client.chat.completions.create(
+                model=self._settings.model_for(task),
+                max_tokens=self._settings.max_tokens_for(task),
+                messages=messages,  # type: ignore[arg-type]
+                stream=True,
+            )
+            # The `messages=` shape mismatch below (same as _create()) makes
+            # mypy's overload resolution fall back to the full
+            # ChatCompletion | AsyncStream[ChatCompletionChunk] union rather
+            # than picking the stream=True overload.
+            async for chunk in chunks:  # type: ignore[union-attr]
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except openai.APIStatusError as exc:
+            raise UpstreamError(
+                f"{self._settings.llm_backend} request failed for task {task}: {exc.message}"
+            ) from exc
+        except openai.APIConnectionError as exc:
+            raise UpstreamError(
+                f"{self._settings.llm_backend} connection failed for task {task}"
+            ) from exc
 
     async def _create(
         self,

@@ -39,6 +39,22 @@ def settings() -> Settings:
     )
 
 
+class _FakeChunkStream:
+    """Mimics the async iterable returned by ``create(stream=True)``."""
+
+    def __init__(self, deltas: list[str | None]) -> None:
+        self._deltas = list(deltas)
+
+    def __aiter__(self) -> _FakeChunkStream:
+        return self
+
+    async def __anext__(self) -> SimpleNamespace:
+        if not self._deltas:
+            raise StopAsyncIteration
+        delta = self._deltas.pop(0)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=delta))])
+
+
 def _fake_sdk_client(*responses: object) -> MagicMock:
     fake = MagicMock()
     fake.chat.completions.create = AsyncMock(
@@ -135,3 +151,27 @@ async def test_connection_failure_is_wrapped_as_upstream_error(settings: Setting
 
     with pytest.raises(UpstreamError, match="connection failed"):
         await client.complete(task=LLMTask.profile_description, prompt="hi")
+
+
+async def test_stream_yields_deltas_and_skips_empty_ones(settings: Settings) -> None:
+    fake = _fake_sdk_client(_FakeChunkStream(["Once ", None, "upon ", "", "a time"]))
+    client = OpenAICompatLLMClient(fake, settings)
+
+    chunks = [chunk async for chunk in client.stream(task=LLMTask.narrative, prompt="hi")]
+
+    assert chunks == ["Once ", "upon ", "a time"]
+    assert fake.chat.completions.create.call_args.kwargs["stream"] is True
+
+
+async def test_stream_request_failure_is_wrapped_as_upstream_error(settings: Settings) -> None:
+    request = httpx.Request("POST", "http://localhost:1234/v1/chat/completions")
+    response = httpx.Response(status_code=500, request=request)
+    fake = MagicMock()
+    fake.chat.completions.create = AsyncMock(
+        side_effect=openai.APIStatusError("server error", response=response, body=None)
+    )
+    client = OpenAICompatLLMClient(fake, settings)
+
+    with pytest.raises(UpstreamError, match="request failed"):
+        async for _ in client.stream(task=LLMTask.narrative, prompt="hi"):
+            pass

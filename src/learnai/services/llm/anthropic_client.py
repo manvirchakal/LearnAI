@@ -13,6 +13,7 @@ models that support it and is simply absent on ones that don't.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import TypeVar
 
 import anthropic
@@ -50,6 +51,52 @@ class AnthropicLLMClient:
             return schema.model_validate(json.loads(text))
         except (json.JSONDecodeError, ValueError) as exc:
             raise UpstreamError(f"Anthropic returned invalid structured output for {task}") from exc
+
+    def stream(
+        self, *, task: LLMTask, prompt: str, system: str | None = None
+    ) -> AsyncIterator[str]:
+        return self._stream_text(task=task, prompt=prompt, system=system)
+
+    async def _stream_text(
+        self, *, task: LLMTask, prompt: str, system: str | None
+    ) -> AsyncIterator[str]:
+        kwargs: dict[str, object] = {}
+        if system is not None:
+            kwargs["system"] = system
+
+        try:
+            async with self._client.messages.stream(
+                model=self._settings.model_for(task),
+                max_tokens=self._settings.max_tokens_for(task),
+                messages=[{"role": "user", "content": prompt}],
+                output_config={"effort": self._settings.effort_for(task)},  # type: ignore[arg-type]
+                **kwargs,  # type: ignore[arg-type]
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+                message = await stream.get_final_message()
+        except anthropic.APIStatusError as exc:
+            raise UpstreamError(f"Anthropic request failed for task {task}: {exc.message}") from exc
+        except anthropic.APIConnectionError as exc:
+            raise UpstreamError(f"Anthropic connection failed for task {task}") from exc
+
+        # A refusal (rare, and typically with no text emitted beforehand —
+        # the model declines outright rather than partially answering) is
+        # only knowable from the final message, after every delta above has
+        # already been yielded. The caller (the SSE endpoint) is what turns
+        # this into a client-visible error event appended to the stream.
+        if message.stop_reason == "refusal":
+            raise UpstreamError(f"Anthropic declined the request for task {task}")
+
+        logger.info(
+            "llm_completion",
+            backend="anthropic",
+            task=task,
+            model=message.model,
+            input_tokens=message.usage.input_tokens,
+            output_tokens=message.usage.output_tokens,
+            streamed=True,
+        )
 
     async def _create(
         self,

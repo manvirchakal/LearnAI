@@ -17,8 +17,12 @@ from learnai.services.llm.anthropic_client import AnthropicLLMClient
 class _FakeStream:
     """Mimics the async-context-manager returned by ``client.messages.stream``."""
 
-    def __init__(self, message: object) -> None:
+    def __init__(self, message: object, *, chunks: list[str] | None = None) -> None:
         self._message = message
+        # Assigned once, like the real SDK's own AsyncMessageStream — an
+        # async generator object, consumed with `async for text in
+        # stream.text_stream`.
+        self.text_stream = self._make_text_stream(chunks or [])
 
     async def __aenter__(self) -> _FakeStream:
         return self
@@ -28,6 +32,11 @@ class _FakeStream:
 
     async def get_final_message(self) -> object:
         return self._message
+
+    @staticmethod
+    async def _make_text_stream(chunks: list[str]) -> Any:
+        for chunk in chunks:
+            yield chunk
 
 
 def _text_message(
@@ -54,9 +63,11 @@ def settings() -> Settings:
     )
 
 
-def _client_returning(message: object, settings: Settings) -> AnthropicLLMClient:
+def _client_returning(
+    message: object, settings: Settings, *, chunks: list[str] | None = None
+) -> AnthropicLLMClient:
     fake_sdk_client = MagicMock()
-    fake_sdk_client.messages.stream.return_value = _FakeStream(message)
+    fake_sdk_client.messages.stream.return_value = _FakeStream(message, chunks=chunks)
     return AnthropicLLMClient(fake_sdk_client, settings)
 
 
@@ -130,3 +141,37 @@ async def test_connection_failure_is_wrapped_as_upstream_error(settings: Setting
 
     with pytest.raises(UpstreamError, match="Anthropic connection failed"):
         await client.complete(task=LLMTask.profile_description, prompt="hi")
+
+
+async def test_stream_yields_deltas_in_order(settings: Settings) -> None:
+    message = _text_message("irrelevant — text_stream is what's consumed")
+    client = _client_returning(message, settings, chunks=["Once ", "upon ", "a time"])
+
+    chunks = [chunk async for chunk in client.stream(task=LLMTask.narrative, prompt="hi")]
+
+    assert chunks == ["Once ", "upon ", "a time"]
+
+
+async def test_stream_raises_on_refusal_after_yielding_nothing(settings: Settings) -> None:
+    message = _text_message("", stop_reason="refusal")
+    client = _client_returning(message, settings, chunks=[])
+
+    with pytest.raises(UpstreamError, match="declined"):
+        async for _ in client.stream(task=LLMTask.narrative, prompt="hi"):
+            pass
+
+
+async def test_stream_request_failure_is_wrapped_as_upstream_error(settings: Settings) -> None:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(status_code=500, request=request)
+
+    def _raise(*args: Any, **kwargs: Any) -> None:
+        raise anthropic.APIStatusError("server error", response=response, body=None)
+
+    fake_sdk_client = MagicMock()
+    fake_sdk_client.messages.stream.side_effect = _raise
+    client = AnthropicLLMClient(fake_sdk_client, settings)
+
+    with pytest.raises(UpstreamError, match="Anthropic request failed"):
+        async for _ in client.stream(task=LLMTask.narrative, prompt="hi"):
+            pass
