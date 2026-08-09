@@ -73,3 +73,9 @@ def test_diagrams_includes_content_and_optional_narrative() -> None:
     )
     assert "Mitosis has four phases." in with_narrative
     assert "Summary already written" in with_narrative
+
+
+def test_chat_system_includes_profile() -> None:
+    prompt = render("chat_system.j2", learning_profile="auditory learner")
+    assert "auditory learner" in prompt
+    assert "search_materials" in prompt
