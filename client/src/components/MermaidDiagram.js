@@ -10,7 +10,9 @@ const MermaidDiagram = ({ chart, index }) => {
     mermaid.initialize({
       startOnLoad: true,
       theme: 'default',
-      securityLevel: 'loose',
+      // 'strict' sanitizes label text (no raw HTML/script injection from
+      // generated diagram content) — 'loose' had no reason to be set here.
+      securityLevel: 'strict',
       htmlLabels: true,
       fontSize: 16,
       flowchart: {

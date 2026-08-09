@@ -39,7 +39,7 @@ function App() {
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
-              <Route path="/study" element={<RequireAuth><Study /></RequireAuth>} />
+              <Route path="/study/:collectionId" element={<RequireAuth><Study /></RequireAuth>} />
               <Route path="/questionnaire" element={<RequireAuth><Questionnaire /></RequireAuth>} />
               <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
               <Route path="/materials/:materialId" element={<RequireAuth><Reader /></RequireAuth>} />

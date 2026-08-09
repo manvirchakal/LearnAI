@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -13,6 +14,7 @@ import apiClient from '../api/client';
 import NavBar from './NavBar';
 
 const Collections = () => {
+  const navigate = useNavigate();
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -88,12 +90,25 @@ const Collections = () => {
             {collections.map((collection) => (
               <ListItem
                 key={collection.id}
-                sx={{ border: '1px solid #ddd', borderRadius: 1, mb: 1 }}
+                sx={{
+                  border: '1px solid #ddd',
+                  borderRadius: 1,
+                  mb: 1,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                }}
               >
                 <ListItemText
                   primary={collection.name}
                   secondary={`${collection.kind} · ${collection.material_refs.length} material(s)`}
                 />
+                <Button
+                  size="small"
+                  disabled={collection.material_refs.length === 0}
+                  onClick={() => navigate(`/study/${collection.id}`)}
+                >
+                  Study
+                </Button>
               </ListItem>
             ))}
           </List>

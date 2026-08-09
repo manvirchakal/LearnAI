@@ -91,7 +91,10 @@ const Questionnaire = () => {
         questionnaire_version: 1,
       });
 
-      navigate('/study');
+      // Study is per-collection now (see App.js's /study/:collectionId
+      // route) — there's no specific collection to jump into right after
+      // the questionnaire, so send the user to pick or create one instead.
+      navigate('/collections');
     } catch (err) {
       console.error('Error saving learning profile:', err);
       setError('Something went wrong saving your profile. Please try again.');
