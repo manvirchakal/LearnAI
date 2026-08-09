@@ -32,6 +32,7 @@ from learnai.http_errors import register_exception_handlers
 from learnai.logging import bind_request_id, configure_logging, get_logger, new_request_id
 from learnai.routers.auth import router as auth_router
 from learnai.routers.collections import router as collections_router
+from learnai.routers.generation import router as generation_router
 from learnai.routers.jobs import router as jobs_router
 from learnai.routers.materials import router as materials_router
 from learnai.routers.profile import router as profile_router
@@ -235,6 +236,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(profile_router)
     app.include_router(collections_router)
+    app.include_router(generation_router)
     app.include_router(jobs_router)
     app.include_router(materials_router)
 

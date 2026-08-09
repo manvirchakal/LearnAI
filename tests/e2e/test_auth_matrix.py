@@ -34,6 +34,9 @@ PROTECTED_ROUTES: list[tuple[str, str, dict[str, object] | None]] = [
     ("GET", "/api/v1/materials/000000000000000000000000", None),
     ("GET", "/api/v1/materials/000000000000000000000000/tree", None),
     ("GET", "/api/v1/materials/000000000000000000000000/sections/1", None),
+    ("GET", "/api/v1/collections/000000000000000000000000/narrative", None),
+    ("POST", "/api/v1/collections/000000000000000000000000/game", None),
+    ("POST", "/api/v1/collections/000000000000000000000000/diagrams", None),
 ]
 
 
