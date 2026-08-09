@@ -21,14 +21,35 @@ import os
 import anthropic
 import openai
 import pytest
+from pydantic import BaseModel
 
 from learnai.config import LLMTask, Settings
 from learnai.services.llm.anthropic_client import AnthropicLLMClient
+from learnai.services.llm.client import AgentTool
 from learnai.services.llm.openai_compat_client import OpenAICompatLLMClient
 
 pytestmark = pytest.mark.live
 
 _PROMPT = "Reply with exactly the word: ok"
+
+
+class _EchoArgs(BaseModel):
+    text: str
+
+
+async def _echo(text: str) -> str:
+    return f"echoed: {text}"
+
+
+_ECHO_TOOL = AgentTool(
+    name="echo",
+    description="Echoes back the given text, prefixed with 'echoed: '.",
+    args_schema=_EchoArgs,
+    handler=_echo,
+)
+_AGENT_PROMPT = (
+    "Call the echo tool with text set to 'hello world', then tell me exactly what it returned."
+)
 
 # tests/conftest.py sets this placeholder via os.environ.setdefault so the
 # rest of the suite can construct Settings() without a real key — it must
@@ -65,6 +86,27 @@ async def test_anthropic_adapter_streams_a_real_request() -> None:
     chunks = [chunk async for chunk in client.stream(task=LLMTask.narrative, prompt=_PROMPT)]
 
     assert "".join(chunks).strip()
+
+
+@pytest.mark.skipif(
+    os.environ.get("ANTHROPIC_API_KEY", "") in ("", _PLACEHOLDER_ANTHROPIC_KEY),
+    reason="no real ANTHROPIC_API_KEY set",
+)
+async def test_anthropic_adapter_agent_invokes_a_stub_tool() -> None:
+    settings = Settings(
+        google_client_id="live-test", session_secret="a-test-secret-at-least-32-bytes-long"
+    )
+    client = AnthropicLLMClient(anthropic.AsyncAnthropic(), settings)
+
+    result = await client.agent(
+        task=LLMTask.chat,
+        system="You must use the echo tool to answer the user's request.",
+        messages=[{"role": "user", "content": _AGENT_PROMPT}],
+        tools=[_ECHO_TOOL],
+    )
+
+    assert any(call.tool_name == "echo" for call in result.tool_calls)
+    assert result.text.strip()
 
 
 @pytest.mark.skipif(
@@ -109,3 +151,31 @@ async def test_openai_compatible_adapter_streams_a_real_request() -> None:
     chunks = [chunk async for chunk in client.stream(task=LLMTask.narrative, prompt=_PROMPT)]
 
     assert "".join(chunks).strip()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("LLM_BASE_URL"),
+    reason="no LLM_BASE_URL set (a local OpenAI-compatible endpoint — LM Studio, vLLM, Ollama)",
+)
+async def test_openai_compatible_adapter_agent_invokes_a_stub_tool() -> None:
+    settings = Settings(
+        google_client_id="live-test",
+        session_secret="a-test-secret-at-least-32-bytes-long",
+        llm_backend="openai_compatible",
+        llm_base_url=os.environ["LLM_BASE_URL"],
+        llm_model_default=os.environ.get("LLM_MODEL_DEFAULT", "local-model"),
+    )
+    sdk_client = openai.AsyncOpenAI(
+        api_key=settings.generation_api_key() or "not-needed", base_url=settings.llm_base_url
+    )
+    client = OpenAICompatLLMClient(sdk_client, settings)
+
+    result = await client.agent(
+        task=LLMTask.chat,
+        system="You must use the echo tool to answer the user's request.",
+        messages=[{"role": "user", "content": _AGENT_PROMPT}],
+        tools=[_ECHO_TOOL],
+    )
+
+    assert any(call.tool_name == "echo" for call in result.tool_calls)
+    assert result.text.strip()
