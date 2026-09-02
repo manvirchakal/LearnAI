@@ -144,6 +144,7 @@ module = [
     "pymupdf.*",
     "pptx.*",
     "aiofiles.*",
+    "yt_dlp.*",
 ]
 ignore_missing_imports = true
 
