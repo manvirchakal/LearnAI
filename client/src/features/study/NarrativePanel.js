@@ -2,9 +2,28 @@
 // endpoint — via a raw fetch + ReadableStream rather than EventSource, so
 // errors (an `event: error` block, sent after a 200 has already gone out —
 // see routers/generation.py) get parsed the same way as ordinary chunks.
+//
+// Listen/Translate call the Phase 7 media endpoints directly on whatever
+// text is currently shown (the translated text once there is one, so
+// "Listen" after "Translate" reads the translation aloud).
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Box, Button, CircularProgress, Typography } from '@mui/material';
-import { API_BASE_URL } from '../../api/client';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  MenuItem,
+  Select,
+  Typography,
+} from '@mui/material';
+import apiClient, { API_BASE_URL } from '../../api/client';
+
+const LANGUAGES = [
+  { code: 'en-US', label: 'English' },
+  { code: 'es-ES', label: 'Spanish' },
+  { code: 'fr-FR', label: 'French' },
+  { code: 'de-DE', label: 'German' },
+];
 
 function parseBlock(block) {
   const isError = block.startsWith('event: error');
@@ -23,6 +42,12 @@ const NarrativePanel = ({ collectionId, onText }) => {
   const [started, setStarted] = useState(false);
   const [error, setError] = useState(null);
 
+  const [language, setLanguage] = useState('en-US');
+  const [translatedText, setTranslatedText] = useState(null);
+  const [translating, setTranslating] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [mediaError, setMediaError] = useState(null);
+
   useEffect(() => {
     onText?.(text);
   }, [text, onText]);
@@ -32,6 +57,7 @@ const NarrativePanel = ({ collectionId, onText }) => {
     setStreaming(true);
     setError(null);
     setText('');
+    setTranslatedText(null);
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/v1/collections/${collectionId}/narrative`,
@@ -68,6 +94,49 @@ const NarrativePanel = ({ collectionId, onText }) => {
     }
   }, [collectionId]);
 
+  const handleLanguageChange = (event) => {
+    setLanguage(event.target.value);
+    setTranslatedText(null);
+  };
+
+  const handleTranslate = useCallback(async () => {
+    setMediaError(null);
+    setTranslating(true);
+    try {
+      const { data } = await apiClient.post('/api/v1/media/translate', {
+        text,
+        target_language: language,
+      });
+      setTranslatedText(data.translated_text);
+    } catch (err) {
+      console.error('Error translating narrative:', err);
+      setMediaError('Failed to translate this narrative.');
+    } finally {
+      setTranslating(false);
+    }
+  }, [text, language]);
+
+  const handleListen = useCallback(async () => {
+    setMediaError(null);
+    setSpeaking(true);
+    try {
+      const response = await apiClient.post(
+        '/api/v1/media/tts',
+        { text: translatedText || text, language },
+        { responseType: 'blob' }
+      );
+      const url = URL.createObjectURL(response.data);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch (err) {
+      console.error('Error synthesizing speech:', err);
+      setMediaError('No voice is available for this language.');
+    } finally {
+      setSpeaking(false);
+    }
+  }, [text, translatedText, language]);
+
   return (
     <Box>
       {!started && (
@@ -87,10 +156,40 @@ const NarrativePanel = ({ collectionId, onText }) => {
         </Alert>
       )}
       {text && <Typography sx={{ whiteSpace: 'pre-wrap', mt: 2 }}>{text}</Typography>}
-      {started && !streaming && text && (
-        <Button size="small" onClick={generate} sx={{ mt: 2 }}>
-          Regenerate
-        </Button>
+      {translatedText && (
+        <Typography sx={{ whiteSpace: 'pre-wrap', mt: 2, fontStyle: 'italic' }}>
+          {translatedText}
+        </Typography>
+      )}
+
+      {text && !streaming && (
+        <Box sx={{ mt: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Select size="small" value={language} onChange={handleLanguageChange}>
+            {LANGUAGES.map((option) => (
+              <MenuItem key={option.code} value={option.code}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </Select>
+          <Button size="small" onClick={handleListen} disabled={speaking}>
+            {speaking ? 'Loading…' : 'Listen'}
+          </Button>
+          <Button
+            size="small"
+            onClick={handleTranslate}
+            disabled={translating || language === 'en-US'}
+          >
+            {translating ? 'Translating…' : 'Translate'}
+          </Button>
+          <Button size="small" onClick={generate}>
+            Regenerate
+          </Button>
+        </Box>
+      )}
+      {mediaError && (
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          {mediaError}
+        </Alert>
       )}
     </Box>
   );

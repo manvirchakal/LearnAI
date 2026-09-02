@@ -15,6 +15,7 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  TextField,
   Typography,
 } from '@mui/material';
 import apiClient from '../api/client';
@@ -42,6 +43,9 @@ const Upload = () => {
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadingLecture, setUploadingLecture] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [importingYoutube, setImportingYoutube] = useState(false);
   const navigate = useNavigate();
   const pollTimers = useRef(new Set());
 
@@ -114,8 +118,52 @@ const Upload = () => {
     }
   };
 
+  const handleLectureSelected = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setError(null);
+    setUploadingLecture(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await apiClient.post('/api/v1/media/lectures', formData);
+      await fetchMaterials();
+      pollUntilSettled(data.material_id);
+    } catch (err) {
+      console.error('Error uploading lecture:', err);
+      setError(err.response?.data?.detail || 'Failed to upload lecture.');
+    } finally {
+      setUploadingLecture(false);
+    }
+  };
+
+  const handleYoutubeImport = async (event) => {
+    event.preventDefault();
+    const url = youtubeUrl.trim();
+    if (!url) return;
+
+    setError(null);
+    setImportingYoutube(true);
+    try {
+      const { data } = await apiClient.post('/api/v1/media/youtube', { url });
+      setYoutubeUrl('');
+      await fetchMaterials();
+      pollUntilSettled(data.material_id);
+    } catch (err) {
+      console.error('Error importing YouTube video:', err);
+      setError(err.response?.data?.detail || 'Failed to import that video.');
+    } finally {
+      setImportingYoutube(false);
+    }
+  };
+
   const openMaterial = (material) => {
-    if (material.status === 'toc_ready') {
+    // Lecture transcripts have no page-based reader view yet — they're
+    // studied through a collection (Study.js), same as a PDF's chapters,
+    // just not individually browsable here.
+    if (material.status === 'toc_ready' && material.kind !== 'lecture') {
       navigate(`/materials/${material.id}`);
     }
   };
@@ -132,13 +180,42 @@ const Upload = () => {
           contents in the background.
         </Typography>
 
-        <Button variant="contained" component="label" disabled={uploading} sx={{ mb: 1 }}>
-          {uploading ? `Uploading… ${uploadProgress}%` : 'Choose PDF'}
-          <input type="file" accept="application/pdf" hidden onChange={handleFileSelected} />
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+          <Button variant="contained" component="label" disabled={uploading}>
+            {uploading ? `Uploading… ${uploadProgress}%` : 'Choose PDF'}
+            <input type="file" accept="application/pdf" hidden onChange={handleFileSelected} />
+          </Button>
+          <Button variant="outlined" component="label" disabled={uploadingLecture}>
+            {uploadingLecture ? 'Uploading…' : 'Upload lecture (audio/video)'}
+            <input
+              type="file"
+              accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav,video/mp4"
+              hidden
+              onChange={handleLectureSelected}
+            />
+          </Button>
+        </Box>
         {uploading && (
           <LinearProgress variant="determinate" value={uploadProgress} sx={{ mb: 2 }} />
         )}
+
+        <Box component="form" onSubmit={handleYoutubeImport} sx={{ display: 'flex', gap: 1, mb: 2 }}>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Paste a YouTube URL to import its audio as a lecture"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            disabled={importingYoutube}
+          />
+          <Button
+            type="submit"
+            variant="outlined"
+            disabled={importingYoutube || !youtubeUrl.trim()}
+          >
+            {importingYoutube ? 'Importing…' : 'Import'}
+          </Button>
+        </Box>
 
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -161,7 +238,7 @@ const Upload = () => {
               <ListItemButton
                 key={material.id}
                 onClick={() => openMaterial(material)}
-                disabled={material.status !== 'toc_ready'}
+                disabled={material.status !== 'toc_ready' || material.kind === 'lecture'}
                 sx={{
                   border: '1px solid #ddd',
                   borderRadius: 1,
@@ -180,11 +257,16 @@ const Upload = () => {
                         : null
                   }
                 />
-                <Chip
-                  size="small"
-                  label={STATUS_LABEL[material.status] || material.status}
-                  color={STATUS_COLOR[material.status] || 'default'}
-                />
+                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                  {material.kind === 'lecture' && (
+                    <Chip size="small" label="Lecture" variant="outlined" />
+                  )}
+                  <Chip
+                    size="small"
+                    label={STATUS_LABEL[material.status] || material.status}
+                    color={STATUS_COLOR[material.status] || 'default'}
+                  />
+                </Box>
               </ListItemButton>
             ))}
           </List>
