@@ -11,6 +11,7 @@ from learnai.db.migrations import (
     m0003_jobs_indexes,
     m0004_artifacts_indexes,
     m0005_chat_indexes,
+    m0006_translations_indexes,
 )
 from learnai.db.migrations._runner import Migration, apply_pending
 
@@ -20,6 +21,7 @@ ALL_MIGRATIONS: list[Migration] = [
     m0003_jobs_indexes,
     m0004_artifacts_indexes,
     m0005_chat_indexes,
+    m0006_translations_indexes,
 ]
 
 __all__ = ["ALL_MIGRATIONS", "apply_pending"]

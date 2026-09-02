@@ -66,6 +66,7 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
         "0003_jobs_indexes",
         "0004_artifacts_indexes",
         "0005_chat_indexes",
+        "0006_translations_indexes",
     ]
 
     users_indexes = await db["users"].index_information()
@@ -101,6 +102,9 @@ async def test_migrations_create_expected_indexes(db: Database) -> None:
     chat_message_indexes = await db["chat_messages"].index_information()
     assert chat_message_indexes["owner_id_1_conversation_id_1_seq_1"]["unique"] is True
 
+    translation_indexes = await db["translations"].index_information()
+    assert translation_indexes["owner_id_1_text_hash_1_target_language_1"]["unique"] is True
+
 
 async def test_migrations_are_idempotent(db: Database) -> None:
     first = await apply_pending(db, ALL_MIGRATIONS)
@@ -112,6 +116,7 @@ async def test_migrations_are_idempotent(db: Database) -> None:
         "0003_jobs_indexes",
         "0004_artifacts_indexes",
         "0005_chat_indexes",
+        "0006_translations_indexes",
     ]
     assert second == []  # already recorded applied — apply() not re-run
 

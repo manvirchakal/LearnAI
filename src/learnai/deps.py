@@ -25,6 +25,7 @@ from learnai.repositories.learning_profiles import LearningProfileRepository
 from learnai.repositories.materials import MaterialRepository
 from learnai.repositories.sections import SectionRepository
 from learnai.repositories.sessions import SessionRepository
+from learnai.repositories.translations import TranslationRepository
 from learnai.repositories.users import UserRepository
 from learnai.services.auth.session import SessionService
 from learnai.services.extraction.base import DocumentExtractor
@@ -185,3 +186,10 @@ def get_chat_message_repo(user: CurrentUser, db: DbDep) -> ChatMessageRepository
 
 
 ChatMessageRepoDep = Annotated[ChatMessageRepository, Depends(get_chat_message_repo)]
+
+
+def get_translation_repo(user: CurrentUser, db: DbDep) -> TranslationRepository:
+    return TranslationRepository(db, user["_id"])
+
+
+TranslationRepoDep = Annotated[TranslationRepository, Depends(get_translation_repo)]

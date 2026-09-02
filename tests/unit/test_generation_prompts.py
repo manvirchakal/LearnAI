@@ -79,3 +79,9 @@ def test_chat_system_includes_profile() -> None:
     prompt = render("chat_system.j2", learning_profile="auditory learner")
     assert "auditory learner" in prompt
     assert "search_materials" in prompt
+
+
+def test_translation_includes_text_and_target_language() -> None:
+    prompt = render("translation.j2", text="The limit of a function.", target_language="es-ES")
+    assert "The limit of a function." in prompt
+    assert "es-ES" in prompt
