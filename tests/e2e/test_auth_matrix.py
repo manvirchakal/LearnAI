@@ -39,6 +39,9 @@ PROTECTED_ROUTES: list[tuple[str, str, dict[str, object] | None]] = [
     ("POST", "/api/v1/collections/000000000000000000000000/diagrams", None),
     ("GET", "/api/v1/collections/000000000000000000000000/chat", None),
     ("POST", "/api/v1/collections/000000000000000000000000/chat", {"message": "hi"}),
+    ("POST", "/api/v1/media/youtube", {"url": "https://youtube.com/watch?v=abc"}),
+    ("POST", "/api/v1/media/translate", {"text": "hi", "target_language": "fr-FR"}),
+    ("POST", "/api/v1/media/tts", {"text": "hi", "language": "en-US"}),
 ]
 
 
