@@ -123,6 +123,18 @@ class Settings(BaseSettings):
     whisper_model: str = "distil-large-v3"
     whisper_compute_type: str = "int8"
     piper_voice_dir: Path = Path("/data/models/piper")
+    # Language -> Piper voice model filename (relative to piper_voice_dir;
+    # PiperVoice.load reads the matching "<file>.json" config alongside it).
+    # The exact four languages the old Polly integration covered
+    # (Joanna/Conchita/Celine/Marlene) — see server/main.py's voice_map.
+    piper_voice_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "en-US": "en_US-lessac-medium.onnx",
+            "es-ES": "es_ES-davefx-medium.onnx",
+            "fr-FR": "fr_FR-siwis-medium.onnx",
+            "de-DE": "de_DE-thorsten-medium.onnx",
+        }
+    )
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
 

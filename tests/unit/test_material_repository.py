@@ -26,6 +26,56 @@ async def test_create_then_get(db: FakeAsyncDatabase) -> None:
     assert doc["status"] == "uploaded"
     assert doc["page_count"] is None
     assert doc["tree"] is None
+    assert doc["kind"] == "pdf"
+
+
+async def test_create_lecture_defaults_kind_explicitly(db: FakeAsyncDatabase) -> None:
+    repo = MaterialRepository(db, ObjectId())  # type: ignore[arg-type]
+
+    material_id = await repo.create(
+        filename="lecture.mp3",
+        content_type="audio/mpeg",
+        storage_key="k1",
+        size_bytes=1024,
+        kind="lecture",
+    )
+
+    doc = await repo.get(material_id)
+    assert doc["kind"] == "lecture"
+
+
+async def test_update_source_fills_in_real_metadata(db: FakeAsyncDatabase) -> None:
+    repo = MaterialRepository(db, ObjectId())  # type: ignore[arg-type]
+    material_id = await repo.create(
+        filename="https://youtube.com/watch?v=abc",
+        content_type="audio/mp4",
+        storage_key="youtube:abc",
+        size_bytes=0,
+        kind="lecture",
+    )
+
+    await repo.update_source(
+        material_id,
+        filename="Lecture 1 - Limits.mp3",
+        content_type="audio/mpeg",
+        storage_key="media/owner/abc.mp3",
+        size_bytes=4096,
+    )
+
+    doc = await repo.get(material_id)
+    assert doc["filename"] == "Lecture 1 - Limits.mp3"
+    assert doc["content_type"] == "audio/mpeg"
+    assert doc["storage_key"] == "media/owner/abc.mp3"
+    assert doc["size_bytes"] == 4096
+    assert doc["kind"] == "lecture"  # untouched by update_source
+
+
+async def test_update_source_on_missing_material_raises_not_found(db: FakeAsyncDatabase) -> None:
+    repo = MaterialRepository(db, ObjectId())  # type: ignore[arg-type]
+    with pytest.raises(NotFound):
+        await repo.update_source(
+            ObjectId(), filename="a", content_type="a", storage_key="a", size_bytes=1
+        )
 
 
 async def test_get_of_missing_material_raises_not_found(db: FakeAsyncDatabase) -> None:

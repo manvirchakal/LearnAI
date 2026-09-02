@@ -54,6 +54,7 @@ class MaterialOut(BaseModel):
     filename: str
     content_type: str
     size_bytes: int
+    kind: str
     status: MaterialStatus
     page_count: int | None
     error: str | None
@@ -73,6 +74,7 @@ def _material_out(doc: dict[str, Any]) -> MaterialOut:
         filename=doc["filename"],
         content_type=doc["content_type"],
         size_bytes=doc["size_bytes"],
+        kind=doc.get("kind", "pdf"),
         status=doc["status"],
         page_count=doc["page_count"],
         error=doc["error"],
