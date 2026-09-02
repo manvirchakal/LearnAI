@@ -72,7 +72,7 @@ async def get_or_extract_section(
     await sections.upsert(material_id, section)
 
     try:
-        await _index_section(
+        await index_section(
             section,
             material_id=material_id,
             node=node,
@@ -96,7 +96,7 @@ async def get_or_extract_section(
     return section
 
 
-async def _index_section(
+async def index_section(
     section: SectionContent,
     *,
     material_id: ObjectId,
@@ -107,6 +107,11 @@ async def _index_section(
     settings: Settings,
     owner_id: ObjectId,
 ) -> None:
+    """Chunks, embeds, and upserts one section's content into the vector
+    store. Public (unlike the rest of this lazy-extraction module) because
+    ``worker.tasks.transcribe_lecture_task`` reuses it directly — a
+    transcribed lecture's sections are indexed eagerly, right after
+    transcription, rather than lazily on first read like a PDF's."""
     chunks = chunk_section(
         section,
         material_id=material_id,
