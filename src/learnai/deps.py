@@ -33,6 +33,7 @@ from learnai.services.llm.client import LLMClient
 from learnai.services.retrieval.embedder import Embedder
 from learnai.services.retrieval.vector_store import VectorStore
 from learnai.services.storage.base import StorageBackend
+from learnai.services.tts import TTSEngine
 
 # Cookie names, shared between the auth router (which sets/clears them) and
 # get_current_user (which reads the access cookie). Not settings — these are
@@ -76,6 +77,11 @@ def get_embedder(request: Request) -> Embedder:
     return embedder
 
 
+def get_tts_engine(request: Request) -> TTSEngine:
+    tts_engine: TTSEngine = request.app.state.tts_engine
+    return tts_engine
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StorageDep = Annotated[StorageBackend, Depends(get_storage)]
 LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
@@ -83,6 +89,7 @@ ExtractorDep = Annotated[DocumentExtractor, Depends(get_extractor)]
 ArqPoolDep = Annotated[ArqRedis, Depends(get_arq_pool)]
 VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
 EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
+TTSEngineDep = Annotated[TTSEngine, Depends(get_tts_engine)]
 
 # Internal building block for repository/service providers below. Routers
 # should depend on a repository/service type, never on DbDep directly — that

@@ -36,6 +36,7 @@ from learnai.routers.collections import router as collections_router
 from learnai.routers.generation import router as generation_router
 from learnai.routers.jobs import router as jobs_router
 from learnai.routers.materials import router as materials_router
+from learnai.routers.media import router as media_router
 from learnai.routers.profile import router as profile_router
 from learnai.services.extraction.anthropic_pdf import AnthropicPDFExtractor
 from learnai.services.extraction.base import DocumentExtractor
@@ -50,6 +51,7 @@ from learnai.services.retrieval.vector_store import (
 )
 from learnai.services.storage.base import StorageBackend
 from learnai.services.storage.local import LocalFilesystemStorage
+from learnai.services.tts import PiperTTS, TTSEngine
 
 
 def _build_storage(settings: Settings) -> StorageBackend:
@@ -143,6 +145,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # never fail startup itself.
     embedder: Embedder = FastEmbedEmbedder(settings.embedding_model)
     app.state.embedder = embedder
+    # Same deferred-load reasoning — see PiperTTS's own docstring.
+    tts_engine: TTSEngine = PiperTTS(settings.piper_voice_dir, settings.piper_voice_map)
+    app.state.tts_engine = tts_engine
 
     # redis-py's `from_url` lacks a return-type annotation upstream.
     app.state.redis_client = redis.from_url(  # type: ignore[no-untyped-call]
@@ -241,6 +246,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(jobs_router)
     app.include_router(materials_router)
+    app.include_router(media_router)
 
     @app.get("/health/live", tags=["health"])
     async def health_live() -> dict[str, str]:
