@@ -19,10 +19,11 @@ from collections.abc import AsyncIterator
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from learnai.config import QuotaKind
 from learnai.deps import (
     ArtifactRepoDep,
     CollectionRepoDep,
@@ -36,6 +37,8 @@ from learnai.deps import (
     SettingsDep,
     StorageDep,
     VectorStoreDep,
+    daily_quota,
+    enforce_rate_limit,
 )
 from learnai.errors import AppError, ValidationError
 from learnai.repositories.learning_profiles import LearningProfileRepository
@@ -45,7 +48,13 @@ from learnai.services.generation.diagrams import generate_diagrams
 from learnai.services.generation.game import generate_game
 from learnai.services.generation.narrative import stream_narrative
 
-router = APIRouter(prefix="/api/v1/collections", tags=["generation"])
+# Every endpoint here spends model tokens, so the generation quota applies
+# router-wide rather than per-handler (see deps.py's daily_quota).
+router = APIRouter(
+    prefix="/api/v1/collections",
+    tags=["generation"],
+    dependencies=[Depends(enforce_rate_limit), Depends(daily_quota(QuotaKind.generation))],
+)
 
 _NO_PROFILE_DESCRIPTION = "No stated learning-style preference yet."
 

@@ -13,9 +13,10 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from pydantic import BaseModel, Field
 
+from learnai.config import QuotaKind
 from learnai.deps import (
     ArqPoolDep,
     CurrentUser,
@@ -25,12 +26,20 @@ from learnai.deps import (
     StorageDep,
     TranslationRepoDep,
     TTSEngineDep,
+    daily_quota,
+    enforce_rate_limit,
 )
 from learnai.errors import ValidationError
 from learnai.services.ingestion.media import ALLOWED_LECTURE_CONTENT_TYPES
 from learnai.services.translation import translate_text
 
-router = APIRouter(prefix="/api/v1/media", tags=["media"])
+# Quotas are per-endpoint here because this router's surfaces spend
+# different things: uploads/imports spend transcription compute and
+# storage, translate spends model tokens, and TTS is local synthesis that
+# costs nothing but CPU — so it carries the rate limit alone.
+router = APIRouter(
+    prefix="/api/v1/media", tags=["media"], dependencies=[Depends(enforce_rate_limit)]
+)
 
 _MAX_LECTURE_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MiB — generous for an hour+ of audio/video
 
@@ -59,7 +68,12 @@ class TTSRequest(BaseModel):
     language: str = Field(min_length=1)
 
 
-@router.post("/lectures", response_model=UploadAccepted, status_code=202)
+@router.post(
+    "/lectures",
+    response_model=UploadAccepted,
+    status_code=202,
+    dependencies=[Depends(daily_quota(QuotaKind.ingestion))],
+)
 async def upload_lecture(
     user: CurrentUser,
     materials: MaterialRepoDep,
@@ -102,7 +116,12 @@ async def upload_lecture(
     )
 
 
-@router.post("/youtube", response_model=UploadAccepted, status_code=202)
+@router.post(
+    "/youtube",
+    response_model=UploadAccepted,
+    status_code=202,
+    dependencies=[Depends(daily_quota(QuotaKind.ingestion))],
+)
 async def import_youtube(
     body: YouTubeImportRequest,
     user: CurrentUser,
@@ -141,7 +160,11 @@ async def import_youtube(
     )
 
 
-@router.post("/translate", response_model=TranslateResponse)
+@router.post(
+    "/translate",
+    response_model=TranslateResponse,
+    dependencies=[Depends(daily_quota(QuotaKind.generation))],
+)
 async def translate(
     body: TranslateRequest, translations: TranslationRepoDep, llm: LLMClientDep
 ) -> TranslateResponse:

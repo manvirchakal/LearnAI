@@ -12,14 +12,21 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from learnai.config import LLMTask
-from learnai.deps import LearningProfileRepoDep, LLMClientDep
+from learnai.config import LLMTask, QuotaKind
+from learnai.deps import (
+    LearningProfileRepoDep,
+    LLMClientDep,
+    daily_quota,
+    enforce_rate_limit,
+)
 from learnai.services.llm.prompts import render
 
-router = APIRouter(prefix="/api/v1/profile", tags=["profile"])
+router = APIRouter(
+    prefix="/api/v1/profile", tags=["profile"], dependencies=[Depends(enforce_rate_limit)]
+)
 
 
 class ProfileSubmission(BaseModel):
@@ -54,7 +61,12 @@ async def get_profile(repo: LearningProfileRepoDep) -> ProfileOut | None:
     return _profile_out(doc) if doc is not None else None
 
 
-@router.put("", response_model=ProfileOut)
+# Submitting generates the description with the LLM (see the module
+# docstring), so it counts against the generation quota; reading it back
+# does not.
+@router.put(
+    "", response_model=ProfileOut, dependencies=[Depends(daily_quota(QuotaKind.generation))]
+)
 async def submit_profile(
     body: ProfileSubmission, repo: LearningProfileRepoDep, llm: LLMClientDep
 ) -> ProfileOut:

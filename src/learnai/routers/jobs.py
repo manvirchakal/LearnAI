@@ -11,14 +11,14 @@ from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from learnai.deps import JobRepoDep
+from learnai.deps import JobRepoDep, enforce_rate_limit
 from learnai.errors import ValidationError
 from learnai.repositories.jobs import JobStatus
 
-router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
+router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"], dependencies=[Depends(enforce_rate_limit)])
 
 
 class JobOut(BaseModel):

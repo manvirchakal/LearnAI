@@ -14,14 +14,16 @@ from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from learnai.deps import CollectionRepoDep
+from learnai.deps import CollectionRepoDep, enforce_rate_limit
 from learnai.errors import ValidationError
 from learnai.repositories.collections import CollectionKind
 
-router = APIRouter(prefix="/api/v1/collections", tags=["collections"])
+router = APIRouter(
+    prefix="/api/v1/collections", tags=["collections"], dependencies=[Depends(enforce_rate_limit)]
+)
 
 
 def _object_id(value: str) -> ObjectId:

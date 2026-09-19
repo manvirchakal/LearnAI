@@ -10,8 +10,9 @@ from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from learnai.config import QuotaKind
 from learnai.deps import (
     ArtifactRepoDep,
     ChatMessageRepoDep,
@@ -27,12 +28,16 @@ from learnai.deps import (
     SettingsDep,
     StorageDep,
     VectorStoreDep,
+    daily_quota,
+    enforce_rate_limit,
 )
 from learnai.errors import ValidationError
 from learnai.schemas.chat import ChatCitation, ChatMessageOut, ChatRequest
 from learnai.services.agent.chat_agent import send_message
 
-router = APIRouter(prefix="/api/v1/collections", tags=["chat"])
+router = APIRouter(
+    prefix="/api/v1/collections", tags=["chat"], dependencies=[Depends(enforce_rate_limit)]
+)
 
 
 def _object_id(value: str) -> ObjectId:
@@ -66,7 +71,13 @@ async def get_chat_history(
     return [_message_out(doc) for doc in messages]
 
 
-@router.post("/{collection_id}/chat", response_model=ChatMessageOut)
+# Only the POST spends model tokens — reading history back is free, so it
+# carries the router-wide rate limit but not the generation quota.
+@router.post(
+    "/{collection_id}/chat",
+    response_model=ChatMessageOut,
+    dependencies=[Depends(daily_quota(QuotaKind.generation))],
+)
 async def post_chat_message(
     collection_id: str,
     body: ChatRequest,

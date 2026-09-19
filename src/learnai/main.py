@@ -40,6 +40,7 @@ from learnai.routers.media import router as media_router
 from learnai.routers.profile import router as profile_router
 from learnai.services.extraction.anthropic_pdf import AnthropicPDFExtractor
 from learnai.services.extraction.base import DocumentExtractor
+from learnai.services.limits import RateLimiter, RedisRateLimiter
 from learnai.services.llm.anthropic_client import AnthropicLLMClient
 from learnai.services.llm.client import LLMClient
 from learnai.services.llm.openai_compat_client import OpenAICompatLLMClient
@@ -153,6 +154,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis_client = redis.from_url(  # type: ignore[no-untyped-call]
         settings.redis_url, socket_connect_timeout=5, socket_timeout=5
     )
+    # Shares that client: the limiter is counters, not a separate datastore,
+    # and it fails open if Redis is unreachable (see services/limits.py).
+    rate_limiter: RateLimiter = RedisRateLimiter(app.state.redis_client)
+    app.state.rate_limiter = rate_limiter
     app.state.storage = _build_storage(settings)
 
     llm_client, llm_sdk_client = _build_llm_client(settings)

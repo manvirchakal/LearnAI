@@ -8,12 +8,13 @@ once in ``main.py``'s ``lifespan``, not per-request and not at import time.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from arq import ArqRedis
 from fastapi import Cookie, Depends, Request
 
-from learnai.config import Settings, get_settings
+from learnai.config import QuotaKind, Settings, get_settings
 from learnai.db.mongo import Database
 from learnai.errors import Unauthenticated
 from learnai.repositories.artifacts import ArtifactRepository
@@ -29,6 +30,7 @@ from learnai.repositories.translations import TranslationRepository
 from learnai.repositories.users import UserRepository
 from learnai.services.auth.session import SessionService
 from learnai.services.extraction.base import DocumentExtractor
+from learnai.services.limits import RateLimiter, daily_key, window_key
 from learnai.services.llm.client import LLMClient
 from learnai.services.retrieval.embedder import Embedder
 from learnai.services.retrieval.vector_store import VectorStore
@@ -82,6 +84,11 @@ def get_tts_engine(request: Request) -> TTSEngine:
     return tts_engine
 
 
+def get_rate_limiter(request: Request) -> RateLimiter:
+    rate_limiter: RateLimiter = request.app.state.rate_limiter
+    return rate_limiter
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StorageDep = Annotated[StorageBackend, Depends(get_storage)]
 LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
@@ -90,6 +97,7 @@ ArqPoolDep = Annotated[ArqRedis, Depends(get_arq_pool)]
 VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
 EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
 TTSEngineDep = Annotated[TTSEngine, Depends(get_tts_engine)]
+RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 
 # Internal building block for repository/service providers below. Routers
 # should depend on a repository/service type, never on DbDep directly — that
@@ -137,6 +145,50 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
+
+# --- limits ----------------------------------------------------------------
+# Both of these key on the authenticated user, so they hang off CurrentUser
+# above and are only mountable on authenticated routes. The auth router is
+# deliberately not covered: it has no user yet, and limiting login attempts
+# needs an IP-keyed limiter, which is a different policy than either of
+# these (see services/limits.py).
+
+_RATE_LIMIT_WINDOW_SECONDS = 60
+_QUOTA_WINDOW_SECONDS = 86_400
+
+
+async def enforce_rate_limit(
+    user: CurrentUser, limiter: RateLimiterDep, settings: SettingsDep
+) -> None:
+    """The per-user request rate, shared across every API surface — one
+    budget per user rather than one per router, so the configured number
+    means what it says globally."""
+    if not settings.rate_limit_enabled:
+        return
+    await limiter.check(
+        window_key("api", user["_id"], window_seconds=_RATE_LIMIT_WINDOW_SECONDS),
+        limit=settings.rate_limit_per_minute,
+        window_seconds=_RATE_LIMIT_WINDOW_SECONDS,
+        description="API rate limit",
+    )
+
+
+def daily_quota(kind: QuotaKind) -> Callable[..., Awaitable[None]]:
+    """A per-user daily cap, mounted on the endpoints that actually spend
+    the resource it bounds — model tokens for ``generation``, extraction/
+    transcription compute and storage for ``ingestion``."""
+
+    async def _enforce(user: CurrentUser, limiter: RateLimiterDep, settings: SettingsDep) -> None:
+        if not settings.rate_limit_enabled:
+            return
+        await limiter.check(
+            daily_key(kind.value, user["_id"]),
+            limit=settings.quota_for(kind),
+            window_seconds=_QUOTA_WINDOW_SECONDS,
+            description=f"daily {kind.value} quota",
+        )
+
+    return _enforce
 
 
 def get_collection_repo(user: CurrentUser, db: DbDep) -> CollectionRepository:

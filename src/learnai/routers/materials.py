@@ -17,9 +17,10 @@ from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 
+from learnai.config import QuotaKind
 from learnai.deps import (
     ArqPoolDep,
     CurrentUser,
@@ -31,13 +32,17 @@ from learnai.deps import (
     SettingsDep,
     StorageDep,
     VectorStoreDep,
+    daily_quota,
+    enforce_rate_limit,
 )
 from learnai.errors import Conflict, ValidationError
 from learnai.repositories.materials import MaterialStatus
 from learnai.schemas.documents import SectionContent, TOCResult
 from learnai.services.ingestion.pipeline import get_or_extract_section
 
-router = APIRouter(prefix="/api/v1/materials", tags=["materials"])
+router = APIRouter(
+    prefix="/api/v1/materials", tags=["materials"], dependencies=[Depends(enforce_rate_limit)]
+)
 
 _MAX_UPLOAD_BYTES = 32 * 1024 * 1024  # Anthropic's own per-request document limit
 
@@ -83,7 +88,12 @@ def _material_out(doc: dict[str, Any]) -> MaterialOut:
     )
 
 
-@router.post("", response_model=UploadAccepted, status_code=202)
+@router.post(
+    "",
+    response_model=UploadAccepted,
+    status_code=202,
+    dependencies=[Depends(daily_quota(QuotaKind.ingestion))],
+)
 async def upload_material(
     user: CurrentUser,
     materials: MaterialRepoDep,
@@ -144,7 +154,14 @@ async def get_material_tree(material_id: str, materials: MaterialRepoDep) -> TOC
     return TOCResult.model_validate(doc["tree"])
 
 
-@router.get("/{material_id}/sections/{node_id}", response_model=SectionContent)
+# A cache miss here runs a real extraction against Anthropic (see
+# get_or_extract_section), so reading a section for the first time spends
+# model tokens and counts against the generation quota.
+@router.get(
+    "/{material_id}/sections/{node_id}",
+    response_model=SectionContent,
+    dependencies=[Depends(daily_quota(QuotaKind.generation))],
+)
 async def get_section(
     material_id: str,
     node_id: str,
