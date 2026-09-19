@@ -19,7 +19,19 @@ from learnai.logging import get_request_id
 logger = structlog.get_logger(__name__)
 
 
-def _problem_response(status_code: int, code: str, message: str, request: Request) -> JSONResponse:
+def _problem_response(
+    status_code: int,
+    code: str,
+    message: str,
+    request: Request,
+    *,
+    retry_after_seconds: int | None = None,
+) -> JSONResponse:
+    headers = {"X-Request-ID": get_request_id()}
+    if retry_after_seconds is not None:
+        # Standard 429 semantics: tell the client when to come back rather
+        # than leaving it to guess and retry in a tight loop.
+        headers["Retry-After"] = str(retry_after_seconds)
     return JSONResponse(
         status_code=status_code,
         media_type="application/problem+json",
@@ -30,7 +42,7 @@ def _problem_response(status_code: int, code: str, message: str, request: Reques
             "detail": message,
             "request_id": get_request_id(),
         },
-        headers={"X-Request-ID": get_request_id()},
+        headers=headers,
     )
 
 
@@ -41,7 +53,13 @@ def register_exception_handlers(app: FastAPI) -> None:
             logger.error("app_error", code=exc.code, message=exc.message, detail=exc.detail)
         else:
             logger.info("app_error", code=exc.code, message=exc.message)
-        return _problem_response(exc.status_code, exc.code, exc.message, request)
+        return _problem_response(
+            exc.status_code,
+            exc.code,
+            exc.message,
+            request,
+            retry_after_seconds=exc.detail.get("retry_after_seconds"),
+        )
 
     # Registered against Starlette's base HTTPException, not fastapi.HTTPException
     # (a subclass): Starlette's own routing layer raises the base class directly

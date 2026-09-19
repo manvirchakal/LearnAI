@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from learnai.config import Environment, LLMTask, Settings
+from learnai.config import Environment, LLMTask, QuotaKind, Settings
 
 
 def test_dev_defaults_require_no_configuration() -> None:
@@ -82,6 +82,21 @@ def test_production_refuses_dev_auth_bypass() -> None:
         )
 
 
+def test_production_requires_rate_limiting() -> None:
+    """Off by default (so local dev needs no Redis and no configuration),
+    but a production process that never counts requests is exactly the
+    misconfiguration this validator exists to catch."""
+    with pytest.raises(ValidationError, match="rate_limit_enabled"):
+        Settings(
+            _env_file=None,
+            environment=Environment.production,
+            anthropic_api_key="sk-ant-fake",
+            google_client_id="fake",
+            session_secret="x" * 32,
+            cors_origins=["https://example.com"],
+        )
+
+
 def test_fully_configured_production_settings_succeed() -> None:
     settings = Settings(
         _env_file=None,
@@ -90,5 +105,13 @@ def test_fully_configured_production_settings_succeed() -> None:
         google_client_id="fake-client-id",
         session_secret="x" * 32,
         cors_origins=["https://example.com"],
+        rate_limit_enabled=True,
     )
     assert settings.environment is Environment.production
+
+
+def test_quota_lookup_is_per_kind() -> None:
+    settings = Settings(_env_file=None, generation_quota_per_day=7, ingestion_quota_per_day=3)
+
+    assert settings.quota_for(QuotaKind.generation) == 7
+    assert settings.quota_for(QuotaKind.ingestion) == 3

@@ -46,6 +46,19 @@ class LLMTask(StrEnum):
     translation = "translation"
 
 
+class QuotaKind(StrEnum):
+    """Per-owner daily caps on the two kinds of work worth bounding.
+
+    ``generation`` covers everything that spends model tokens (narrative,
+    game, diagrams, chat, translation); ``ingestion`` covers everything
+    that creates a material (PDF upload, lecture upload, YouTube import),
+    which costs extraction/transcription compute and storage.
+    """
+
+    generation = "generation"
+    ingestion = "ingestion"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -119,6 +132,16 @@ class Settings(BaseSettings):
     # --- http ---------------------------------------------------------------
     cors_origins: list[AnyHttpUrl] = Field(default_factory=list)
 
+    # --- limits & quotas ----------------------------------------------------
+    # Everything here is per authenticated user, counted in Redis (see
+    # services/limits.py). Off by default in development so a local session
+    # can hammer the API freely; the production validator below requires it.
+    rate_limit_enabled: bool = False
+    rate_limit_per_minute: int = 120
+    # Daily caps on the two kinds of work worth bounding — see QuotaKind.
+    generation_quota_per_day: int = 100
+    ingestion_quota_per_day: int = 25
+
     # --- inference models (worker) ------------------------------------------
     whisper_model: str = "distil-large-v3"
     whisper_compute_type: str = "int8"
@@ -164,6 +187,8 @@ class Settings(BaseSettings):
             problems.append("google_client_id is required")
         if self.storage_backend == "minio" and not self.minio_endpoint:
             problems.append("minio_endpoint is required when storage_backend=minio")
+        if not self.rate_limit_enabled:
+            problems.append("rate_limit_enabled must be on in production")
 
         if problems:
             raise ValueError("invalid production configuration: " + "; ".join(problems))
@@ -184,6 +209,12 @@ class Settings(BaseSettings):
 
     def max_tokens_for(self, task: LLMTask) -> int:
         return self.llm_max_tokens_overrides.get(task, self.llm_max_tokens_default)
+
+    def quota_for(self, kind: QuotaKind) -> int:
+        return {
+            QuotaKind.generation: self.generation_quota_per_day,
+            QuotaKind.ingestion: self.ingestion_quota_per_day,
+        }[kind]
 
 
 @lru_cache
