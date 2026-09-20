@@ -19,7 +19,10 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       SESSION_SECRET: ${SESSION_SECRET:-dev-only-secret-change-me-please-32chars}
       DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173"]}
+      # 3000 is the Create React App dev server the client runs on today;
+      # 5173 is where the Vite rewrite will serve from. Both, so running the
+      # frontend against this stack needs no edit either side of that move.
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:5173"]}
     volumes:
       - media:/data/media
     depends_on:
