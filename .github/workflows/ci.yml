@@ -69,11 +69,72 @@ jobs:
       # integration'` so a bare local `pytest` stays fast and needs nothing
       # running. This job has real Mongo/Qdrant/Redis service containers
       # above, so re-include `integration` here; `live` (real Anthropic API
-      # calls) stays deselected — no key to spend here. Coverage upload to an
-      # external service is deliberately not wired up yet — add one only once
-      # there's an account/token to point it at; the terminal report below is
-      # enough to catch a regression in CI in the meantime.
+      # calls) stays deselected — no key to spend here.
+      #
+      # The coverage gate is [tool.coverage.report] fail_under in
+      # pyproject.toml, which pytest-cov applies itself: below it, this step
+      # exits non-zero. It lives in config rather than as a --cov-fail-under
+      # flag here so a local `pytest --cov` enforces the same number.
+      # Coverage upload to an external service is deliberately not wired up
+      # — add one only once there's an account/token to point it at; the
+      # terminal report below is enough to catch a regression meanwhile.
       - run: uv run pytest -v -m "not live" --cov --cov-report=term-missing
+
+  audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.11
+      # Audit the locked *runtime* closure, not the dev tools: an advisory
+      # against ruff or pytest isn't something this service ships to anyone.
+      # --all-extras covers ml/media/games, which the worker image installs.
+      # Exported from uv.lock rather than audited in-place so the versions
+      # checked are exactly the pinned ones the images build from.
+      - name: Export the locked runtime dependencies
+        run: uv export --format requirements-txt --all-extras --no-dev --no-hashes --no-emit-project -o requirements-audit.txt
+      - name: pip-audit
+        run: uvx pip-audit -r requirements-audit.txt
+
+  client:
+    name: Client build and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      # CI=true makes react-scripts non-interactive and turns build warnings
+      # into errors. The suite is small on purpose — GameFrame.test.js is a
+      # security regression test (the game iframe's sandbox attribute), and
+      # that property is worth a job of its own.
+      - run: npm test -- --watchAll=false
+        env:
+          CI: true
+      - run: npm run build
+        env:
+          CI: true
+      # Reported, not gated — unlike the Python audit above, which is a hard
+      # gate because it covers the code holding user data. `npm audit fix`
+      # (semver-compatible only) is already applied to the lockfile; every
+      # advisory still standing traces to one of three roots that only a
+      # major bump clears: react-scripts (the build toolchain — the Vite
+      # migration is what retires it), react-pdf-highlighter (pdfjs-dist,
+      # plus an install-time `canvas` -> node-pre-gyp -> tar chain), and
+      # react-router-dom v7. None of them ship exploitable code to the
+      # browser, and a permanently failing step is one nobody reads.
+      - run: npm audit
+        continue-on-error: true
 
   docker:
     name: Build images and smoke-test the compose stack
