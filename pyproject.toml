@@ -222,3 +222,10 @@ omit = ["*/migrations/*"]
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+# The modernization plan's Phase 8 bar is >=80% on services/repositories.
+# The suite sits at ~96% overall, so this gate is set well above that bar
+# but with real headroom below where we actually are: it's a ratchet
+# against regression, not a number to game with assertion-free tests.
+# Applies to any run that passes --cov, including the default local one —
+# CI additionally includes the integration tier, which only raises it.
+fail_under = 90
