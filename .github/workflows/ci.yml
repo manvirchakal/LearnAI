@@ -114,27 +114,18 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
       - run: npm ci
-      # CI=true makes react-scripts non-interactive and turns build warnings
-      # into errors. The suite is small on purpose — GameFrame.test.js is a
-      # security regression test (the game iframe's sandbox attribute), and
-      # that property is worth a job of its own.
-      - run: npm test -- --watchAll=false
-        env:
-          CI: true
+      # vitest run (not watch) — see client/package.json. The suite covers
+      # the client logic whose failure modes never show on screen: the
+      # 401-refresh interceptor, that no session material reaches browser
+      # storage, that Study's panels stay mounted across tab switches, and
+      # the game iframe's sandbox attributes.
+      - run: npm test
       - run: npm run build
-        env:
-          CI: true
-      # Reported, not gated — unlike the Python audit above, which is a hard
-      # gate because it covers the code holding user data. `npm audit fix`
-      # (semver-compatible only) is already applied to the lockfile; every
-      # advisory still standing traces to one of three roots that only a
-      # major bump clears: react-scripts (the build toolchain — the Vite
-      # migration is what retires it), react-pdf-highlighter (pdfjs-dist,
-      # plus an install-time `canvas` -> node-pre-gyp -> tar chain), and
-      # react-router-dom v7. None of them ship exploitable code to the
-      # browser, and a permanently failing step is one nobody reads.
+      # A hard gate, same as pip-audit above. Dropping react-scripts and the
+      # dead dependencies in Phase 9 took the client from 85 advisories to
+      # zero, so there is nothing left to grandfather in — and a clean audit
+      # only stays clean if something fails when it stops being clean.
       - run: npm audit
-        continue-on-error: true
 
   docker:
     name: Build images and smoke-test the compose stack
@@ -162,10 +153,19 @@ jobs:
           tags: learnai-worker:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build client image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./client
+          push: false
+          load: true
+          tags: learnai-client:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Bring up the full stack
         env:
           ANTHROPIC_API_KEY: test-key-not-real
-        run: docker compose up -d mongo qdrant redis api worker
+        run: docker compose up -d
       - name: Wait for /health/ready
         run: |
           for i in $(seq 1 30); do
@@ -179,6 +179,19 @@ jobs:
           echo "::error::stack never became ready"
           docker compose logs
           exit 1
+      # The client is nginx over a static bundle, so "serving" is the whole
+      # contract. Checking a deep route rather than / is the point: it is
+      # what proves the SPA fallback in client/nginx.conf is wired, and a
+      # BrowserRouter app without it 404s on every refresh that isn't the
+      # index.
+      - name: Check the client serves, including a client-side route
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:5173/ > /dev/null; then break; fi
+            sleep 5
+          done
+          curl -sf http://localhost:5173/ | grep -q '<div id="root">'
+          curl -sf http://localhost:5173/study/some-collection-id | grep -q '<div id="root">'
       - name: Tear down
         if: always()
         run: docker compose down -v

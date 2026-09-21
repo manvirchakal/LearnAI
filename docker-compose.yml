@@ -19,10 +19,9 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       SESSION_SECRET: ${SESSION_SECRET:-dev-only-secret-change-me-please-32chars}
       DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-true}
-      # 3000 is the Create React App dev server the client runs on today;
-      # 5173 is where the Vite rewrite will serve from. Both, so running the
-      # frontend against this stack needs no edit either side of that move.
-      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost:5173"]}
+      # 5173 covers both ways the client runs: the `client` service below and
+      # a local `npm run dev`, which bind the same port.
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173"]}
     volumes:
       - media:/data/media
     depends_on:
@@ -67,11 +66,17 @@ services:
   client:
     build:
       context: ./client
+      # Build args, not environment: Vite inlines VITE_* into the bundle at
+      # build time, so a running container cannot be reconfigured — changing
+      # either of these means rebuilding the image.
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     ports:
       - "5173:5173"
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
-    profiles: ["full"]  # client is rewritten to Vite in a later phase; opt-in until then
+    depends_on:
+      api:
+        condition: service_healthy
 
   mongo:
     image: mongo:7

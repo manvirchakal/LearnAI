@@ -13,11 +13,10 @@ pipeline — transcribed locally with faster-whisper, bucketed into
 timestamped sections, and from there indistinguishable from a chapter of a
 book to everything downstream.
 
-> **Status.** The backend (`src/learnai`) is a ground-up rewrite of the
-> original hackathon project and is what this README documents. `client/` is
-> the original Create React App frontend, updated to talk to the new API but
-> not yet rewritten; `server/` is the superseded original backend, kept only
-> until the frontend work lands. Neither is linted or type-checked.
+> **Status.** The backend (`src/learnai`) and the frontend (`client/`) are
+> both current and are what this README documents. `server/` is the
+> superseded original backend, kept only until it is deleted; it is not
+> linted, type-checked, or reachable from anything that runs.
 
 ---
 
@@ -111,8 +110,9 @@ docker compose up -d
 curl localhost:8000/health/ready
 ```
 
-That brings up the API, the worker, MongoDB, Qdrant and Redis. Interactive
-API docs are at <http://localhost:8000/docs>.
+That brings up the whole stack — API, worker, frontend, MongoDB, Qdrant and
+Redis. The app is at <http://localhost:5173>, interactive API docs at
+<http://localhost:8000/docs>.
 
 `DEV_AUTH_BYPASS=true` (the default in `.env.example`) mounts
 `POST /auth/dev-login`, so you can use the whole API without configuring
@@ -129,18 +129,18 @@ reports `succeeded`, then `GET /api/v1/materials/{id}/tree`.
 The app refuses to start with `DEV_AUTH_BYPASS` on when
 `ENVIRONMENT=production` — that's a settings validator, not a convention.
 
-**The frontend** is still Create React App and isn't part of the compose
-stack yet (the `client` service sits behind the `full` profile, waiting on
-the Vite rewrite). Run it directly:
+**Working on the frontend** is nicer against the Vite dev server, which has
+hot module replacement where the compose image is a static nginx bundle:
 
 ```bash
 cd client
-cp .env.example .env.local    # REACT_APP_API_BASE_URL defaults to :8000
-npm ci && npm start           # http://localhost:3000
+cp .env.example .env.local    # VITE_API_BASE_URL defaults to :8000
+npm ci && npm run dev         # http://localhost:5173
 ```
 
-`http://localhost:3000` is already in the compose stack's default
-`CORS_ORIGINS`, so nothing else needs changing.
+Note that `VITE_*` variables are inlined into the bundle at build time, so
+the compose service takes them as **build args** — changing the API URL
+means rebuilding that image, not restarting it.
 
 ---
 
@@ -240,12 +240,13 @@ Four tiers, by what they're allowed to touch:
 | `tests/e2e` | 112 | The real app through `TestClient`; every external faked. | yes |
 | `tests/integration` | 13 | Real MongoDB and Qdrant. | no — `-m integration` |
 | `tests/contract` | 7 | The real Anthropic API. Costs money. | no — `-m live` |
+| `client/src/**/*.test.jsx` | 21 | jsdom; HTTP intercepted by MSW. | yes — `npm test` |
 
 ```bash
 uv run pytest -q                           # the 368 that need nothing running
 uv run pytest -m integration               # needs docker compose up -d mongo qdrant
 uv run pytest -m live                      # needs ANTHROPIC_API_KEY
-cd client && CI=true npm test -- --watchAll=false
+cd client && npm test                      # vitest
 ```
 
 Coverage is gated at 90% (`fail_under` in `pyproject.toml`, applied by
@@ -257,6 +258,11 @@ that *forgetting* fails:
 
 - `test_auth_matrix.py` — every route, unauthenticated.
 - `test_idor_matrix.py` — every `{id}` route, probed with another user's id.
+
+The client tests intercept at the network layer with MSW rather than stubbing
+`apiClient`, so what they pin is the request actually issued — and
+`onUnhandledRequest: 'error'` means a component calling an unstubbed endpoint
+fails rather than quietly rendering an empty state.
 
 ---
 
@@ -296,10 +302,11 @@ fixed-window Redis counters (`services/limits.py`). They fail *open* — Redis
 being down degrades to unlimited rather than to an outage — and are required
 in production by the settings validator.
 
-**Dependencies.** `pip-audit` runs in CI over the locked runtime closure and
-is a hard gate. The client's `npm audit` is reported but not gated; the
-remaining advisories all sit behind major bumps of `react-scripts`,
-`react-pdf-highlighter` and `react-router-dom`, and the CI job says so.
+**Dependencies.** Both audits are hard CI gates: `pip-audit` over the locked
+runtime closure, and `npm audit` for the client. Both are clean. The client
+reached zero by deleting rather than patching — 12 of its 26 declared
+packages were never imported, and `react-scripts` was carrying 31 advisories
+on its own.
 
 ---
 
