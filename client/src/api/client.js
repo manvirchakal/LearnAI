@@ -3,12 +3,9 @@
 // localStorage — so `withCredentials: true` is what actually authenticates
 // a request, not a header this file adds.
 //
-// REACT_APP_* because the client is still the Create React App build today;
-// renaming to VITE_API_BASE_URL happens together with the CRA -> Vite
-// migration, not before, so the two moves stay independently revertible.
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

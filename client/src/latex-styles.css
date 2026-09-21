@@ -20,7 +20,10 @@
   text-align: center;
 }
 
-.latex-equation, .latex-align, .latex-align* {
+/* `.latex-align*` used to be listed here too. `*` is not valid in a class
+   selector, so that third one never matched anything in any browser — it
+   was reaching for LaTeX's `align*` environment and landing nowhere. */
+.latex-equation, .latex-align {
   display: block;
   margin: 1em 0;
   text-align: center;
@@ -57,7 +60,11 @@ figcaption {
 }
 
 q {
-  quotes: """ """ "'" "'";
+  /* Curly quotes, as the escape sequences rather than literal characters:
+     this declaration previously held straight ASCII quotes nested inside
+     ASCII quotes, which is unparseable, so `q` fell back to the browser
+     default instead of the typographic quotes it was asking for. */
+  quotes: "\201C" "\201D" "\2018" "\2019";
 }
 
 q::before {

@@ -1,5 +1,4 @@
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
-// allows you to do things like:
-// expect(element).toHaveTextContent(/react/i)
-// learn more: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom';
+// Runs before every test file (see vite.config.js's test.setupFiles).
+// jest-dom's matchers — toBeInTheDocument, toHaveAttribute, ... — are what
+// let a DOM assertion read as one line instead of a manual querySelector.
+import '@testing-library/jest-dom/vitest';
