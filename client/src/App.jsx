@@ -6,7 +6,6 @@ import Study from './pages/Study';
 import Questionnaire from './pages/Questionnaire';
 import Upload from './pages/Upload';
 import Reader from './pages/Reader';
-import SelectTextbook from './pages/SelectTextbook';
 import Collections from './pages/Collections';
 import { RequireAuth } from './components/Auth';
 import { AuthProvider } from './context/AuthContext';
@@ -43,7 +42,6 @@ function App() {
               <Route path="/questionnaire" element={<RequireAuth><Questionnaire /></RequireAuth>} />
               <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
               <Route path="/materials/:materialId" element={<RequireAuth><Reader /></RequireAuth>} />
-              <Route path="/select-textbook" element={<RequireAuth><SelectTextbook /></RequireAuth>} />
               <Route path="/collections" element={<RequireAuth><Collections /></RequireAuth>} />
             </Routes>
           </Router>
