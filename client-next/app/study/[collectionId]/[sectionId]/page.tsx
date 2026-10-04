@@ -1,6 +1,6 @@
 "use client";
 import { Box, Typography, Divider } from "@mui/material";
-import { use, useEffect } from "react";
+import { useEffect } from "react";
 import AppShell from "@/components/layout/AppShell";
 import NarrativePanel from "@/components/study/NarrativePanel";
 import GamePanel from "@/components/study/GamePanel";
@@ -14,11 +14,11 @@ import { useUIStore } from "@/store/uiStore";
 import { useTextbookStructure } from "@/api/textbooks";
 
 interface PageProps {
-  params: Promise<{ collectionId: string; sectionId: string }>;
+  params: { collectionId: string; sectionId: string };
 }
 
 export default function StudyPage({ params }: PageProps) {
-  const { collectionId, sectionId } = use(params);
+  const { collectionId, sectionId } = params;
   const decodedSection = decodeURIComponent(sectionId);
 
   const { setStudyContext, setChapters, fileId, userId } = useStudyStore();

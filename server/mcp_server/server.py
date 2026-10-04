@@ -1,6 +1,6 @@
 """
 FastMCP server — registers all LearnAI MCP tools.
-Can be run standalone: python -m mcp.server
+Can be run standalone: python -m mcp_server.server
 or imported for embedding.
 """
 from fastmcp import FastMCP
@@ -13,12 +13,12 @@ from mcp_server.tools.translate_tool import mcp as translate_mcp
 from mcp_server.tools.tts_tool import mcp as tts_mcp
 
 server = FastMCP("learnai")
-server.mount("storage", storage_mcp)
-server.mount("pdf", pdf_mcp)
-server.mount("rag", rag_mcp)
-server.mount("whisper", whisper_mcp)
-server.mount("translate", translate_mcp)
-server.mount("tts", tts_mcp)
+server.mount(storage_mcp, namespace="storage")
+server.mount(pdf_mcp, namespace="pdf")
+server.mount(rag_mcp, namespace="rag")
+server.mount(whisper_mcp, namespace="whisper")
+server.mount(translate_mcp, namespace="translate")
+server.mount(tts_mcp, namespace="tts")
 
 
 if __name__ == "__main__":

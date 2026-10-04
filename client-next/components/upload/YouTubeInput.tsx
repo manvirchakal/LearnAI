@@ -14,7 +14,7 @@ export default function YouTubeInput() {
 
   const handleSubmit = () => {
     if (!isValidYouTubeUrl(url)) return;
-    transcribe({ url }, { onSuccess: () => setUrl("") });
+    transcribe(url, { onSuccess: () => setUrl("") });
   };
 
   return (

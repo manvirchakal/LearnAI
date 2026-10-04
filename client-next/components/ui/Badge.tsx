@@ -1,8 +1,8 @@
 "use client";
 import { Chip, ChipProps } from "@mui/material";
 
-interface Props extends Omit<ChipProps, "color"> {
-  variant?: "default" | "primary" | "success" | "warning" | "error";
+interface Props extends Omit<ChipProps, "color" | "variant"> {
+  tone?: "default" | "primary" | "success" | "warning" | "error";
 }
 
 const colorMap = {
@@ -13,8 +13,8 @@ const colorMap = {
   error: { bgcolor: "#ffe3e3", color: "#c92a2a" },
 };
 
-export default function Badge({ variant = "default", sx, ...props }: Props) {
-  const colors = colorMap[variant];
+export default function Badge({ tone = "default", sx, ...props }: Props) {
+  const colors = colorMap[tone];
   return (
     <Chip
       size="small"
