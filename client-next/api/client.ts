@@ -9,7 +9,7 @@ export const API_BASE = "/api-backend";
 export const apiClient = axios.create({ baseURL: API_BASE });
 
 // No auth yet: identity is a plain header. Swap for a bearer token later.
-const USER_ID = process.env.NEXT_PUBLIC_USER_ID || "default";
+export const USER_ID = process.env.NEXT_PUBLIC_USER_ID || "default";
 apiClient.interceptors.request.use((config) => {
   config.headers["X-User-Id"] = USER_ID;
   return config;

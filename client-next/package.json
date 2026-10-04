@@ -8,8 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "postinstall": "node scripts/copy-vendor-assets.mjs",
-    "test": "vitest run"
+    "postinstall": "node scripts/copy-vendor-assets.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.13.0",

@@ -3,60 +3,46 @@ import { Alert, Box, LinearProgress, Typography } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
 import Button from "@/components/ui/Button";
-import { errorMessage } from "@/api/client";
-import { useRegenerateStudy, useStudyMaterials } from "@/api/study";
+import Spinner from "@/components/ui/Spinner";
+import { useStudySession } from "./StudySession";
 
-interface Props {
-  fileId: string;
-  sectionId: string;
-}
+export default function NarrativePanel() {
+  const { status, materials, streamingText, activity, error, generate } = useStudySession();
 
-export default function NarrativePanel({ fileId, sectionId }: Props) {
-  const { data, isPending, error, refetch, isFetching } = useStudyMaterials(fileId, sectionId);
-  const regenerate = useRegenerateStudy(fileId, sectionId);
-  const busy = isFetching || regenerate.isPending;
+  if (status === "loading") return <Spinner label="Loading section…" />;
 
-  if (isPending && !error) {
-    return (
-      <Box sx={{ p: 4 }}>
-        <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />
-        <Typography color="text.secondary" variant="body2">
-          Personalizing this section to your learning profile… the first visit can take a minute.
-        </Typography>
-      </Box>
-    );
-  }
-
-  if (error) {
+  if (status === "error" && !materials) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert
-          severity="error"
-          action={<Button size="small" onClick={() => refetch()} loading={isFetching}>Retry</Button>}
-        >
-          Couldn&apos;t generate this section: {errorMessage(error)}
+        <Alert severity="error" action={<Button size="small" onClick={() => generate(false)}>Retry</Button>}>
+          Couldn&apos;t generate this section: {error}
         </Alert>
       </Box>
     );
   }
 
+  const streaming = status === "streaming";
+  const text = streaming && streamingText ? streamingText : materials?.narrative ?? "";
+
   return (
     <Box sx={{ p: 3, maxWidth: 900 }}>
-      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
-        <Button
-          size="small"
-          variant="text"
-          startIcon={<RefreshIcon fontSize="small" />}
-          loading={regenerate.isPending}
-          disabled={busy}
-          onClick={() => regenerate.mutate()}
-        >
-          Regenerate
-        </Button>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1, minHeight: 32 }}>
+        <Typography variant="caption" color="text.secondary">{streaming ? activity : ""}</Typography>
+        {!streaming && (
+          <Button size="small" variant="text" startIcon={<RefreshIcon fontSize="small" />} onClick={() => generate(true)}>
+            Regenerate
+          </Button>
+        )}
       </Box>
-      {regenerate.error && <Alert severity="error" sx={{ mb: 2 }}>{errorMessage(regenerate.error)}</Alert>}
-      {busy && <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />}
-      <MarkdownRenderer content={data?.narrative ?? ""} />
+      {streaming && <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />}
+      {status === "error" && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {text ? (
+        <MarkdownRenderer content={text} math={!streaming} />
+      ) : (
+        <Typography color="text.secondary" variant="body2">
+          Personalizing this section to your learning profile…
+        </Typography>
+      )}
     </Box>
   );
 }

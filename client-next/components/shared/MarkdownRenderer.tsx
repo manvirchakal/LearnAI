@@ -5,8 +5,19 @@ import rehypeRaw from "rehype-raw";
 import { MathJax } from "better-react-mathjax";
 import { Box } from "@mui/material";
 
+interface Props {
+  content: string;
+  /** Typeset LaTeX. Turn off while streaming — re-typesetting every token is expensive. */
+  math?: boolean;
+}
+
 /** Markdown + LaTeX. Requires the MathJaxContext from app/providers.tsx. */
-export default function MarkdownRenderer({ content }: { content: string }) {
+export default function MarkdownRenderer({ content, math = true }: Props) {
+  const markdown = (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+      {content}
+    </ReactMarkdown>
+  );
   return (
     <Box
       sx={{
@@ -17,11 +28,7 @@ export default function MarkdownRenderer({ content }: { content: string }) {
         "& ul,ol": { pl: 3 },
       }}
     >
-      <MathJax dynamic>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-          {content}
-        </ReactMarkdown>
-      </MathJax>
+      {math ? <MathJax dynamic>{markdown}</MathJax> : markdown}
     </Box>
   );
 }

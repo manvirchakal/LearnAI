@@ -9,6 +9,7 @@ Books API — uploaded PDFs and their sections, the primary unit of study.
     GET    /books/{file_id}/sections/{section_id}/pdf     section PDF
     GET    /books/{file_id}/sections/{section_id}/study   cached study materials (404 if none)
     POST   /books/{file_id}/sections/{section_id}/study   get-or-generate (content agent)
+    POST   /books/{file_id}/sections/{section_id}/study/stream  same, as SSE (token/stage/done/error)
     POST   /books/{file_id}/sections/{section_id}/game    regenerate game (content agent, game graph)
     GET    /books/{file_id}/sections/{section_id}/chat    history
     POST   /books/{file_id}/sections/{section_id}/chat    send message (chat agent)
@@ -20,18 +21,24 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, StreamingResponse
 
 from agents.chat_agent import get_history, run_chat_agent
-from agents.content_agent import load_cached_materials, run_content_agent, run_game_agent
+from agents.content_agent import load_cached_materials, run_content_agent, run_game_agent, stream_content_agent
 from agents.document_agent import run_document_agent
 from core.dependencies import get_user_id
 from models.book import BookDetail, BookSummary
 from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
 from services import book_service
+from utils.streaming_utils import sse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/books", tags=["books"])
+
+# no-transform stops gzip in intermediaries (including Next.js's rewrite proxy)
+# from buffering the stream; X-Accel-Buffering does the same for nginx.
+SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
 
 
 def _section_or_404(user_id: str, file_id: str, section_id: str) -> None:
@@ -130,6 +137,25 @@ def generate_study_materials(
     except Exception as e:
         logger.exception("Study material generation failed")
         raise HTTPException(status_code=502, detail=f"Generation failed: {e}")
+
+
+@router.post("/{file_id}/sections/{section_id}/study/stream")
+async def stream_study_materials(
+    file_id: str, section_id: str, body: StudyRequest = StudyRequest(), user_id: str = Depends(get_user_id)
+):
+    text = await run_in_threadpool(_section_text, user_id, file_id, section_id)
+
+    async def events():
+        try:
+            async for event, data in stream_content_agent(text, user_id, scope=file_id, unit_id=section_id,
+                                                          rag_file_id=file_id,
+                                                          force_regenerate=body.force_regenerate):
+                yield sse(event, data)
+        except Exception as e:
+            logger.exception("Streaming study generation failed")
+            yield sse("error", f"Generation failed: {e}")
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.post("/{file_id}/sections/{section_id}/game", response_model=GameResponse)

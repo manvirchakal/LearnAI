@@ -6,6 +6,7 @@ import ChatPanel from "@/components/study/ChatPanel";
 import DiagramPanel from "@/components/study/DiagramPanel";
 import GamePanel from "@/components/study/GamePanel";
 import NarrativePanel from "@/components/study/NarrativePanel";
+import { StudySessionProvider } from "@/components/study/StudySession";
 import StudyTabs from "@/components/study/StudyTabs";
 import Spinner from "@/components/ui/Spinner";
 import { sectionPdfUrl, useBook } from "@/api/books";
@@ -31,42 +32,52 @@ export default function StudyPage({ params }: PageProps) {
   const section = chapter?.sections.find((s) => s.id === sectionId);
 
   if (isPending) {
-    return <AppShell><Spinner label="Loading section…" fullPage /></AppShell>;
+    return (
+      <AppShell>
+        <Spinner label="Loading section…" fullPage />
+      </AppShell>
+    );
   }
   if (!book || !section) {
     return (
       <AppShell book={book}>
-        <Box sx={{ p: 4 }}><Alert severity="error">This section doesn&apos;t exist.</Alert></Box>
+        <Box sx={{ p: 4 }}>
+          <Alert severity="error">This section doesn&apos;t exist.</Alert>
+        </Box>
       </AppShell>
     );
   }
 
   return (
     <AppShell book={book} activeSectionId={sectionId}>
-      <Box sx={{ display: "flex", height: "calc(100vh - 64px)" }}>
-        <Box sx={{ flex: 1, minWidth: 0, overflowY: "auto", borderRight: "1px solid #e9ecef" }}>
-          <Box sx={{ p: 3, pb: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              {chapter?.number} · {chapter?.title} · pp. {section.start_page}–{section.end_page}
-            </Typography>
-            <Typography variant="h6" fontWeight={700}>{section.title}</Typography>
+      <StudySessionProvider key={sectionId} fileId={fileId} sectionId={sectionId}>
+        <Box sx={{ display: "flex", height: "calc(100vh - 64px)" }}>
+          <Box sx={{ flex: 1, minWidth: 0, overflowY: "auto", borderRight: "1px solid #e9ecef" }}>
+            <Box sx={{ p: 3, pb: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {chapter?.number} · {chapter?.title} · pp. {section.start_page}–{section.end_page}
+              </Typography>
+              <Typography variant="h6" fontWeight={700}>
+                {section.title}
+              </Typography>
+            </Box>
+            <Divider />
+            <NarrativePanel />
           </Box>
-          <Divider />
-          <NarrativePanel fileId={fileId} sectionId={sectionId} />
-        </Box>
 
-        <Box sx={{ width: 480, flexShrink: 0, display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
-          <StudyTabs />
-          <Box sx={{ flex: 1, minHeight: 0, overflowY: activeTab === "chat" ? "hidden" : "auto" }}>
-            {activeTab === "chat" && <ChatPanel fileId={fileId} sectionId={sectionId} />}
-            {activeTab === "game" && <GamePanel fileId={fileId} sectionId={sectionId} />}
-            {activeTab === "diagram" && <DiagramPanel fileId={fileId} sectionId={sectionId} />}
-            {activeTab === "pdf" && (
-              <PDFViewer key={sectionId} url={sectionPdfUrl(fileId, sectionId)} firstPage={section.start_page} />
-            )}
+          <Box sx={{ width: 480, flexShrink: 0, display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
+            <StudyTabs />
+            <Box sx={{ flex: 1, minHeight: 0, overflowY: activeTab === "chat" ? "hidden" : "auto" }}>
+              {activeTab === "chat" && <ChatPanel fileId={fileId} sectionId={sectionId} />}
+              {activeTab === "game" && <GamePanel />}
+              {activeTab === "diagram" && <DiagramPanel />}
+              {activeTab === "pdf" && (
+                <PDFViewer key={sectionId} url={sectionPdfUrl(fileId, sectionId)} firstPage={section.start_page} />
+              )}
+            </Box>
           </Box>
         </Box>
-      </Box>
+      </StudySessionProvider>
     </AppShell>
   );
 }

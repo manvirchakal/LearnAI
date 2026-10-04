@@ -4,9 +4,12 @@ scripted fake LLM — so the full HTTP → agent → storage/RAG path runs offli
 """
 import hashlib
 import os
+import re
 import sys
 import tempfile
+import time
 import types
+from typing import Any, Callable
 
 import pytest
 
@@ -25,6 +28,9 @@ for name, attr in (("sentence_transformers", "SentenceTransformer"), ("faster_wh
 
 import fitz  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from langchain_core.language_models import BaseChatModel  # noqa: E402
+from langchain_core.messages import AIMessage, AIMessageChunk  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult  # noqa: E402
 
 import core.vectorstore  # noqa: E402
 
@@ -44,32 +50,63 @@ class FakeLLM:
     """Answers by prompt type; game code can be scripted per call."""
 
     VALID_GAME = 'const [n, setN] = useState(0);\nreturn React.createElement("button", {onClick: () => setN(n + 1)}, `Clicks: ${n}`);'
+    NARRATIVE = "## Narrative\nPersonalized explanation of this section."
 
     def __init__(self):
         self.calls = []
         self.game_codes = []
 
-    def __call__(self, prompt, *args, **kwargs):
+    def __call__(self, prompt: str) -> str:
         self.calls.append(prompt)
         if "Create a fully functional React component" in prompt:
             return self.game_codes.pop(0) if self.game_codes else self.VALID_GAME
+        if "latest question" in prompt:
+            return "(fake tutor) Here is a concise answer."
         if "mermaid" in prompt.lower():
             return "```mermaid\ngraph TD\n  A[Start] --> B[End]\n```"
         if "game" in prompt.lower():
             return "A clicking game about the section."
-        return "## Narrative\nPersonalized explanation."
+        return self.NARRATIVE
+
+
+class FakeChatModel(BaseChatModel):
+    """LangChain chat model backed by a FakeLLM; streams word by word."""
+
+    responder: Callable[[str], str]
+    token_delay: float = 0.0  # seconds per streamed token, to make streaming visible in UI runs
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-chat"
+
+    def _reply(self, messages) -> str:
+        content: Any = messages[-1].content
+        return self.responder(content if isinstance(content, str) else str(content))
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=self._reply(messages)))])
+
+    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        for token in re.findall(r"\S+\s*", self._reply(messages)):
+            if self.token_delay:
+                time.sleep(self.token_delay)
+            chunk = ChatGenerationChunk(message=AIMessageChunk(content=token))
+            if run_manager:
+                run_manager.on_llm_new_token(token, chunk=chunk)
+            yield chunk
+
+
+def install_fake_llm(fake: FakeLLM, setattr_: Callable = setattr, token_delay: float = 0.0) -> None:
+    """Route every core.llm model construction to the fake."""
+    import core.llm
+
+    setattr_(core.llm, "get_llm", lambda *args, **kwargs: FakeChatModel(responder=fake, token_delay=token_delay))
 
 
 @pytest.fixture
 def llm(monkeypatch):
     fake = FakeLLM()
-    import agents.content_agent as content
-    import agents.chat_agent as chat
-    import services.profile_service as profile
-
-    monkeypatch.setattr(content, "invoke_llm", fake)
-    monkeypatch.setattr(chat, "invoke_llm_with_history", lambda prompt, history, **kw: fake(prompt))
-    monkeypatch.setattr(profile, "invoke_llm", fake, raising=False)
+    install_fake_llm(fake, monkeypatch.setattr)
     return fake
 
 

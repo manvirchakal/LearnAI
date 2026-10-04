@@ -10,3 +10,13 @@ export interface StudyMaterials {
 export interface GameResponse {
   game_code: string;
 }
+
+/** Content-graph node names, emitted as each finishes */
+export type StudyStage =
+  | "load_cached" | "rag" | "narrative" | "game_idea" | "game_code" | "validate_code" | "diagrams" | "save";
+
+export type StudyStreamEvent =
+  | { event: "token"; data: string }
+  | { event: "stage"; data: StudyStage }
+  | { event: "done"; data: StudyMaterials }
+  | { event: "error"; data: string };

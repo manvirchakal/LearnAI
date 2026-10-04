@@ -54,7 +54,7 @@ Rules:
 def parse_toc_with_llm(images: List[bytes]) -> List[Dict]:
     """Use Claude vision to parse rendered TOC pages into raw chapters."""
     from langchain_core.messages import HumanMessage
-    from core.llm import get_sonnet
+    from core.llm import get_sonnet, message_text
 
     content: list = [{"type": "text", "text": _TOC_PROMPT}]
     for i, img in enumerate(images, 1):
@@ -62,9 +62,7 @@ def parse_toc_with_llm(images: List[bytes]) -> List[Dict]:
                                                      "data": base64.b64encode(img).decode()}})
         content.append({"type": "text", "text": f"This is page {i} of the table of contents."})
 
-    raw = get_sonnet().invoke([HumanMessage(content=content)]).content
-    if isinstance(raw, list):  # content blocks
-        raw = "".join(b.get("text", "") for b in raw if isinstance(b, dict))
+    raw = message_text(get_sonnet().invoke([HumanMessage(content=content)]))
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError("TOC parser returned no JSON")

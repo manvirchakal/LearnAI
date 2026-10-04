@@ -51,7 +51,7 @@ def test_study_materials_generated_once_then_cached(client, book, llm):
     first = client.post(url, json={})
     assert first.status_code == 200, first.text
     body = first.json()
-    assert body["narrative"].startswith("## Narrative")
+    assert body["narrative"] == FakeLLM.NARRATIVE
     assert body["game_code"] == FakeLLM.VALID_GAME
     assert body["diagrams"] and body["diagrams"][0].startswith("graph TD")
 
@@ -118,3 +118,31 @@ def test_collection_study_over_book_sections(client, book, llm):
     r = client.post(f"/collections/{col['collection_id']}/study", json={})
     assert r.status_code == 200, r.text
     assert r.json()["narrative"]
+
+
+def _parse_sse(raw: str):
+    import json
+    events = []
+    for frame in raw.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in frame.splitlines())
+        events.append((lines["event"], json.loads(lines["data"])))
+    return events
+
+
+def test_study_stream_emits_tokens_stages_and_done(client, book, llm):
+    url = f"/books/{book['file_id']}/sections/ch1.s2/study/stream"
+    with client.stream("POST", url, json={}) as r:
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+        events = _parse_sse(r.read().decode())
+
+    tokens = [d for e, d in events if e == "token"]
+    stages = [d for e, d in events if e == "stage"]
+    assert len(tokens) > 1 and "".join(tokens) == FakeLLM.NARRATIVE
+    assert stages[:3] == ["load_cached", "rag", "narrative"] and stages[-1] == "save"
+    assert events[-1][0] == "done" and events[-1][1]["narrative"] == FakeLLM.NARRATIVE
+
+    # second request is a cache hit: no tokens, immediate done
+    with client.stream("POST", url, json={}) as r:
+        cached = _parse_sse(r.read().decode())
+    assert [e for e, _ in cached] == ["stage", "done"]
+    assert cached[-1][1] == events[-1][1]

@@ -13,12 +13,12 @@ Game graph (regenerate just the game for an existing unit):
                                           └──────▶ save ▶ END
 """
 import logging
-from typing import Optional
+from typing import AsyncIterator, Optional, Tuple
 
 from langgraph.graph import END, StateGraph
 
 from agents.base import ContentState
-from core.llm import invoke_llm
+from core.llm import invoke_llm, message_text
 from services.profile_service import get_learning_profile
 from services.rag_service import retrieve_context
 from services.storage_service import load_study_materials, save_study_materials
@@ -192,6 +192,33 @@ def run_content_agent(source_text: str, user_id: str, scope: str, unit_id: str,
         _initial_state(source_text, user_id, scope, unit_id, rag_file_id, force_regenerate)
     )
     return {k: result[k] for k in RESULT_KEYS}
+
+
+async def stream_content_agent(source_text: str, user_id: str, scope: str, unit_id: str,
+                               rag_file_id: Optional[str] = None,
+                               force_regenerate: bool = False) -> AsyncIterator[Tuple[str, object]]:
+    """
+    Run the content graph, yielding UI events as they happen:
+        ("token", str)   narrative text as the model writes it
+        ("stage", str)   a graph node finished (load_cached, rag, narrative, game_idea, ...)
+        ("done", dict)   final study materials (also when served from cache)
+    """
+    state = _initial_state(source_text, user_id, scope, unit_id, rag_file_id, force_regenerate)
+    async for mode, chunk in content_graph.astream(state, stream_mode=["messages", "updates"]):
+        if mode == "messages":
+            message, meta = chunk
+            if meta.get("langgraph_node") == "narrative":
+                token = message_text(message)
+                if token:
+                    yield "token", token
+        else:
+            for node in chunk:
+                yield "stage", node
+
+    materials = load_cached_materials(user_id, scope, unit_id)
+    if not materials:
+        raise RuntimeError("Generation finished without producing study materials")
+    yield "done", materials
 
 
 def run_game_agent(source_text: str, user_id: str, scope: str, unit_id: str,
