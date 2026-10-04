@@ -102,17 +102,38 @@ cd server && FAKE_TOKEN_DELAY=0.1 python -m tests.fake_server
 
 ### Images
 
-CI (`.github/workflows/ci.yml`) runs the tests, then builds `linux/amd64` and `linux/arm64` images and pushes them to GHCR:
-
-- `ghcr.io/manvirchakal/learnai-server`
-- `ghcr.io/manvirchakal/learnai-client`
-
-Pushes to `main` are tagged `latest`; branches get their branch name, plus `sha-<short>` and semver tags for `v*` releases.
-
-If the packages are private, either make them public in GitHub's package settings or give the cluster an image pull secret.
+Both images are multi-arch (`linux/amd64`, `linux/arm64`):
 
 - **Server image:** about 1.2 GB. It contains no PyTorch; add `--build-arg EXTRAS=local-ml` to bundle the in-process models. It runs as uid 10001 with data in `/data`, and its health checks are `/health` (liveness) and `/health/ready` (storage writable).
 - **Client image:** about 300 MB. Next.js runs in standalone mode. `API_URL` is read at runtime by the `/api-backend` proxy route, so the same image works in every environment.
+
+### CI/CD: Forgejo → Woodpecker → Argo CD
+
+[`.woodpecker.yaml`](.woodpecker.yaml) does the following:
+
+- **Every push and PR:** runs the server tests and client checks.
+- **Default branch and tags:**
+  1. Builds both images for amd64 and arm64.
+  2. Pushes them to Forgejo's container registry, tagged with the commit SHA and `latest`.
+  3. Commits the SHA into `deploy/k8s/kustomization.yaml`, with `[CI SKIP]` in the message so it doesn't trigger another pipeline.
+- **Argo CD** ([`deploy/argocd/application.yaml`](deploy/argocd/application.yaml)) watches `deploy/k8s` and rolls the pods out.
+
+One-time setup:
+
+1. **Placeholders:** replace `git.example.lan/OWNER` in `.woodpecker.yaml`, `deploy/k8s/kustomization.yaml` and `deploy/argocd/application.yaml`.
+2. **Woodpecker secrets:** add `registry_username`, `registry_password` (a token with `package:write`) and `forgejo_push_token` (a token with `repository:write`).
+3. **Woodpecker server:** set `WOODPECKER_PLUGINS_PRIVILEGED=woodpeckerci/plugin-docker-buildx`.
+4. **Woodpecker agent (Ryzen):** register QEMU so it can build arm64 images: `docker run --privileged --rm tonistiigi/binfmt --install arm64`. Emulated arm64 builds are slow; registry build caches (`:buildcache`) keep later runs short. A Woodpecker agent on a Pi could build arm64 natively instead.
+5. **Cluster secrets** (they stay out of git):
+   ```bash
+   kubectl create namespace learnai
+   kubectl -n learnai create secret docker-registry registry-credentials \
+     --docker-server=git.example.lan --docker-username=<user> --docker-password=<token>
+   kubectl -n learnai create secret generic learnai-server-secrets --from-env-file=secret.env   # optional
+   ```
+6. **Register the app with Argo CD:** `kubectl apply -n argocd -f deploy/argocd/application.yaml`. If the repo is private, also add it as a repository in Argo CD.
+
+`.github/workflows/ci.yml` does the same build to GHCR while the repo lives on GitHub. Delete it after the move.
 
 ### Model host (vLLM)
 
@@ -131,11 +152,10 @@ Keep `LLM_MAX_OUTPUT_TOKENS` plus the prompt under `--max-model-len`. Source mat
 ### k3s (Raspberry Pi cluster)
 
 ```bash
-# 1. Point the config at the GPU host
+# Point the config at the GPU host, and set the hostname
 $EDITOR deploy/k8s/server.env          # OPENAI_BASE_URL, EMBEDDING_BASE_URL, STT_BASE_URL, models
-$EDITOR deploy/k8s/ingress.yaml        # hostname
-# 2. Deploy
-kubectl apply -k deploy/k8s
+$EDITOR deploy/k8s/ingress.yaml
+# Argo CD applies deploy/k8s; without Argo: kubectl apply -k deploy/k8s
 kubectl -n learnai get pods
 kubectl -n learnai exec deploy/learnai-server -- \
   python -c "import urllib.request;print(urllib.request.urlopen('http://localhost:8000/health/dependencies').read().decode())"

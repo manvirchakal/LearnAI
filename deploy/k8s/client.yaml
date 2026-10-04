@@ -12,6 +12,8 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: learnai, app.kubernetes.io/component: client}
     spec:
+      imagePullSecrets:
+        - name: registry-credentials
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

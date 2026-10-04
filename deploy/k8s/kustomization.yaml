@@ -14,16 +14,18 @@ configMapGenerator:
   - name: learnai-server-config
     envs: [server.env]
 
-# Optional secrets (OPENAI_API_KEY for a vLLM --api-key, AWS keys for Bedrock):
-#   cp secret.env.example secret.env && edit, then uncomment
-# secretGenerator:
-#   - name: learnai-server-secrets
-#     envs: [secret.env]
+# Secrets stay out of git (Argo CD syncs this directory). Create them once:
+#   kubectl -n learnai create secret generic learnai-server-secrets --from-env-file=secret.env
+#   kubectl -n learnai create secret docker-registry registry-credentials \
+#     --docker-server=git.example.lan --docker-username=<user> --docker-password=<token>
+# Both are optional: the server runs without the first, and the second is only
+# needed while the Forgejo packages are private.
 
+# newTag is pinned to a commit SHA by the Woodpecker deploy-bump step.
 images:
   - name: learnai-server
-    newName: ghcr.io/manvirchakal/learnai-server
+    newName: git.example.lan/OWNER/learnai-server
     newTag: latest
   - name: learnai-client
-    newName: ghcr.io/manvirchakal/learnai-client
+    newName: git.example.lan/OWNER/learnai-client
     newTag: latest
