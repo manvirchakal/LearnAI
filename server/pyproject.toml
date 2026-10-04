@@ -12,23 +12,18 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
-    "httpx>=0.27",
-
-    # Config
-    "python-dotenv>=1.0",
     "pydantic-settings>=2.0",
 
     # AWS Bedrock (Claude LLM — only remaining AWS dependency)
     "boto3>=1.35",
-    "langchain-aws>=0.2",
+    "langchain-aws>=1.0",
 
-    # LangGraph + LangChain
-    "langgraph>=0.2",
-    "langchain>=0.3",
-    "langchain-core>=0.3",
+    # LangGraph agents
+    "langgraph>=1.0",
+    "langchain-core>=1.0",
 
     # MCP
-    "fastmcp>=0.9",
+    "fastmcp>=4.0",
 
     # Local AI: STT
     "faster-whisper>=1.0",
@@ -41,35 +36,35 @@ dependencies = [
 
     # Local AI: Embeddings + Vector store
     "sentence-transformers>=3.0",
-    "chromadb>=0.5",
+    "chromadb>=1.0",
 
     # PDF processing
     "PyMuPDF>=1.24",
-    "PyPDF2>=3.0",
-    "pikepdf>=9.0",
     "Pillow>=10.0",
 
-    # Document processing
+    # Presentations
     "python-pptx>=1.0",
-    "chardet>=5.0",
 
     # Media
     "yt-dlp>=2024.0",
 
     # Code validation
     "esprima>=4.0",
-
-    # Utilities
-    "cachetools>=5.0",
-    "requests>=2.32",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
     "httpx>=0.27",
 ]
 
+[tool.setuptools]
+py-modules = ["main"]
+
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["agents*", "core*", "mcp_server*", "models*", "routes*", "services*", "utils*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

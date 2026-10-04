@@ -37,3 +37,9 @@ node_modules/
 
 launch.json
 create_inference_profile.py
+
+# Local data (uploads, generated content, vector store)
+server/data/
+
+# Next.js
+.next/

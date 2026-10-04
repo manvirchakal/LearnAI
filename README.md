@@ -1,127 +1,124 @@
-# LearnAI: Revolutionizing Education with GenAI
+# LearnAI
 
-Welcome to LearnAI, an innovative AI-driven educational platform designed to transform the learning experience. Our mission is to provide personalized, adaptive, and engaging education for every student. LearnAI empowers students to learn at their own pace, ensuring that each individual receives the support and resources they need to succeed. By harnessing the power of artificial intelligence, we're creating a future where education is tailored to you. Our platform offers personalized learning paths, performance-based content adjustment, dynamic resource allocation, and a interactive learning elements. Join us on this exciting journey to revolutionize learning!
+LearnAI turns a textbook PDF into a personalized study experience. For every section of a book it generates, tailored to the learner's VARK learning style:
 
-## Table of Contents
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Contributing](#contributing)
-- [License](#license)
+- **Narrative.** A rewritten explanation that streams in as it is written.
+- **Game.** An interactive React mini-game generated for the section.
+- **Diagrams.** Mermaid diagrams of the key concepts.
+- **Tutor chat.** Chat grounded in the section text plus retrieval over everything the learner has uploaded.
 
-## Features
+It can also transcribe YouTube videos and recorded lectures and ingest slide decks and notes, and it offers translation and text-to-speech.
 
-1. **Learner-Aware Content Adaptation**
-   - Description: The platform uses questionnaires to assess the learner's learning style and adapts the content accordingly. For example, if the learner is a visual learner, the platform may provide more diagrams and visual aids.
-   - Purpose: This feature ensures that learners remain engaged and supported, particularly when they encounter difficult concepts.
+All processing runs locally except the LLM itself: **Claude via AWS Bedrock** is the only cloud dependency.
 
-2. **Adaptive Learning Paths**
-   - Description: The platform dynamically adjusts the difficulty of quizzes and learning materials based on the learner's ongoing performance and progress.
-   - Purpose: This personalized approach allows each student to learn at their own pace, promoting a deeper understanding of the material.
+| Concern | Implementation |
+|---|---|
+| PDF text, outline, page rendering | PyMuPDF |
+| Printed table-of-contents parsing (when a PDF has no outline) | Claude vision |
+| Speech-to-text | faster-whisper |
+| Text-to-speech | pyttsx3 (espeak on Linux) |
+| Translation | argostranslate (models download once per language pair) |
+| Embeddings / RAG | sentence-transformers + ChromaDB |
+| Storage | Local filesystem under `server/data/` |
+| Auth | None yet: identity is the `X-User-Id` header (default `default`) |
 
-3. **AI-Generated Narratives and Explanations**
-   - Description: The platform leverages Llama 3.1 and T5 models to generate simplified explanations, engaging narratives, and interactive content from textbook materials.
-   - Purpose: By converting complex educational content into more accessible formats, the platform caters to learners with varying levels of proficiency and learning preferences.
+## Architecture
 
-4. **Interactive Learning Elements and Real-Time Diagrams**
-   - Description: The platform generates interactive learning elements like games and diagrams to help learners understand and remember concepts.
-   - Purpose: This feature keeps learners motivated and helps reinforce concepts by providing timely feedback and encouragement.
+```
+client/  Next.js 14 (App Router) · React 18 · TypeScript · MUI 6 + Tailwind · TanStack Query · Zustand
+  app/         routes: /home /upload /library /questionnaire /study/[fileId] /study/[fileId]/[sectionId]
+  api/         typed hooks per backend resource (books, study, chat, profile, media, …)
+  components/  ui/ (primitives) · layout/ · study/ · game/ · upload/ · library/ · shared/
+  types/       API contracts mirrored from server/models
+  store/       UI preferences only (server state lives in TanStack Query)
 
-5. **Inclusivity and Accessibility**
-   - Description: The platform is designed to be accessible to all learners, including those with disabilities. Features like text-to-speech, customizable interfaces, and multilingual support ensure that the platform can be used by a diverse audience.
-   - Purpose: To create an inclusive learning environment that removes barriers to education, ensuring that everyone has the opportunity to succeed.
+server/  FastAPI · LangGraph · FastMCP
+  routes/      HTTP only: validation, status codes, response models
+  agents/      LangGraph workflows: document ingestion, study content, chat, media
+  services/    single-purpose operations: books, storage, RAG, media, profile, accessibility
+  models/      Pydantic request/response models
+  utils/       pure helpers: prompts, TOC normalization, game-code and diagram cleanup, SSE
+  core/        config, local storage, vector store, Bedrock client
+  mcp_server/  the same local services exposed as MCP tools, mounted at /mcp
+  tests/       offline end-to-end API tests (fake LLM + embeddings)
+```
 
-## Installation and Setup
+**The study model.**
+- **Books and sections.** An uploaded PDF becomes a *book*. Its outline (or Claude's reading of its printed TOC) is normalized into chapters and *sections*. Each section gets a stable id such as `ch3.s2` and an explicit page range. Sections are the unit of study, and every generated artifact is cached per section.
+- **Collections.** Collections are an optional grouping of sections, transcripts, slides and notes. You can study and chat over them too.
 
-To install and setupLearnAI, follow these steps:
+**Agents.**
+- **Document agent:** `save_upload → read_outline → (vision TOC) → normalize → save_metadata`. Section text is then indexed in the background.
+- **Content agent:** `load_cached → rag → narrative → game_idea → game_code ⇄ validate_code → diagrams → save`. A cache hit short-circuits the run. Game code is syntax-checked and retried up to 2 times. A separate game-only graph regenerates just the game.
+- **Chat agent:** `load_context → translate_input → rag_retrieve → llm_call → translate_output → save_history`.
+- **Media agent:** `acquire_audio → transcribe → store → embed`.
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/manvirchakal/LearnAI
-   ```
-2. Navigate to the project directory:
-   ```
-   cd LearnAI
-   ```
-3. Setup virtual environment:
-    ```
-    python -m venv venv
-    ```
-4. Activate the virtual environment:
-   - On Windows:
-     ```
-     .\venv\Scripts\activate
-     ```
-   - On macOS and Linux:
-     ```
-     source venv/bin/activate
-     ```
-   - On Windows with Git Bash:
-     ```
-     source venv/Scripts/activate
-     ```
-5. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-6. Install npm packages:
-   ```
-   cd client
-   npm install --legacy-peer-deps
-   ```
-7. Create a new file called `.env` in the root directory and add the following:
-   ```
-   AWS_ACCESS_KEY_ID=<your_aws_access_key_id>
-   AWS_SECRET_ACCESS_KEY=<your_aws_secret_access_key>
-   AWS_DEFAULT_REGION=<your_aws_region>
-   COGNITO_AUTHORIZATION_URL=<your_cognito_authorization_url>
-   COGNITO_TOKEN_URL=<your_cognito_token_url>
-   COGNITO_JWKS_URL=<your_cognito_jwks_url>
-   COGNITO_APP_CLIENT_ID=<your_cognito_app_client_id>
-   KNOWLEDGE_BASE_ID=<your_knowledge_base_id>
-   MODEL_ARN=arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-instant-v1
-   TEXTBOOK_S3_BUCKET=<your_textbook_s3_bucket>
-   ```
-8. Create and `.env.local` file in the client directory and add the following:
-   ```
-   REACT_APP_AWS_REGION=<your_aws_region>
-   REACT_APP_USER_POOL_ID=<your_user_pool_id>
-   REACT_APP_USER_POOL_WEB_CLIENT_ID=<your_cognito_app_client_id>
-   ```
+**Streaming.** The narrative streams over SSE straight out of the content graph, using LangGraph's `messages` stream mode. Stage events follow as each node finishes.
 
-## Usage
+## Running locally
 
-To use LearnAI, follow these steps:
+### Prerequisites
 
-1. To run the server:
-   ```
-   uvicorn server.main:app --reload
-   ```
-2. To run the client:
-   ```
-   cd client
-   npm start
-   ```
-3. Navigate to the URL provided in the client terminal to access the application. (Usually http://localhost:3000)
+- Python 3.11+ and Node 20+
+- `ffmpeg`, needed by yt-dlp and faster-whisper for some formats
+- On Linux, `espeak-ng` for text-to-speech
+- AWS credentials that can invoke Claude models on Bedrock
 
-## Contributing
+### Backend
 
-We welcome contributions to LearnAI! Please follow these steps to contribute:
+```bash
+cd server
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env        # set AWS credentials/region and Bedrock model ids
+uvicorn main:app --reload   # http://localhost:8000 — API docs at /docs, MCP at /mcp
+```
 
-1. Fork the repository
-2. Create a new branch: `git checkout -b feature-branch-name`
-3. Make your changes and commit them: `git commit -m 'Add some feature'`
-4. Push to the branch: `git push origin feature-branch-name`
-5. Submit a pull request
+The embedding and Whisper models download on first use.
 
-## License
+### Frontend
 
-This project is licensed under multiple licenses due to the various components used:
+```bash
+cd client
+npm install                 # also copies MathJax + the pdf.js worker into public/vendor
+cp .env.local.example .env.local
+npm run dev                 # http://localhost:3000
+```
 
-- FastAPI and React components are licensed under the [MIT License](https://opensource.org/licenses/MIT).
-- Anthropic Claude is used under the [Anthropic API Terms of Use](https://www.anthropic.com/legal/terms).
-- AWS services are used under the [AWS Customer Agreement](https://aws.amazon.com/agreement/).
+The browser only talks to Next.js. Requests to `/api-backend/*` are proxied to `API_URL` (default `http://localhost:8000`).
 
-Please see the [LICENSE.md](LICENSE.md) file for full license texts and any additional details.
+### Without AWS credentials
 
+`tests/fake_server.py` serves the real API with a scripted fake LLM and fake embeddings. Use it for UI work:
 
+```bash
+cd server && FAKE_TOKEN_DELAY=0.1 python -m tests.fake_server
+```
+
+## Tests and checks
+
+```bash
+cd server && pytest                         # upload → structure → study (incl. SSE) → game → chat → delete, MCP tools
+cd client && npm run type-check && npm run lint && npm run build
+```
+
+## API overview
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/books` | Upload a PDF (multipart `file`, optional `toc_pages` like `5-9`) |
+| `GET` | `/books`, `/books/{file_id}` | List books, book with chapters/sections |
+| `GET` | `/books/{file_id}/sections/{section_id}/pdf` | The section's pages as a PDF |
+| `GET`/`POST` | `/books/{file_id}/sections/{section_id}/study` | Cached materials / get-or-generate |
+| `POST` | `/books/{file_id}/sections/{section_id}/study/stream` | Same as SSE: `token`, `stage`, `done`, `error` |
+| `POST` | `/books/{file_id}/sections/{section_id}/game` | Regenerate the game |
+| `GET`/`POST` | `/books/{file_id}/sections/{section_id}/chat` | Chat history / send a message |
+| `GET`/`PUT` | `/profile`, `GET /profile/questionnaire` | VARK learning profile |
+| `POST` | `/media/youtube`, `/media/lectures`, `/media/presentations` | Transcribe / ingest media |
+| | `/collections/...`, `/notes`, `/accessibility/{translate,speech}` | Collections, notes, translation and TTS |
+
+## Known limitations
+
+- **Generated games run as same-origin JavaScript.** This is fine for a single local user. Before multi-user deployment, games should run in a sandboxed iframe.
+- **No authentication.** `X-User-Id` is trusted as-is.
+- **Image notes aren't OCR'd.** Only PDF notes have their text extracted.
