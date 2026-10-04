@@ -11,7 +11,9 @@ GAME_CODE_SYSTEM_PROMPT = """Create a fully functional React component for the f
 {game_idea}
 
 The component will be rendered within a DynamicGameComponent via:
-  const ComponentFunction = new Function('React', 'useState', 'useEffect', 'MathJax', `return function Game() {{ ... }}`);
+  const factory = new Function('React', 'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'MathJax', `return function Game() {{ <your code> }}`);
+Your code is the BODY of the Game function: declare state/handlers, then end with `return React.createElement(...)`.
+MathJax is a React component that typesets LaTeX children, e.g. React.createElement(MathJax, null, "\\(x^2\\)").
 
 Requirements:
 1. Use React hooks (useState, useEffect, useRef, useCallback) without React. prefix
@@ -37,11 +39,16 @@ Requirements:
 Generate the game code now, no explanations or comments, just the code:"""
 
 
+def wrap_game_body(code: str) -> str:
+    """The exact shape the frontend executes (see DynamicGameComponent)."""
+    return f"function Game() {{\n{code}\n}}"
+
+
 def validate_js_syntax(code: str) -> bool:
-    """Validate JavaScript syntax using esprima."""
+    """Validate the generated function body by parsing it inside its wrapper."""
     try:
         import esprima
-        esprima.parseScript(code)
+        esprima.parseScript(wrap_game_body(code))
         return True
     except Exception as e:
         logger.warning(f"JS syntax error: {e}")
@@ -49,19 +56,17 @@ def validate_js_syntax(code: str) -> bool:
 
 
 def post_process_game_code(code: str) -> str:
-    """Clean up Claude-generated game code."""
+    """Clean up Claude-generated game code into a bare Game function body."""
+    code = code.strip()
     # Strip markdown code fences if present
-    code = re.sub(r"^```(?:javascript|js)?\n?", "", code, flags=re.MULTILINE)
-    code = re.sub(r"\n?```$", "", code, flags=re.MULTILINE)
+    code = re.sub(r"^```(?:javascript|jsx?|js)?\s*\n?", "", code)
+    code = re.sub(r"\n?```\s*$", "", code).strip()
 
-    # Remove wrapper function artifacts
-    code = re.sub(r"^return\s*function\s*\w*\s*\(\)\s*{", "", code)
-    code = re.sub(r"}\s*$", "", code)
+    # If the model wrapped the body anyway, unwrap it (and only then drop the closing brace)
+    wrapper = re.match(r"^(?:return\s+)?function\s*\w*\s*\(\s*\)\s*\{", code)
+    if wrapper and code.endswith("}"):
+        code = code[wrapper.end():-1].strip()
 
     # Fix MathJax.Node → MathJax
     code = code.replace("React.createElement(MathJax.Node,", "React.createElement(MathJax,")
-
-    # Fix arrow function spacing
-    code = re.sub(r"(\w+)\s*=>\s*{", r"\1 => {", code)
-
-    return code.strip()
+    return code

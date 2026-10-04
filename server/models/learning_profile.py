@@ -15,4 +15,5 @@ class LearningProfile(BaseModel):
 
 
 class SaveProfileRequest(BaseModel):
-    answers: Dict
+    # {"Visual": {"<statement>": 1-5, ...}, "Auditory": {...}, ...}
+    answers: Dict[str, Dict[str, int]]

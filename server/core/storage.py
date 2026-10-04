@@ -15,8 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve(key: str) -> Path:
-    """Turn an S3-style key into an absolute local path under DATA_DIR."""
-    return settings.DATA_DIR / key
+    """Turn an S3-style key into an absolute local path under DATA_DIR.
+
+    Keys embed client-supplied values (X-User-Id, ids from URLs), so reject
+    anything that would escape DATA_DIR.
+    """
+    root = settings.DATA_DIR.resolve()
+    path = (root / key).resolve()
+    if path != root and root not in path.parents:
+        raise ValueError(f"Storage key escapes data directory: {key!r}")
+    return path
 
 
 # ── JSON helpers ──────────────────────────────────────────────────────────────
@@ -87,7 +95,7 @@ def list_keys(prefix: str) -> List[str]:
     if not base.exists():
         return []
     return [
-        str(p.relative_to(settings.DATA_DIR))
+        str(p.relative_to(settings.DATA_DIR.resolve()))
         for p in sorted(base.rglob("*"))
         if p.is_file()
     ]

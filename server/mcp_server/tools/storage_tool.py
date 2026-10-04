@@ -1,4 +1,4 @@
-"""MCP tool: local file storage (read/write)."""
+"""MCP tools: read-only access to local storage (keys are confined to DATA_DIR)."""
 from fastmcp import FastMCP
 from core import storage
 
@@ -9,13 +9,6 @@ mcp = FastMCP("storage")
 def read_json(key: str) -> dict:
     """Read a JSON object from local storage by key."""
     return storage.load_json(key)
-
-
-@mcp.tool()
-def write_json(key: str, data: dict) -> str:
-    """Write a JSON object to local storage."""
-    storage.save_json(key, data)
-    return f"Saved to {key}"
 
 
 @mcp.tool()

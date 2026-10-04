@@ -1,11 +1,16 @@
 """MCP tool: local Whisper transcription via faster-whisper."""
 from fastmcp import FastMCP
-from services.media_service import _transcribe_file
+
+from core import storage
+from services.media_service import transcribe_file
 
 mcp = FastMCP("whisper")
 
 
 @mcp.tool()
-def transcribe_audio_file(audio_path: str) -> str:
-    """Transcribe an audio file using local faster-whisper."""
-    return _transcribe_file(audio_path)
+def transcribe_stored_audio(key: str) -> str:
+    """Transcribe an audio/video file held in local storage (key relative to DATA_DIR)."""
+    path = storage.get_local_path(key)
+    if not path.is_file():
+        raise FileNotFoundError(f"No stored file at {key}")
+    return transcribe_file(path)

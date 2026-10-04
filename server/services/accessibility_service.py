@@ -13,41 +13,37 @@ logger = logging.getLogger(__name__)
 
 # ── Translation ───────────────────────────────────────────────────────────────
 
-def translate_text(text: str, target_language: str) -> Optional[str]:
-    """
-    Translate text using argostranslate (offline).
-    Source language is always English ('en').
-    On first use per language pair, downloads the package automatically.
-    """
-    try:
-        from argostranslate import package, translate
-        installed_languages = translate.get_installed_languages()
-        from_lang = next((l for l in installed_languages if l.code == "en"), None)
-        to_lang = next((l for l in installed_languages if l.code == target_language), None)
+def _language_pair(source: str, target: str):
+    from argostranslate import translate
+    langs = {l.code: l for l in translate.get_installed_languages()}
+    return langs.get(source), langs.get(target)
 
+
+def translate_text(text: str, target_language: str, source_language: str = "en") -> Optional[str]:
+    """
+    Translate text offline with argostranslate.
+    The language pair's model is downloaded once, on first use.
+    """
+    if source_language == target_language:
+        return text
+    try:
+        from argostranslate import package
+        from_lang, to_lang = _language_pair(source_language, target_language)
         if not from_lang or not to_lang:
-            logger.info(f"Installing argostranslate package for en→{target_language}")
+            logger.info(f"Installing argostranslate package {source_language}→{target_language}")
             package.update_package_index()
-            available = package.get_available_packages()
-            pkg = next(
-                (p for p in available if p.from_code == "en" and p.to_code == target_language),
-                None,
-            )
+            pkg = next((p for p in package.get_available_packages()
+                        if p.from_code == source_language and p.to_code == target_language), None)
             if not pkg:
-                logger.warning(f"No argostranslate package found for en→{target_language}")
+                logger.warning(f"No argostranslate package for {source_language}→{target_language}")
                 return None
             package.install_from_path(pkg.download())
-            installed_languages = translate.get_installed_languages()
-            from_lang = next((l for l in installed_languages if l.code == "en"), None)
-            to_lang = next((l for l in installed_languages if l.code == target_language), None)
-
+            from_lang, to_lang = _language_pair(source_language, target_language)
         if not from_lang or not to_lang:
             return None
-
-        translation = from_lang.get_translation(to_lang)
-        return translation.translate(text)
+        return from_lang.get_translation(to_lang).translate(text)
     except Exception as e:
-        logger.error(f"Translation error (en→{target_language}): {e}")
+        logger.error(f"Translation error ({source_language}→{target_language}): {e}")
         return None
 
 

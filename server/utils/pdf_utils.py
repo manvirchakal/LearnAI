@@ -23,6 +23,11 @@ def extract_text_from_pages(pdf_path: str | Path, start_page: int, end_page: int
     return "\n".join(text_parts)
 
 
+def page_count(pdf_path: str | Path) -> int:
+    with fitz.open(str(pdf_path)) as doc:
+        return len(doc)
+
+
 def extract_toc(pdf_path: str | Path) -> List[dict]:
     """
     Extract built-in table of contents using PyMuPDF.

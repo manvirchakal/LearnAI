@@ -14,7 +14,7 @@ from mcp_server.tools.tts_tool import mcp as tts_mcp
 
 server = FastMCP("learnai")
 server.mount(storage_mcp, namespace="storage")
-server.mount(pdf_mcp, namespace="pdf")
+server.mount(pdf_mcp, namespace="books")
 server.mount(rag_mcp, namespace="rag")
 server.mount(whisper_mcp, namespace="whisper")
 server.mount(translate_mcp, namespace="translate")

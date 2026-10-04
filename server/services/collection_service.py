@@ -6,11 +6,11 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from services.book_service import get_section_text
 from services.storage_service import (
     save_collection,
     load_collection,
     list_collections,
-    load_extracted_text,
 )
 from core import storage
 
@@ -81,78 +81,20 @@ def create_default_collection(
     return collection_id
 
 
-def create_textbook_collections(
-    file_id: str, book_title: str, toc_structure: List[Dict], local_key: str, user_id: str
-) -> Dict:
-    """Create per-section and per-chapter collections for a textbook."""
-    collections: Dict = {"book_id": file_id, "section_collections": [], "chapter_collections": []}
-
-    for chapter in toc_structure:
-        chapter_sections = chapter.get("sections", [])
-        chapter_collection_id = str(uuid.uuid4())
-        section_ids = []
-
-        for section in chapter_sections:
-            section_id = str(uuid.uuid4())
-            section_col = {
-                "collection_id": section_id,
-                "name": f"{book_title} - {section['title']}",
-                "created_date": datetime.now().isoformat(),
-                "user_id": user_id,
-                "parent_chapter": chapter["number"],
-                "materials": {
-                    "textbook_sections": [{
-                        "section_id": section_id,
-                        "title": section["title"],
-                        "page": section["page"],
-                        "local_key": local_key,
-                        "added_date": datetime.now().isoformat(),
-                    }],
-                    "transcriptions": [],
-                    "presentations": [],
-                    "notes": [],
-                },
-            }
-            save_collection(user_id, section_id, section_col)
-            section_ids.append(section_id)
-            collections["section_collections"].append(section_col)
-
-        chapter_col = {
-            "collection_id": chapter_collection_id,
-            "name": f"{book_title} - {chapter['number']}: {chapter['title']}",
-            "created_date": datetime.now().isoformat(),
-            "user_id": user_id,
-            "chapter_number": chapter["number"],
-            "materials": {
-                "textbook_sections": [
-                    {"section_id": str(uuid.uuid4()), "title": s["title"], "page": s["page"],
-                     "local_key": local_key, "added_date": datetime.now().isoformat()}
-                    for s in chapter_sections
-                ],
-                "transcriptions": [],
-                "presentations": [],
-                "notes": [],
-                "subcollections": section_ids,
-            },
-        }
-        save_collection(user_id, chapter_collection_id, chapter_col)
-        collections["chapter_collections"].append(chapter_col)
-
-    return collections
-
-
 def get_collection_content(collection_id: str, user_id: str) -> Dict:
     """Aggregate all material text from a collection for use in prompts."""
     col = get_collection(collection_id, user_id)
     content: Dict = {"textbook_content": [], "transcriptions": [], "presentations": [], "notes": []}
 
-    for section in col.get("materials", {}).get("textbook_sections", []):
-        file_id = section.get("file_id", "")
-        section_title = section.get("title", "")
-        if file_id and section_title:
-            text = load_extracted_text(user_id, file_id, section_title)
-            if text:
-                content["textbook_content"].append({"text": text})
+    # Textbook sections are referenced as {"file_id": ..., "section_id": ...}
+    for ref in col.get("materials", {}).get("textbook_sections", []):
+        file_id, section_id = ref.get("file_id"), ref.get("section_id")
+        if not (file_id and section_id):
+            continue
+        try:
+            content["textbook_content"].append({"text": get_section_text(user_id, file_id, section_id)})
+        except FileNotFoundError:
+            logger.warning(f"Collection {collection_id} references missing section {file_id}/{section_id}")
 
     for trans in col.get("materials", {}).get("transcriptions", []):
         trans_id = trans.get("transcription_id") or trans.get("job_id", "")

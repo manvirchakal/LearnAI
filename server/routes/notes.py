@@ -1,6 +1,5 @@
 import logging
 import os
-import tempfile
 import uuid
 from datetime import datetime
 
@@ -15,15 +14,16 @@ from services.storage_service import (
     load_notes_content,
 )
 from services.collection_service import create_default_collection
+from services.rag_service import ingest_section
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["notes"])
+router = APIRouter(prefix="/notes", tags=["notes"])
 
 SUPPORTED_FORMATS = [".pdf", ".jpg", ".jpeg", ".png"]
 
 
-@router.post("/process-notes")
-async def process_notes(
+@router.post("")
+def process_notes(
     notes: UploadFile = File(...),
     user_id: str = Depends(get_user_id),
 ):
@@ -33,7 +33,7 @@ async def process_notes(
 
     notes_id = str(uuid.uuid4())
     try:
-        notes_bytes = await notes.read()
+        notes_bytes = notes.file.read()
 
         # Extract text using PyMuPDF (PDF) or pytesseract-free plain fitz for images
         processed_content = {"text_content": [], "diagrams": [], "tables": []}
@@ -70,6 +70,11 @@ async def process_notes(
 
         save_notes_metadata(user_id, notes_id, metadata)
         save_notes_content(user_id, notes_id, processed_content)
+        notes_text = "\n".join(t["text"] for t in processed_content["text_content"])
+        try:
+            ingest_section(user_id, "notes", notes_id, notes_text)
+        except Exception as e:
+            logger.warning(f"Embedding notes {notes_id} failed: {e}")
 
         collection_id = create_default_collection("notes", notes_id, metadata, user_id)
 
@@ -85,8 +90,8 @@ async def process_notes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/notes/{notes_id}")
-async def get_notes(notes_id: str, user_id: str = Depends(get_user_id)):
+@router.get("/{notes_id}")
+def get_notes(notes_id: str, user_id: str = Depends(get_user_id)):
     try:
         metadata = load_notes_metadata(user_id, notes_id)
         content = load_notes_content(user_id, notes_id)

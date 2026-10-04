@@ -22,8 +22,9 @@ def _bedrock_runtime_client():
     return boto3.client(
         service_name="bedrock-runtime",
         region_name=settings.AWS_DEFAULT_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        # None (not "") lets boto3 fall back to its credential chain (env, profile, SSO, role)
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID or None,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or None,
         config=Config(retries={"max_attempts": 3}),
     )
 

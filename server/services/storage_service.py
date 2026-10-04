@@ -20,30 +20,25 @@ def profile_exists(user_id: str) -> bool:
     return storage.json_exists(f"learning_profiles/{user_id}.json")
 
 
-# ── Textbook uploads ──────────────────────────────────────────────────────────
+# ── Books (uploaded PDFs) ──────────────────────────────────────────────────────
 
-def save_upload(user_id: str, unique_filename: str, data: bytes) -> str:
-    key = f"user-uploads/{user_id}/{unique_filename}"
+def save_upload(user_id: str, file_id: str, data: bytes) -> str:
+    key = f"user-uploads/{user_id}/{file_id}.pdf"
     storage.save_bytes(key, data)
     return key
 
 
-def load_upload(user_id: str, unique_filename: str) -> bytes:
-    return storage.load_bytes(f"user-uploads/{user_id}/{unique_filename}")
+def save_book_metadata(user_id: str, file_id: str, metadata: dict) -> None:
+    storage.save_json(f"metadata/{user_id}/{file_id}.json", metadata)
 
 
-def save_metadata(user_id: str, unique_filename: str, metadata: dict) -> None:
-    storage.save_json(f"metadata/{user_id}/{unique_filename}.json", metadata)
+def load_book_metadata(user_id: str, file_id: str) -> dict:
+    return storage.load_json(f"metadata/{user_id}/{file_id}.json")
 
 
-def load_metadata(user_id: str, unique_filename: str) -> dict:
-    return storage.load_json(f"metadata/{user_id}/{unique_filename}.json")
-
-
-def list_metadata(user_id: str) -> List[dict]:
-    keys = storage.list_json_keys(f"metadata/{user_id}/")
+def list_book_metadata(user_id: str) -> List[dict]:
     results = []
-    for key in keys:
+    for key in storage.list_json_keys(f"metadata/{user_id}/"):
         try:
             results.append(storage.load_json(key))
         except Exception:
@@ -51,46 +46,34 @@ def list_metadata(user_id: str) -> List[dict]:
     return results
 
 
-# ── Extracted text ────────────────────────────────────────────────────────────
+# ── Per-section artifacts (keyed by stable section ids, never titles) ─────────
 
-def save_extracted_text(user_id: str, file_id: str, section_name: str, text: str) -> None:
-    storage.save_text(f"extracted-text/{user_id}/{file_id}/section_{section_name}.txt", text)
-
-
-def load_extracted_text(user_id: str, file_id: str, section_name: str) -> str:
-    key = f"extracted-text/{user_id}/{file_id}/section_{section_name}.txt"
-    if not storage.json_exists(key) and not (storage._resolve(key)).exists():
-        return ""
-    try:
-        return storage.load_text(key)
-    except FileNotFoundError:
-        return ""
+def save_extracted_text(user_id: str, file_id: str, section_id: str, text: str) -> None:
+    storage.save_text(f"extracted-text/{user_id}/{file_id}/{section_id}.txt", text)
 
 
-# ── Narratives ────────────────────────────────────────────────────────────────
-
-def save_narrative(user_id: str, file_id: str, section_name: str, force: str, data: dict) -> None:
-    storage.save_json(f"narratives/{user_id}/{file_id}/{section_name}_{force}.json", data)
-
-
-def load_narrative(user_id: str, file_id: str, section_name: str, force: str) -> dict:
-    key = f"narratives/{user_id}/{file_id}/{section_name}_{force}.json"
-    if not storage._resolve(key).exists():
-        return {}
-    return storage.load_json(key)
+def load_extracted_text(user_id: str, file_id: str, section_id: str) -> str:
+    key = f"extracted-text/{user_id}/{file_id}/{section_id}.txt"
+    return storage.load_text(key) if storage.json_exists(key) else ""
 
 
-# ── Chat history ──────────────────────────────────────────────────────────────
+def save_study_materials(user_id: str, scope: str, unit_id: str, data: dict) -> None:
+    """scope is a file_id for book sections, or "collections" for collections."""
+    storage.save_json(f"narratives/{user_id}/{scope}/{unit_id}.json", data)
 
-def save_chat_history(user_id: str, file_id: str, section_name: str, history: list) -> None:
-    storage.save_json(f"chat-history/{user_id}/{file_id}/{section_name}.json", history)
+
+def load_study_materials(user_id: str, scope: str, unit_id: str) -> dict:
+    key = f"narratives/{user_id}/{scope}/{unit_id}.json"
+    return storage.load_json(key) if storage.json_exists(key) else {}
 
 
-def load_chat_history(user_id: str, file_id: str, section_name: str) -> list:
-    key = f"chat-history/{user_id}/{file_id}/{section_name}.json"
-    if not storage._resolve(key).exists():
-        return []
-    return storage.load_json(key)
+def save_chat_history(user_id: str, scope: str, unit_id: str, history: list) -> None:
+    storage.save_json(f"chat-history/{user_id}/{scope}/{unit_id}.json", history)
+
+
+def load_chat_history(user_id: str, scope: str, unit_id: str) -> list:
+    key = f"chat-history/{user_id}/{scope}/{unit_id}.json"
+    return storage.load_json(key) if storage.json_exists(key) else []
 
 
 # ── Collections ───────────────────────────────────────────────────────────────

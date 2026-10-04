@@ -1,173 +1,124 @@
 """
-LangGraph document ingestion agent.
-Pipeline: save_upload → extract_toc → parse_toc_llm → create_collections → embed_sections
+LangGraph document ingestion agent — turns an uploaded PDF into a studyable book.
+
+    save_upload ▶ read_outline ─┬─(outline found)──────────────▶ normalize ▶ save_metadata ▶ END
+                                ├─(toc_pages given)▶ parse_toc_vision ─┘
+                                └─(neither)────────────────────▶ normalize
+
+Section text extraction and embedding are not part of this graph: they run
+lazily per section, or for the whole book as a background task after upload
+(services/book_service.index_book), so the upload request returns quickly.
 """
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
 from agents.base import DocumentState
-from services.storage_service import save_upload, save_metadata
-from services.collection_service import create_textbook_collections
-from services.textbook_service import _parse_toc_with_llm
-from services.rag_service import ingest_section
-from utils.pdf_utils import extract_toc, pages_to_images, extract_text_and_tables_pymupdf
 from core import storage
+from services.book_service import parse_toc_with_llm
+from services.storage_service import save_book_metadata, save_upload
+from utils.pdf_utils import extract_toc, page_count, pages_to_images
+from utils.toc_utils import normalize_toc, single_section_toc, toc_from_outline
 
 logger = logging.getLogger(__name__)
 
 
-def node_save_upload(state: DocumentState) -> DocumentState:
+def node_save_upload(state: DocumentState) -> dict:
+    file_id = uuid.uuid4().hex
+    local_key = save_upload(state["user_id"], file_id, state["file_bytes"])
+    return {"file_id": file_id, "local_key": local_key,
+            "num_pages": page_count(storage.get_local_path(local_key))}
+
+
+def node_read_outline(state: DocumentState) -> dict:
     try:
-        unique_filename = f"{uuid.uuid4()}_{state['filename']}"
-        local_key = save_upload(state["user_id"], unique_filename, state["file_bytes"])
-        file_id = unique_filename.split("_")[0]
-        return {**state, "local_key": local_key, "file_id": file_id}
+        raw = toc_from_outline(extract_toc(storage.get_local_path(state["local_key"])))
     except Exception as e:
-        return {**state, "error": str(e)}
+        logger.warning(f"Reading PDF outline failed: {e}")
+        raw = []
+    return {"raw_toc": raw, "toc_source": "outline" if raw else "none"}
 
 
-def node_extract_toc(state: DocumentState) -> DocumentState:
-    if state.get("error") or state["document_type"] != "textbook" or not state.get("toc_pages"):
-        return state
+def node_parse_toc_vision(state: DocumentState) -> dict:
     try:
-        pdf_path = storage._resolve(state["local_key"])
-        embedded = extract_toc(str(pdf_path))
-        if embedded:
-            chapters = {}
-            for entry in embedded:
-                if entry["level"] == 1:
-                    chapters[entry["title"]] = {
-                        "number": f"Chapter {len(chapters)+1}",
-                        "title": entry["title"],
-                        "page": entry["page"],
-                        "sections": [],
-                    }
-                elif entry["level"] == 2:
-                    last = list(chapters.values())[-1] if chapters else None
-                    if last:
-                        last["sections"].append({"title": entry["title"], "page": entry["page"]})
-            return {**state, "toc_structure": list(chapters.values())}
-        # No embedded TOC; will fall through to LLM parsing
-        return state
+        start, end = (int(p) for p in state["toc_pages"].split("-"))
+        images = pages_to_images(storage.get_local_path(state["local_key"]), start, end)
+        raw = parse_toc_with_llm(images)
+        return {"raw_toc": raw, "toc_source": "vision" if raw else "none"}
     except Exception as e:
-        logger.warning(f"TOC extraction failed: {e}, will try LLM parsing")
-        return state
+        # A bad TOC parse shouldn't fail the upload; fall back to a single section
+        logger.error(f"Vision TOC parsing failed: {e}")
+        return {"raw_toc": [], "toc_source": "none", "error": f"TOC parsing failed: {e}"}
 
 
-def node_parse_toc_llm(state: DocumentState) -> DocumentState:
-    """Use Claude vision if embedded TOC wasn't found."""
-    if state.get("error") or state.get("toc_structure") or not state.get("toc_pages"):
-        return state
-    try:
-        pdf_path = storage._resolve(state["local_key"])
-        start, end = map(int, state["toc_pages"].split("-"))
-        images = pages_to_images(str(pdf_path), start, end)
-        toc = _parse_toc_with_llm(images)
-        return {**state, "toc_structure": toc}
-    except Exception as e:
-        logger.error(f"LLM TOC parsing failed: {e}")
-        return {**state, "toc_structure": [], "error": str(e)}
+def node_normalize(state: DocumentState) -> dict:
+    chapters = normalize_toc(state["raw_toc"], state["num_pages"])
+    if not chapters:
+        chapters = single_section_toc(state["filename"].removesuffix(".pdf"), state["num_pages"])
+    return {"chapters": chapters}
 
 
-def node_save_metadata(state: DocumentState) -> DocumentState:
-    try:
-        unique_filename = state["local_key"].split("/")[-1]
-        metadata = {
-            "title": state["filename"],
-            "local_key": state["local_key"],
-            "s3_key": state["local_key"],
-            "user_id": state["user_id"],
-            "document_type": state["document_type"],
-            "table_of_contents": state.get("toc_structure", []),
-        }
-        save_metadata(state["user_id"], unique_filename, metadata)
-        return state
-    except Exception as e:
-        return {**state, "error": str(e)}
+def node_save_metadata(state: DocumentState) -> dict:
+    save_book_metadata(state["user_id"], state["file_id"], {
+        "file_id": state["file_id"],
+        "title": state["filename"].removesuffix(".pdf"),
+        "filename": state["filename"],
+        "local_key": state["local_key"],
+        "user_id": state["user_id"],
+        "document_type": state["document_type"],
+        "num_pages": state["num_pages"],
+        "toc_source": state["toc_source"],
+        "chapters": state["chapters"],
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {}
 
 
-def node_create_collections(state: DocumentState) -> DocumentState:
-    if not state.get("toc_structure"):
-        return state
-    try:
-        unique_filename = state["local_key"].split("/")[-1]
-        file_id = state["file_id"]
-        cols = create_textbook_collections(
-            file_id, state["filename"], state["toc_structure"], state["local_key"], state["user_id"]
-        )
-        return {**state, "collections": cols}
-    except Exception as e:
-        logger.error(f"Collection creation failed: {e}")
-        return {**state, "collections": {}}
-
-
-def node_embed_sections(state: DocumentState) -> DocumentState:
-    """Embed extracted text of all sections into ChromaDB."""
-    if not state.get("toc_structure"):
-        return state
-    try:
-        pdf_path = storage._resolve(state["local_key"])
-        toc = state["toc_structure"]
-        for chapter in toc:
-            secs = chapter.get("sections", [])
-            for i, sec in enumerate(secs):
-                end = secs[i + 1]["page"] - 1 if i + 1 < len(secs) else sec["page"] + 50
-                text = extract_text_and_tables_pymupdf(str(pdf_path), sec["page"], end)
-                if text.strip():
-                    ingest_section(state["user_id"], state["file_id"], sec["title"], text)
-    except Exception as e:
-        logger.warning(f"Section embedding failed: {e}")
-    return state
+def route_after_outline(state: DocumentState) -> str:
+    if state["raw_toc"]:
+        return "normalize"
+    return "vision" if state.get("toc_pages") else "normalize"
 
 
 def build_document_graph():
     g = StateGraph(DocumentState)
     g.add_node("save_upload", node_save_upload)
-    g.add_node("extract_toc", node_extract_toc)
-    g.add_node("parse_toc_llm", node_parse_toc_llm)
+    g.add_node("read_outline", node_read_outline)
+    g.add_node("parse_toc_vision", node_parse_toc_vision)
+    g.add_node("normalize", node_normalize)
     g.add_node("save_metadata", node_save_metadata)
-    g.add_node("create_collections", node_create_collections)
-    g.add_node("embed_sections", node_embed_sections)
 
     g.set_entry_point("save_upload")
-    g.add_edge("save_upload", "extract_toc")
-    g.add_edge("extract_toc", "parse_toc_llm")
-    g.add_edge("parse_toc_llm", "save_metadata")
-    g.add_edge("save_metadata", "create_collections")
-    g.add_edge("create_collections", "embed_sections")
-    g.add_edge("embed_sections", END)
+    g.add_edge("save_upload", "read_outline")
+    g.add_conditional_edges("read_outline", route_after_outline,
+                            {"normalize": "normalize", "vision": "parse_toc_vision"})
+    g.add_edge("parse_toc_vision", "normalize")
+    g.add_edge("normalize", "save_metadata")
+    g.add_edge("save_metadata", END)
     return g.compile()
 
 
 document_graph = build_document_graph()
 
 
-def run_document_agent(
-    file_bytes: bytes,
-    filename: str,
-    user_id: str,
-    document_type: str = "textbook",
-    toc_pages: Optional[str] = None,
-) -> dict:
-    initial: DocumentState = {
+def run_document_agent(file_bytes: bytes, filename: str, user_id: str,
+                       document_type: str = "textbook", toc_pages: Optional[str] = None) -> dict:
+    """Ingest a PDF. Returns {"file_id", "toc_source", "warning"}."""
+    result = document_graph.invoke({
         "file_bytes": file_bytes,
         "filename": filename,
         "user_id": user_id,
-        "file_id": "",
         "document_type": document_type,
-        "toc_pages": toc_pages,
-        "toc_structure": [],
+        "toc_pages": toc_pages or None,
+        "file_id": "",
         "local_key": "",
-        "collections": {},
+        "num_pages": 0,
+        "raw_toc": [],
+        "toc_source": "none",
+        "chapters": [],
         "error": None,
-    }
-    result = document_graph.invoke(initial)
-    return {
-        "local_key": result["local_key"],
-        "s3_key": result["local_key"],
-        "collections": result.get("collections", {}),
-        "error": result.get("error"),
-    }
+    })
+    return {"file_id": result["file_id"], "toc_source": result["toc_source"], "warning": result.get("error")}

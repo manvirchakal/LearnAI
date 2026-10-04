@@ -1,42 +1,35 @@
-import io
-import logging
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
-import tempfile
-import os
+"""
+Accessibility API — local translation (argostranslate) and TTS (pyttsx3).
 
-from models.ai_outputs import SynthesizeSpeechRequest, TranslateRequest
-from services.accessibility_service import translate_text, synthesize_speech
+    POST /accessibility/translate  {text, target_language} → {translated_text}
+    POST /accessibility/speech     {text, language}        → audio/wav
+"""
+import logging
+
+from fastapi import APIRouter, HTTPException, Response
+
+from models.accessibility import SynthesizeSpeechRequest, TranslateRequest
+from services.accessibility_service import synthesize_speech, translate_text
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["accessibility"])
+router = APIRouter(prefix="/accessibility", tags=["accessibility"])
 
 
 @router.post("/translate")
-async def translate_endpoint(request: TranslateRequest):
-    if not request.text or not request.target_language:
-        raise HTTPException(status_code=400, detail="text and target_language are required")
+def translate(request: TranslateRequest):
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
     result = translate_text(request.text, request.target_language)
     if result is None:
-        raise HTTPException(status_code=500, detail="Translation failed or language pair not supported")
+        raise HTTPException(status_code=422, detail="Translation failed or language pair not installed")
     return {"translated_text": result}
 
 
-@router.post("/api/synthesize-speech")
-async def synthesize_speech_endpoint(request: SynthesizeSpeechRequest):
-    if not request.text:
+@router.post("/speech")
+def speech(request: SynthesizeSpeechRequest):
+    if not request.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-    try:
-        audio_bytes = synthesize_speech(request.text, request.language)
-        if not audio_bytes:
-            raise HTTPException(status_code=500, detail="Speech synthesis failed")
-
-        # Write to temp file and serve
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-
-        return FileResponse(tmp_path, media_type="audio/wav", filename="speech.wav")
-    except Exception as e:
-        logger.error(f"TTS error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    audio = synthesize_speech(request.text, request.language)
+    if not audio:
+        raise HTTPException(status_code=500, detail="Speech synthesis failed (is espeak installed?)")
+    return Response(audio, media_type="audio/wav")

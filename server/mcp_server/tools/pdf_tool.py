@@ -1,23 +1,24 @@
-"""MCP tool: PDF text and TOC extraction via PyMuPDF."""
+"""MCP tools: browse uploaded books and read section text (PyMuPDF, local)."""
 from fastmcp import FastMCP
-from utils.pdf_utils import extract_text_from_pages, extract_toc, extract_text_and_tables_pymupdf
 
-mcp = FastMCP("pdf")
+from services import book_service
 
-
-@mcp.tool()
-def extract_text(pdf_path: str, start_page: int, end_page: int) -> str:
-    """Extract plain text from a PDF page range."""
-    return extract_text_from_pages(pdf_path, start_page, end_page)
+mcp = FastMCP("books")
 
 
 @mcp.tool()
-def get_toc(pdf_path: str) -> list:
-    """Extract the built-in table of contents from a PDF."""
-    return extract_toc(pdf_path)
+def list_books(user_id: str = "default") -> list:
+    """List a user's uploaded books (file_id, title, page and section counts)."""
+    return book_service.list_books(user_id)
 
 
 @mcp.tool()
-def extract_section_text(pdf_path: str, start_page: int, end_page: int) -> str:
-    """Extract text and tables from a PDF section using PyMuPDF."""
-    return extract_text_and_tables_pymupdf(pdf_path, start_page, end_page)
+def get_book_structure(file_id: str, user_id: str = "default") -> dict:
+    """Chapters and sections of a book, with stable section ids and page ranges."""
+    return book_service.get_book(user_id, file_id)
+
+
+@mcp.tool()
+def get_section_text(file_id: str, section_id: str, user_id: str = "default") -> str:
+    """Extracted text of one section (cached and embedded for RAG on first read)."""
+    return book_service.get_section_text(user_id, file_id, section_id)

@@ -4,10 +4,9 @@ from datetime import datetime
 
 
 class TextbookSectionRef(BaseModel):
+    file_id: str
     section_id: str
-    title: str
-    page: int
-    local_key: str
+    title: str = ""
     added_date: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 

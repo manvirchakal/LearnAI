@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import List, Optional
 
-from core.vectorstore import ingest_texts, query, delete_user_collection
+from core.vectorstore import get_collection, ingest_texts, query, delete_user_collection
 
 logger = logging.getLogger(__name__)
 
@@ -59,3 +59,11 @@ def ingest_transcript(user_id: str, job_id: str, text: str) -> None:
 
 def ingest_presentation(user_id: str, pres_id: str, text: str) -> None:
     ingest_section(user_id, "presentations", pres_id, text)
+
+
+def delete_file_chunks(user_id: str, file_id: str) -> None:
+    """Remove every embedded chunk belonging to one file."""
+    try:
+        get_collection(user_id).delete(where={"file_id": file_id})
+    except Exception as e:
+        logger.warning(f"Could not delete chunks for {user_id}/{file_id}: {e}")

@@ -1,85 +1,82 @@
+"""
+Media API — transcripts (YouTube, recorded/uploaded lectures) and presentations.
+
+    POST /media/youtube           {video_url}           (media agent)
+    POST /media/lectures          multipart audio+title (media agent)
+    GET  /media/transcriptions
+    POST /media/presentations     multipart .pptx
+    GET  /media/presentations
+    GET  /media/presentations/{presentation_id}
+"""
 import logging
+
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 
+from agents.media_agent import run_lecture_agent, run_youtube_agent
 from core.dependencies import get_user_id
-from services.media_service import transcribe_youtube, transcribe_lecture, process_presentation
-from services.storage_service import list_transcription_metadata, list_presentation_metadata, load_presentation_metadata
-from services.storage_service import load_presentation_slide
+from services.media_service import process_presentation
+from services.storage_service import (
+    list_presentation_metadata,
+    list_transcription_metadata,
+    load_presentation_metadata,
+    load_presentation_slide,
+)
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["media"])
+router = APIRouter(prefix="/media", tags=["media"])
 
 
-@router.post("/transcribe-youtube")
-async def transcribe_youtube_endpoint(
-    video_url: str = Body(..., embed=True),
-    user_id: str = Depends(get_user_id),
-):
+@router.post("/youtube")
+def transcribe_youtube(video_url: str = Body(..., embed=True), user_id: str = Depends(get_user_id)):
     try:
-        return await transcribe_youtube(video_url, user_id)
+        return run_youtube_agent(video_url, user_id)
     except Exception as e:
-        logger.error(f"YouTube transcription error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("YouTube transcription failed")
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
 
 
-@router.post("/transcribe-lecture")
-async def transcribe_lecture_endpoint(
+@router.post("/lectures")
+def transcribe_lecture(
     audio: UploadFile = File(...),
     title: str = Form(...),
     user_id: str = Depends(get_user_id),
 ):
     try:
-        audio_bytes = await audio.read()
-        return await transcribe_lecture(audio_bytes, audio.filename, title, user_id)
+        return run_lecture_agent(audio.file.read(), audio.filename or "", title, user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Lecture transcription error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Lecture transcription failed")
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
 
 
-@router.post("/process-presentation")
-async def process_presentation_endpoint(
-    presentation: UploadFile = File(...),
-    user_id: str = Depends(get_user_id),
-):
-    if not presentation.filename.endswith(".pptx"):
-        raise HTTPException(status_code=400, detail="Only .pptx files are supported")
-    try:
-        pptx_bytes = await presentation.read()
-        return process_presentation(pptx_bytes, presentation.filename, user_id)
-    except Exception as e:
-        logger.error(f"Presentation processing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/user-transcriptions")
-async def user_transcriptions(user_id: str = Depends(get_user_id)):
+@router.get("/transcriptions")
+def list_transcriptions(user_id: str = Depends(get_user_id)):
     return list_transcription_metadata(user_id)
 
 
-@router.get("/list-presentations/{user_id_path}")
-async def list_presentations(user_id_path: str, user_id: str = Depends(get_user_id)):
-    return list_presentation_metadata(user_id_path)
-
-
-@router.get("/get-presentation/{user_id_path}/{presentation_id}")
-async def get_presentation(
-    user_id_path: str,
-    presentation_id: str,
-    format: str = "separate",
-    user_id: str = Depends(get_user_id),
-):
+@router.post("/presentations")
+def upload_presentation(presentation: UploadFile = File(...), user_id: str = Depends(get_user_id)):
+    if not (presentation.filename or "").lower().endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="Only .pptx files are supported")
     try:
-        metadata = load_presentation_metadata(user_id_path, presentation_id)
-        slides = [
-            load_presentation_slide(user_id_path, presentation_id, n)
-            for n in range(1, metadata["total_slides"] + 1)
-        ]
-        if format == "consolidated":
-            return {"metadata": metadata, "content": {f"slide_{i+1}": s for i, s in enumerate(slides)}}
-        return {"metadata": metadata, "slides": slides}
+        return process_presentation(presentation.file.read(), presentation.filename, user_id)
+    except Exception as e:
+        logger.exception("Presentation processing failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/presentations")
+def list_presentations(user_id: str = Depends(get_user_id)):
+    return list_presentation_metadata(user_id)
+
+
+@router.get("/presentations/{presentation_id}")
+def get_presentation(presentation_id: str, user_id: str = Depends(get_user_id)):
+    try:
+        metadata = load_presentation_metadata(user_id, presentation_id)
+        slides = [load_presentation_slide(user_id, presentation_id, n)
+                  for n in range(1, metadata["total_slides"] + 1)]
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Presentation not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"metadata": metadata, "slides": slides}
