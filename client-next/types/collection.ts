@@ -1,13 +1,11 @@
 export interface TextbookSectionRef {
+  file_id: string;
   section_id: string;
-  title: string;
-  page: number;
-  local_key: string;
-  added_date: string;
+  title?: string;
 }
 
 export interface CollectionMaterials {
-  textbook_sections: Record<string, unknown>[];
+  textbook_sections: TextbookSectionRef[];
   transcriptions: Record<string, unknown>[];
   presentations: Record<string, unknown>[];
   notes: Record<string, unknown>[];
@@ -19,7 +17,5 @@ export interface Collection {
   name: string;
   created_date: string;
   user_id: string;
-  chapter_number?: string;
-  parent_chapter?: string;
   materials: CollectionMaterials;
 }

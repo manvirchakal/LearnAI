@@ -1,33 +1,31 @@
 "use client";
-import {
-  Drawer, List, ListItemButton, ListItemText, Collapse,
-  Typography, Box, Divider, IconButton,
-} from "@mui/material";
+import { Box, Collapse, Divider, Drawer, List, ListItemButton, ListItemText, Typography } from "@mui/material";
 import ExpandLess from "@mui/icons-material/ExpandLess";
 import ExpandMore from "@mui/icons-material/ExpandMore";
-import { useStudyStore } from "@/store/studyStore";
+import Link from "next/link";
+import { useState } from "react";
 import { useUIStore } from "@/store/uiStore";
-import type { ChapterNode } from "@/types/textbook";
-import { useRouter } from "next/navigation";
+import type { BookDetail } from "@/types/book";
 
-const DRAWER_WIDTH = 280;
+export const DRAWER_WIDTH = 280;
 
 interface Props {
-  chapters: ChapterNode[];
-  collectionIdMap?: Record<string, string>; // sectionTitle → collectionId
-  fileId?: string;
+  book: BookDetail;
+  activeSectionId?: string;
 }
 
-export default function Sidebar({ chapters, collectionIdMap = {}, fileId = "" }: Props) {
+export default function Sidebar({ book, activeSectionId }: Props) {
   const { sidebarOpen } = useUIStore();
-  const { expandedChapters, toggleChapter, setStudyContext } = useStudyStore();
-  const router = useRouter();
+  const activeChapter = book.chapters.find((c) => c.sections.some((s) => s.id === activeSectionId))?.id;
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(activeChapter ? [activeChapter] : []));
 
-  const handleSectionClick = (sectionId: string, sectionTitle: string) => {
-    const collectionId = collectionIdMap[sectionTitle] || sectionId;
-    setStudyContext(collectionId, sectionTitle, fileId);
-    router.push(`/study/${collectionId}/${encodeURIComponent(sectionTitle)}`);
-  };
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <Drawer
@@ -46,32 +44,43 @@ export default function Sidebar({ chapters, collectionIdMap = {}, fileId = "" }:
       }}
     >
       <Box sx={{ p: 2 }}>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
-          Contents
+        <Link href={`/study/${book.file_id}`} style={{ textDecoration: "none", color: "inherit" }}>
+          <Typography variant="subtitle2" fontWeight={700} noWrap title={book.title}>
+            {book.title}
+          </Typography>
+        </Link>
+        <Typography variant="caption" color="text.secondary">
+          {book.section_count} sections · {book.num_pages} pages
         </Typography>
       </Box>
       <Divider />
       <List dense disablePadding>
-        {chapters.map((chapter) => (
+        {book.chapters.map((chapter) => (
           <Box key={chapter.id}>
-            <ListItemButton onClick={() => toggleChapter(chapter.id)} sx={{ py: 1 }}>
+            <ListItemButton onClick={() => toggle(chapter.id)} sx={{ py: 1 }}>
               <ListItemText
                 primary={chapter.title}
+                secondary={chapter.number}
                 primaryTypographyProps={{ variant: "body2", fontWeight: 600, fontSize: 13 }}
+                secondaryTypographyProps={{ fontSize: 11 }}
               />
-              {expandedChapters.has(chapter.id) ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+              {expanded.has(chapter.id) ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
             </ListItemButton>
-            <Collapse in={expandedChapters.has(chapter.id)}>
+            <Collapse in={expanded.has(chapter.id)}>
               <List dense disablePadding>
                 {chapter.sections.map((section) => (
                   <ListItemButton
                     key={section.id}
+                    component={Link}
+                    href={`/study/${book.file_id}/${section.id}`}
+                    selected={section.id === activeSectionId}
                     sx={{ pl: 4, py: 0.5 }}
-                    onClick={() => handleSectionClick(section.id, section.title)}
                   >
                     <ListItemText
                       primary={section.title}
-                      primaryTypographyProps={{ variant: "caption", color: "text.secondary" }}
+                      secondary={`pp. ${section.start_page}–${section.end_page}`}
+                      primaryTypographyProps={{ variant: "caption", fontWeight: section.id === activeSectionId ? 600 : 400 }}
+                      secondaryTypographyProps={{ fontSize: 10 }}
                     />
                   </ListItemButton>
                 ))}

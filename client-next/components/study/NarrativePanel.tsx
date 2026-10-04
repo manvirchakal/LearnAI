@@ -1,40 +1,30 @@
 "use client";
-import { Box, Typography, Alert, LinearProgress } from "@mui/material";
-import { useEffect, useRef } from "react";
+import { Alert, Box, LinearProgress, Typography } from "@mui/material";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
 import Button from "@/components/ui/Button";
-import Spinner from "@/components/ui/Spinner";
-import { useStudyStore } from "@/store/studyStore";
-import { useGenerateNarrative } from "@/api/content";
+import { errorMessage } from "@/api/client";
+import { useRegenerateStudy, useStudyMaterials } from "@/api/study";
 
-export default function NarrativePanel() {
-  const { collectionId, sectionName, narrative, isStreamingNarrative, streamingText, forceRegenerate, setNarrative } = useStudyStore();
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const { mutate: generate, isPending, error } = useGenerateNarrative();
+interface Props {
+  fileId: string;
+  sectionId: string;
+}
 
-  useEffect(() => {
-    if (!collectionId || !sectionName) return;
-    if (narrative && !forceRegenerate) return;
-    generate({ collectionId, sectionName });
-  }, [collectionId, sectionName, forceRegenerate]);
+export default function NarrativePanel({ fileId, sectionId }: Props) {
+  const { data, isPending, error, refetch, isFetching } = useStudyMaterials(fileId, sectionId);
+  const regenerate = useRegenerateStudy(fileId, sectionId);
+  const busy = isFetching || regenerate.isPending;
 
-  // Auto-scroll during streaming
-  useEffect(() => {
-    if (isStreamingNarrative) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [streamingText, isStreamingNarrative]);
-
-  if (!collectionId) {
+  if (isPending && !error) {
     return (
-      <Box sx={{ p: 4, textAlign: "center" }}>
-        <Typography color="text.secondary">Select a section to view its content.</Typography>
+      <Box sx={{ p: 4 }}>
+        <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />
+        <Typography color="text.secondary" variant="body2">
+          Personalizing this section to your learning profile… the first visit can take a minute.
+        </Typography>
       </Box>
     );
-  }
-
-  if (isPending && !isStreamingNarrative) {
-    return <Spinner label="Generating narrative…" />;
   }
 
   if (error) {
@@ -42,21 +32,31 @@ export default function NarrativePanel() {
       <Box sx={{ p: 3 }}>
         <Alert
           severity="error"
-          action={<Button size="small" onClick={() => generate({ collectionId, sectionName: sectionName || "" })}>Retry</Button>}
+          action={<Button size="small" onClick={() => refetch()} loading={isFetching}>Retry</Button>}
         >
-          Failed to generate narrative.
+          Couldn&apos;t generate this section: {errorMessage(error)}
         </Alert>
       </Box>
     );
   }
 
-  const displayText = isStreamingNarrative ? streamingText : (narrative?.narrative || "");
-
   return (
     <Box sx={{ p: 3, maxWidth: 900 }}>
-      {isStreamingNarrative && <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />}
-      <MarkdownRenderer content={displayText} />
-      <div ref={bottomRef} />
+      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<RefreshIcon fontSize="small" />}
+          loading={regenerate.isPending}
+          disabled={busy}
+          onClick={() => regenerate.mutate()}
+        >
+          Regenerate
+        </Button>
+      </Box>
+      {regenerate.error && <Alert severity="error" sx={{ mb: 2 }}>{errorMessage(regenerate.error)}</Alert>}
+      {busy && <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />}
+      <MarkdownRenderer content={data?.narrative ?? ""} />
     </Box>
   );
 }

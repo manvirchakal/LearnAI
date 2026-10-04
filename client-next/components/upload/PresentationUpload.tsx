@@ -18,9 +18,7 @@ export default function PresentationUpload() {
 
   const handleUpload = () => {
     if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-    upload(formData, { onSuccess: () => setFile(null) });
+    upload(file, { onSuccess: () => setFile(null) });
   };
 
   return (

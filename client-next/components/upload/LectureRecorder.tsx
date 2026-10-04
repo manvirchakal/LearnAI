@@ -1,9 +1,10 @@
 "use client";
-import { Box, Typography, Alert, LinearProgress } from "@mui/material";
+import { Alert, Box, LinearProgress, TextField, Typography } from "@mui/material";
 import MicIcon from "@mui/icons-material/Mic";
 import StopIcon from "@mui/icons-material/Stop";
 import { useRef, useState } from "react";
 import Button from "@/components/ui/Button";
+import { errorMessage } from "@/api/client";
 import { useTranscribeLecture } from "@/api/media";
 
 type RecordingState = "idle" | "recording" | "processing";
@@ -11,6 +12,7 @@ type RecordingState = "idle" | "recording" | "processing";
 export default function LectureRecorder() {
   const [state, setState] = useState<RecordingState>("idle");
   const [seconds, setSeconds] = useState(0);
+  const [title, setTitle] = useState("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -26,11 +28,13 @@ export default function LectureRecorder() {
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const formData = new FormData();
-        formData.append("file", blob, "lecture.webm");
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm";
         setState("processing");
-        transcribe(formData, { onSuccess: () => setState("idle"), onError: () => setState("idle") });
+        transcribe(
+          { audio: blob, filename: `lecture.${ext}`, title: title.trim() || `Lecture ${new Date().toLocaleString()}` },
+          { onSettled: () => setState("idle") },
+        );
       };
 
       recorder.start();
@@ -57,6 +61,17 @@ export default function LectureRecorder() {
         <Typography fontWeight={600}>Record Lecture</Typography>
       </Box>
 
+      <TextField
+        fullWidth
+        size="small"
+        label="Lecture title"
+        placeholder="e.g. Week 3 — Thermodynamics"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        disabled={state !== "idle"}
+        sx={{ mb: 2 }}
+      />
+
       <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
         {state === "idle" && (
           <Button variant="contained" color="error" startIcon={<MicIcon />} onClick={startRecording}>
@@ -81,8 +96,8 @@ export default function LectureRecorder() {
         )}
       </Box>
 
-      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Transcription saved to your library!</Alert>}
-      {error && <Alert severity="error" sx={{ mt: 2 }}>Transcription failed.</Alert>}
+      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Transcript saved — it&apos;s available as a collection for study.</Alert>}
+      {error && <Alert severity="error" sx={{ mt: 2 }}>Transcription failed: {errorMessage(error)}</Alert>}
     </Box>
   );
 }

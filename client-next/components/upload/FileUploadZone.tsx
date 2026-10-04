@@ -1,20 +1,23 @@
 "use client";
-import { Box, Typography, LinearProgress, Alert } from "@mui/material";
+import { Alert, Box, LinearProgress, TextField, Typography } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import { useCallback, useState } from "react";
 import Button from "@/components/ui/Button";
-import { useUploadPDF } from "@/api/textbooks";
+import { useUploadBook } from "@/api/books";
+import { errorMessage } from "@/api/client";
 import { useRouter } from "next/navigation";
 
 export default function FileUploadZone() {
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [tocPages, setTocPages] = useState("");
   const router = useRouter();
-  const { mutate: upload, isPending, error, isSuccess } = useUploadPDF();
+  const { mutate: upload, isPending, error, isSuccess } = useUploadBook();
+  const tocValid = tocPages === "" || /^\d+-\d+$/.test(tocPages);
 
   const handleFile = useCallback((f: File) => {
-    if (f.type !== "application/pdf") return;
+    if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) return;
     setFile(f);
   }, []);
 
@@ -31,12 +34,11 @@ export default function FileUploadZone() {
   };
 
   const handleUpload = () => {
-    if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-    upload(formData, {
-      onSuccess: () => setTimeout(() => router.push("/library"), 1500),
-    });
+    if (!file || !tocValid) return;
+    upload(
+      { file, tocPages: tocPages || undefined },
+      { onSuccess: (book) => router.push(`/study/${book.file_id}`) },
+    );
   };
 
   return (
@@ -91,8 +93,25 @@ export default function FileUploadZone() {
       </Box>
 
       {isPending && <LinearProgress sx={{ mt: 2, borderRadius: 1 }} />}
-      {error && <Alert severity="error" sx={{ mt: 2 }}>Upload failed. Please try again.</Alert>}
-      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Upload complete! Redirecting…</Alert>}
+      {file && !isSuccess && (
+        <TextField
+          fullWidth
+          size="small"
+          sx={{ mt: 2 }}
+          label="Table of contents pages (optional)"
+          placeholder="e.g. 5-9"
+          value={tocPages}
+          onChange={(e) => setTocPages(e.target.value.trim())}
+          error={!tocValid}
+          helperText={
+            tocValid
+              ? "Only needed if the PDF has no built-in outline; the printed TOC on these pages is read by Claude."
+              : "Use a page range like 5-9"
+          }
+        />
+      )}
+      {error && <Alert severity="error" sx={{ mt: 2 }}>Upload failed: {errorMessage(error)}</Alert>}
+      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Upload complete! Opening your book…</Alert>}
 
       {file && !isSuccess && (
         <Button
@@ -100,6 +119,7 @@ export default function FileUploadZone() {
           variant="contained"
           sx={{ mt: 2 }}
           loading={isPending}
+          disabled={!tocValid}
           onClick={handleUpload}
         >
           Upload PDF

@@ -1,21 +1,32 @@
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+/**
+ * All requests go through the Next.js rewrite at /api-backend (see
+ * next.config.mjs), so the browser only ever talks to one origin.
+ */
+export const API_BASE = "/api-backend";
 
-export const apiClient = axios.create({
-  baseURL: API_URL,
-  headers: { "Content-Type": "application/json" },
-});
+export const apiClient = axios.create({ baseURL: API_BASE });
 
-// Inject user ID header on every request (no auth token — just identity)
+// No auth yet: identity is a plain header. Swap for a bearer token later.
+const USER_ID = process.env.NEXT_PUBLIC_USER_ID || "default";
 apiClient.interceptors.request.use((config) => {
-  // In a real app with auth this would inject a Bearer token.
-  // For now, userId can be set via the Zustand store below.
-  const userId = typeof window !== "undefined"
-    ? (window as unknown as Record<string, string>).__learnai_user_id || "default"
-    : "default";
-  config.headers["x-user-id"] = userId;
+  config.headers["X-User-Id"] = USER_ID;
   return config;
 });
+
+/** Human-readable message from an API error (FastAPI puts it in `detail`). */
+export function errorMessage(err: unknown): string {
+  if (err instanceof AxiosError) {
+    const detail = (err.response?.data as { detail?: unknown } | undefined)?.detail;
+    if (typeof detail === "string") return detail;
+    return err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** True for an HTTP error with the given status. */
+export const isStatus = (err: unknown, status: number) =>
+  err instanceof AxiosError && err.response?.status === status;
 
 export default apiClient;

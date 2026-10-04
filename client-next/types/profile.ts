@@ -1,18 +1,14 @@
 export type VARKCategory = "Visual" | "Auditory" | "ReadingWriting" | "Kinesthetic";
 
-export interface ProfileAnswers {
-  Visual?: Record<string, number>;
-  Auditory?: Record<string, number>;
-  ReadingWriting?: Record<string, number>;
-  Kinesthetic?: Record<string, number>;
+/** Agreement with each statement, 1 (strongly disagree) to 5 (strongly agree) */
+export type ProfileAnswers = Record<VARKCategory, Record<string, number>>;
+
+export interface Questionnaire {
+  scale: { min: number; max: number };
+  categories: Record<VARKCategory, string[]>;
 }
 
 export interface LearningProfile {
   answers: ProfileAnswers;
-  description: string;
-}
-
-export interface SaveProfileResponse {
-  message: string;
   description: string;
 }

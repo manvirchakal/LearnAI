@@ -1,12 +1,12 @@
-export interface NarrativeResult {
+export interface StudyMaterials {
   narrative: string;
   game_idea: string;
+  /** Body of a `Game()` function component; see DynamicGameComponent */
   game_code: string;
+  /** Mermaid sources */
   diagrams: string[];
 }
 
-export interface StudySection {
-  collectionId: string;
-  sectionName: string;
-  fileId: string;
+export interface GameResponse {
+  game_code: string;
 }

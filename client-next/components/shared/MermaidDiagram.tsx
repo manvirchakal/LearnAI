@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Box, Typography } from "@mui/material";
 import mermaid from "mermaid";
 
-mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
 
 let diagramCounter = 0;
 

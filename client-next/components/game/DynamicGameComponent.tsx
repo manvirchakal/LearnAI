@@ -1,98 +1,58 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Box, Typography, Alert } from "@mui/material";
+import { Alert, Box, Typography } from "@mui/material";
+import { MathJax } from "better-react-mathjax";
+import React, { ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ErrorBoundary from "@/components/shared/ErrorBoundary";
+import Button from "@/components/ui/Button";
+
+/**
+ * Runs AI-generated game code. Contract (server/utils/code_utils.py):
+ * the code is the BODY of a `Game()` function component, written with
+ * React.createElement (no JSX) and ending in `return React.createElement(...)`.
+ * These names are injected; nothing else is in scope.
+ */
+const SCOPE = ["React", "useState", "useEffect", "useRef", "useCallback", "useMemo", "MathJax"] as const;
+const SCOPE_VALUES = [React, useState, useEffect, useRef, useCallback, useMemo, MathJax];
+
+function compileGame(body: string): ComponentType {
+  // eslint-disable-next-line no-new-func
+  const factory = new Function(...SCOPE, `"use strict";\nreturn function Game() {\n${body}\n};`);
+  const Game = factory(...SCOPE_VALUES);
+  if (typeof Game !== "function") throw new Error("Game code did not produce a component");
+  return Game as ComponentType;
+}
 
 interface Props {
   gameCode: string;
-  onError?: (err: string) => void;
+  onRetry?: () => void;
 }
 
-/**
- * Executes AI-generated React game code at runtime using new Function().
- * The generated code is expected to export a default React component as a
- * self-contained string, e.g.:
- *   function Game() { ... return <div>...</div>; }
- *   return Game;
- *
- * We inject React, useState, useEffect, useRef into the sandbox scope so the
- * generated code can use hooks without explicit imports.
- */
-export default function DynamicGameComponent({ gameCode, onError }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
+function GameError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <Alert severity="warning" action={onRetry && <Button size="small" onClick={onRetry}>New game</Button>}>
+      <Typography variant="body2" gutterBottom>This game failed to run.</Typography>
+      <Typography variant="caption" fontFamily="monospace">{message}</Typography>
+    </Alert>
+  );
+}
 
-  useEffect(() => {
-    if (!gameCode || !containerRef.current) return;
-    setError(null);
-
+export default function DynamicGameComponent({ gameCode, onRetry }: Props) {
+  const compiled = useMemo(() => {
     try {
-      // Dynamically import React DOM to avoid SSR issues
-      import("react-dom/client").then((ReactDOM) => {
-        try {
-          const React = require("react");
-          const { useState, useEffect, useRef, useCallback, useMemo } = React;
-
-          // Build sandbox — inject common hooks so generated code can use them
-          // eslint-disable-next-line no-new-func
-          const factory = new Function(
-            "React",
-            "useState",
-            "useEffect",
-            "useRef",
-            "useCallback",
-            "useMemo",
-            `"use strict"; ${gameCode}`
-          );
-
-          const GameComponent = factory(
-            React, useState, useEffect, useRef, useCallback, useMemo
-          );
-
-          if (typeof GameComponent !== "function") {
-            throw new Error("Generated code did not return a React component.");
-          }
-
-          const root = ReactDOM.createRoot(containerRef.current!);
-          root.render(React.createElement(GameComponent));
-
-          // Cleanup on unmount
-          return () => {
-            try { root.unmount(); } catch (_) {}
-          };
-        } catch (e: any) {
-          const msg = e?.message || String(e);
-          setError(msg);
-          onError?.(msg);
-        }
-      });
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      setError(msg);
-      onError?.(msg);
+      return { Game: compileGame(gameCode), error: null };
+    } catch (e) {
+      return { Game: null, error: e instanceof Error ? e.message : String(e) };
     }
   }, [gameCode]);
 
-  if (error) {
-    return (
-      <Alert severity="error" sx={{ m: 2 }}>
-        <Typography variant="body2" fontFamily="monospace" fontSize={12}>
-          Game render error: {error}
-        </Typography>
-      </Alert>
-    );
-  }
+  if (!compiled.Game) return <GameError message={compiled.error ?? "Unknown error"} onRetry={onRetry} />;
+  const { Game } = compiled;
 
   return (
-    <Box
-      ref={containerRef}
-      sx={{
-        width: "100%",
-        minHeight: 400,
-        bgcolor: "white",
-        borderRadius: 1,
-        overflow: "hidden",
-        "& *": { boxSizing: "border-box" },
-      }}
-    />
+    <Box sx={{ width: "100%", minHeight: 400, bgcolor: "white", borderRadius: 1, border: "1px solid #e9ecef", overflow: "hidden" }}>
+      <ErrorBoundary fallback={<GameError message="The game crashed while rendering." onRetry={onRetry} />}>
+        <Game />
+      </ErrorBoundary>
+    </Box>
   );
 }

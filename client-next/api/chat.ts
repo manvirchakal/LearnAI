@@ -1,21 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import apiClient from "./client";
-import type { ChatRequest, ChatResponse, ChatHistory } from "@/types/chat";
+import type { ChatHistory, ChatRequest, ChatResponse } from "@/types/chat";
 
-export const useChatHistory = (fileId: string, sectionName: string) =>
+export const chatKey = (fileId: string, sectionId: string) => ["chat", fileId, sectionId] as const;
+
+const chatPath = (fileId: string, sectionId: string) => `/books/${fileId}/sections/${sectionId}/chat`;
+
+export const useChatHistory = (fileId: string, sectionId: string) =>
   useQuery<ChatHistory>({
-    queryKey: ["chat-history", fileId, sectionName],
-    queryFn: () =>
-      apiClient.get("/chat-history", { params: { file_id: fileId, section_name: sectionName } }).then((r) => r.data),
-    enabled: !!fileId && !!sectionName,
+    queryKey: chatKey(fileId, sectionId),
+    queryFn: () => apiClient.get(chatPath(fileId, sectionId)).then((r) => r.data),
+    enabled: !!fileId && !!sectionId,
   });
 
-export const useSendMessage = () => {
+export const useSendMessage = (fileId: string, sectionId: string) => {
   const qc = useQueryClient();
   return useMutation<ChatResponse, Error, ChatRequest>({
-    mutationFn: (payload) => apiClient.post("/api/chat", payload).then((r) => r.data),
-    onSuccess: (_, variables) => {
-      qc.invalidateQueries({ queryKey: ["chat-history", variables.file_id, variables.section_name] });
-    },
+    mutationFn: (payload) => apiClient.post(chatPath(fileId, sectionId), payload).then((r) => r.data),
+    onSuccess: ({ history }) => qc.setQueryData<ChatHistory>(chatKey(fileId, sectionId), { history }),
   });
 };

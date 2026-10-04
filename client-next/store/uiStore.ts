@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type StudyTab = "game" | "diagram" | "pdf";
+export type StudyTab = "chat" | "game" | "diagram" | "pdf";
 
 interface UIStore {
   sidebarOpen: boolean;
@@ -22,7 +22,7 @@ export const useUIStore = create<UIStore>()(
       sidebarOpen: true,
       ttsEnabled: false,
       language: "en",
-      activeTab: "diagram",
+      activeTab: "chat",
 
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),

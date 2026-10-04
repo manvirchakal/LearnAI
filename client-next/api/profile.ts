@@ -1,16 +1,32 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import apiClient from "./client";
-import type { LearningProfile, SaveProfileResponse } from "@/types/profile";
+import type { LearningProfile, ProfileAnswers, Questionnaire } from "@/types/profile";
 
-export const useGetProfile = () =>
-  useQuery<LearningProfile>({
+export const useQuestionnaire = () =>
+  useQuery<Questionnaire>({
+    queryKey: ["profile", "questionnaire"],
+    queryFn: () => apiClient.get("/profile/questionnaire").then((r) => r.data),
+    staleTime: Infinity,
+  });
+
+/** Resolves to null when the user hasn't taken the questionnaire yet. */
+export const useProfile = () =>
+  useQuery<LearningProfile | null>({
     queryKey: ["profile"],
-    queryFn: () => apiClient.get("/profile/learning-profile").then((r) => r.data),
-    retry: false,
+    queryFn: () =>
+      apiClient
+        .get("/profile")
+        .then((r) => r.data)
+        .catch((e) => {
+          if (e?.response?.status === 404) return null;
+          throw e;
+        }),
   });
 
-export const useSaveProfile = () =>
-  useMutation<SaveProfileResponse, Error, Record<string, unknown>>({
-    mutationFn: (answers) =>
-      apiClient.post("/profile/save-learning-profile", { answers }).then((r) => r.data),
+export const useSaveProfile = () => {
+  const qc = useQueryClient();
+  return useMutation<LearningProfile, Error, ProfileAnswers>({
+    mutationFn: (answers) => apiClient.put("/profile", { answers }).then((r) => r.data),
+    onSuccess: (profile) => qc.setQueryData(["profile"], profile),
   });
+};

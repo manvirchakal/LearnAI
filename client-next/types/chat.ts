@@ -5,18 +5,13 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   message: string;
-  user_id: string;
-  file_id: string;
-  section_name: string;
-  collection_id?: string;
   language?: string;
-}
-
-export interface ChatResponse {
-  reply: string;
-  history?: ChatMessage[];
 }
 
 export interface ChatHistory {
   history: ChatMessage[];
+}
+
+export interface ChatResponse extends ChatHistory {
+  reply: string;
 }

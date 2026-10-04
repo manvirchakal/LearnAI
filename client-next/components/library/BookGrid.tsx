@@ -2,10 +2,10 @@
 import { Box, Typography } from "@mui/material";
 import MenuBookIcon from "@mui/icons-material/MenuBook";
 import BookCard from "./BookCard";
-import type { BookItem } from "@/types/textbook";
+import type { BookSummary } from "@/types/book";
 
 interface Props {
-  books: BookItem[];
+  books: BookSummary[];
 }
 
 export default function BookGrid({ books }: Props) {
@@ -32,7 +32,7 @@ export default function BookGrid({ books }: Props) {
       }}
     >
       {books.map((book, i) => (
-        <BookCard key={book.file_id || book.s3_key || i} book={book} />
+        <BookCard key={book.file_id} book={book} />
       ))}
     </Box>
   );

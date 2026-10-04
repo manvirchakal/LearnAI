@@ -4,15 +4,16 @@ export interface TranscriptionMetadata {
   original_filename: string;
   transcription_date: string;
   source_type: "upload" | "youtube";
-  video_url?: string;
+  video_url?: string | null;
+  video_id?: string | null;
 }
 
 export interface TranscriptionResult {
+  job_id: string;
+  title: string;
   transcript: string;
   metadata: TranscriptionMetadata;
-  job_id: string;
   collection_id: string;
-  video_title?: string;
 }
 
 export interface PresentationMetadata {
@@ -31,6 +32,8 @@ export interface SlideContent {
 }
 
 export interface PresentationResult {
+  presentation_id: string;
+  collection_id: string;
   metadata: PresentationMetadata;
   slides: SlideContent[];
 }
