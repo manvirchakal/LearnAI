@@ -69,4 +69,6 @@ include = ["agents*", "core*", "mcp_server*", "models*", "routes*", "services*",
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# bare `pytest` (as in CI) does not put the cwd on sys.path
+pythonpath = ["."]
 addopts = "-q"
