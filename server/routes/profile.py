@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core.dependencies import get_user_id
 from services.profile_service import save_learning_profile, get_full_learning_profile
-from models.ai_outputs import SaveProfileRequest
+from models.learning_profile import SaveProfileRequest
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
