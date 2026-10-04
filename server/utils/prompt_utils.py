@@ -3,6 +3,15 @@ Dynamic prompt construction utilities.
 """
 from typing import Dict
 
+from core.config import settings
+
+
+def clip_source(text: str) -> str:
+    """Bound source material so prompts fit the model's context window."""
+    limit = settings.LLM_MAX_SOURCE_CHARS
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n\n[... remaining material truncated ...]"
 
 LEARNING_CATEGORIES = {
     "Visual": [

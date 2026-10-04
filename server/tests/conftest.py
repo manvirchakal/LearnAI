@@ -5,10 +5,8 @@ scripted fake LLM — so the full HTTP → agent → storage/RAG path runs offli
 import hashlib
 import os
 import re
-import sys
 import tempfile
 import time
-import types
 from typing import Any, Callable
 
 import pytest
@@ -16,15 +14,6 @@ import pytest
 _DATA = tempfile.mkdtemp(prefix="learnai-test-")
 os.environ["DATA_DIR"] = _DATA
 os.environ["CHROMA_DIR"] = os.path.join(_DATA, "vectorstore")
-
-# Heavy ML deps are optional for tests: stub them if they aren't installed.
-for name, attr in (("sentence_transformers", "SentenceTransformer"), ("faster_whisper", "WhisperModel")):
-    try:
-        __import__(name)
-    except ImportError:
-        mod = types.ModuleType(name)
-        setattr(mod, attr, object)
-        sys.modules[name] = mod
 
 import fitz  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -43,6 +32,10 @@ def _fake_embed(texts):
     return out
 
 
+# conftest can be imported twice (as `conftest` and `tests.conftest`); keep the original once
+if not hasattr(core.vectorstore, "_real_embed"):
+    core.vectorstore._real_embed = core.vectorstore._embed
+REAL_EMBED = core.vectorstore._real_embed
 core.vectorstore._embed = _fake_embed
 
 

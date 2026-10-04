@@ -16,7 +16,7 @@ from services.accessibility_service import translate_text
 from services.profile_service import get_learning_profile
 from services.rag_service import retrieve_context
 from services.storage_service import load_chat_history, load_study_materials, save_chat_history
-from utils.prompt_utils import build_chat_prompt
+from utils.prompt_utils import build_chat_prompt, clip_source
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def run_chat_agent(message: str, context_text: str, user_id: str, scope: str, un
         "unit_id": unit_id,
         "rag_file_id": rag_file_id,
         "language": language,
-        "context_text": context_text,
+        "context_text": clip_source(context_text),
         "narrative_summary": "",
         "rag_context": "",
         "learning_profile": "",

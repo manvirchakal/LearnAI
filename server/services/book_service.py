@@ -31,7 +31,7 @@ class SectionNotFound(FileNotFoundError):
     pass
 
 
-# ── TOC parsing via Claude vision (used by the document agent) ────────────────
+# ── TOC parsing via a vision model (used by the document agent) ────────────────
 
 _TOC_PROMPT = """Analyze this table of contents and output ONLY a JSON object with this exact structure:
 {
@@ -52,17 +52,16 @@ Rules:
 
 
 def parse_toc_with_llm(images: List[bytes]) -> List[Dict]:
-    """Use Claude vision to parse rendered TOC pages into raw chapters."""
+    """Have the vision model read rendered TOC pages into raw chapters."""
     from langchain_core.messages import HumanMessage
-    from core.llm import get_sonnet, message_text
+    from core.llm import get_llm, image_block, message_text
 
     content: list = [{"type": "text", "text": _TOC_PROMPT}]
     for i, img in enumerate(images, 1):
-        content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                                     "data": base64.b64encode(img).decode()}})
+        content.append(image_block(base64.b64encode(img).decode()))
         content.append({"type": "text", "text": f"This is page {i} of the table of contents."})
 
-    raw = message_text(get_sonnet().invoke([HumanMessage(content=content)]))
+    raw = message_text(get_llm("vision", max_tokens=4096, temperature=0).invoke([HumanMessage(content=content)]))
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError("TOC parser returned no JSON")

@@ -1,12 +1,18 @@
 """
-Local TTS (pyttsx3) and translation (argostranslate).
-Replaces AWS Polly and AWS Translate.
+Translation and text-to-speech.
+
+TRANSLATION_PROVIDER:
+    llm    the configured chat model translates (no extra models on the server)
+    argos  argostranslate in-process (needs the [local-ml] extra)
+TTS is pyttsx3 (espeak-ng on Linux), which is light enough to run anywhere.
 """
 import io
 import logging
 import os
 import tempfile
 from typing import Optional
+
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +25,35 @@ def _language_pair(source: str, target: str):
     return langs.get(source), langs.get(target)
 
 
+_TRANSLATE_PROMPT = """Translate the text below from the language with ISO 639-1 code "{source}" to the language with code "{target}".
+Preserve Markdown formatting, code and math. Output ONLY the translation.
+
+{text}"""
+
+
 def translate_text(text: str, target_language: str, source_language: str = "en") -> Optional[str]:
-    """
-    Translate text offline with argostranslate.
-    The language pair's model is downloaded once, on first use.
-    """
-    if source_language == target_language:
+    """Translate text with the configured provider; None if translation failed."""
+    if source_language == target_language or not text.strip():
         return text
+    if settings.TRANSLATION_PROVIDER == "llm":
+        return _translate_llm(text, target_language, source_language)
+    return _translate_argos(text, target_language, source_language)
+
+
+def _translate_llm(text: str, target_language: str, source_language: str) -> Optional[str]:
+    from langchain_core.messages import HumanMessage
+    from core.llm import get_llm, message_text
+
+    prompt = _TRANSLATE_PROMPT.format(source=source_language, target=target_language, text=text)
+    try:
+        return message_text(get_llm("text", max_tokens=4096, temperature=0).invoke([HumanMessage(content=prompt)])).strip()
+    except Exception as e:
+        logger.error(f"Translation error ({source_language}→{target_language}): {e}")
+        return None
+
+
+def _translate_argos(text: str, target_language: str, source_language: str) -> Optional[str]:
+    """argostranslate; the language pair's model is downloaded once, on first use."""
     try:
         from argostranslate import package
         from_lang, to_lang = _language_pair(source_language, target_language)

@@ -1,39 +1,82 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
-from typing import List
+from typing import List, Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # AWS Bedrock — only remaining AWS dependency (Claude LLM)
+    # ── LLM ───────────────────────────────────────────────────────────────────
+    # "openai": any OpenAI-compatible server (vLLM, llama.cpp, Ollama, LiteLLM)
+    # "bedrock": Claude via AWS Bedrock
+    LLM_PROVIDER: Literal["openai", "bedrock"] = "openai"
+    # Model roles. LLM_MODEL writes narratives, games and chat replies;
+    # LLM_VISION_MODEL reads scanned tables of contents. Empty = provider default.
+    LLM_MODEL: str = ""
+    LLM_VISION_MODEL: str = ""
+    # Turn off when the served model can't take images: scanned-TOC parsing is
+    # then skipped and books without a PDF outline become a single section.
+    LLM_VISION_ENABLED: bool = True
+    # Upper bound on generated tokens per call; keep prompt + this below the
+    # server's context length (vLLM --max-model-len).
+    LLM_MAX_OUTPUT_TOKENS: int = 8192
+    LLM_TIMEOUT_SECONDS: float = 300
+    # Source material (a section, a collection) is truncated to this many
+    # characters before prompting. ~4 chars/token: 40k chars ≈ 10k tokens.
+    LLM_MAX_SOURCE_CHARS: int = 40_000
+
+    # OpenAI-compatible endpoint (vLLM serves it at http://<host>:<port>/v1)
+    OPENAI_BASE_URL: str = "http://localhost:8001/v1"
+    OPENAI_API_KEY: str = "EMPTY"
+
+    # AWS Bedrock. Leave the keys empty to use boto3's default credential chain.
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_DEFAULT_REGION: str = "us-east-1"
-    BEDROCK_MODEL_HAIKU: str = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
-    BEDROCK_MODEL_SONNET: str = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 
-    # Local storage root
+    # ── Embeddings (RAG) ──────────────────────────────────────────────────────
+    # "openai": POST {EMBEDDING_BASE_URL}/embeddings (e.g. vLLM --task embed)
+    # "local": sentence-transformers in-process (pip install ".[local-ml]")
+    EMBEDDING_PROVIDER: Literal["openai", "local"] = "openai"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    EMBEDDING_BASE_URL: str = ""  # empty = OPENAI_BASE_URL
+    EMBEDDING_BATCH_SIZE: int = 64
+
+    # ── Speech-to-text ────────────────────────────────────────────────────────
+    # "openai": POST {STT_BASE_URL}/audio/transcriptions (e.g. vLLM serving Whisper)
+    # "local": faster-whisper in-process (pip install ".[local-ml]")
+    STT_PROVIDER: Literal["openai", "local"] = "openai"
+    STT_MODEL: str = "openai/whisper-large-v3-turbo"  # for "local": tiny | base | small | medium | large-v3
+    STT_BASE_URL: str = ""  # empty = OPENAI_BASE_URL
+    # Remote audio is re-encoded with ffmpeg into chunks of this length (keeps
+    # each upload under the server's file-size limit)
+    STT_CHUNK_SECONDS: int = 600
+
+    # ── Translation ───────────────────────────────────────────────────────────
+    # "llm": translate with the chat model; "argos": argostranslate in-process
+    TRANSLATION_PROVIDER: Literal["llm", "argos"] = "llm"
+
+    # ── Storage ───────────────────────────────────────────────────────────────
     DATA_DIR: Path = Path(__file__).parent.parent / "data"
-
-    # ChromaDB persistent directory
     CHROMA_DIR: Path = Path(__file__).parent.parent / "data" / "vectorstore"
+    MAX_UPLOAD_MB: int = 200
 
-    # Sentence-transformers model for local embeddings
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-
-    # faster-whisper model size: tiny | base | small | medium | large-v3
-    WHISPER_MODEL: str = "base"
-
-    # argostranslate: source language assumed English
-    TRANSLATE_SOURCE_LANG: str = "en"
-
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3001"]
-
-    # Server
+    # ── Server ────────────────────────────────────────────────────────────────
+    # Only needed if browsers call the API directly instead of through Next.js
+    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    LOG_LEVEL: str = "INFO"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # ── Derived ───────────────────────────────────────────────────────────────
+    @property
+    def embedding_base_url(self) -> str:
+        return self.EMBEDDING_BASE_URL or self.OPENAI_BASE_URL
+
+    @property
+    def stt_base_url(self) -> str:
+        return self.STT_BASE_URL or self.OPENAI_BASE_URL
 
 
 settings = Settings()

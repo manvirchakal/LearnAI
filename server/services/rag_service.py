@@ -16,7 +16,7 @@ def ingest_section(
     file_id: str,
     section_name: str,
     text: str,
-    chunk_size: int = 500,
+    chunk_size: int = 300,  # words; ~400 tokens fits 512-token embedding models
 ) -> None:
     """Chunk and embed a textbook/transcript section into the user's vector store."""
     if not text.strip():

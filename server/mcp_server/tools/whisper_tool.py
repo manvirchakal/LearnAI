@@ -1,4 +1,4 @@
-"""MCP tool: local Whisper transcription via faster-whisper."""
+"""MCP tool: transcription of stored audio with the configured STT provider."""
 from fastmcp import FastMCP
 
 from core import storage

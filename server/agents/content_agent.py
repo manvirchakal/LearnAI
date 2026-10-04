@@ -24,7 +24,7 @@ from services.rag_service import retrieve_context
 from services.storage_service import load_study_materials, save_study_materials
 from utils.code_utils import GAME_CODE_SYSTEM_PROMPT, post_process_game_code, validate_js_syntax
 from utils.diagram_utils import DIAGRAM_SYSTEM_PROMPT, extract_mermaid_blocks, post_process_mermaid
-from utils.prompt_utils import build_game_idea_prompt, build_narrative_prompt
+from utils.prompt_utils import build_game_idea_prompt, build_narrative_prompt, clip_source
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ game_graph = build_game_graph()
 def _initial_state(source_text: str, user_id: str, scope: str, unit_id: str,
                    rag_file_id: Optional[str], force_regenerate: bool) -> ContentState:
     return {
-        "source_text": source_text,
+        "source_text": clip_source(source_text),
         "user_id": user_id,
         "scope": scope,
         "unit_id": unit_id,

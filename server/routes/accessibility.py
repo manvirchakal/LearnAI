@@ -1,5 +1,5 @@
 """
-Accessibility API — local translation (argostranslate) and TTS (pyttsx3).
+Accessibility API — translation (LLM or argostranslate) and local TTS (pyttsx3).
 
     POST /accessibility/translate  {text, target_language} → {translated_text}
     POST /accessibility/speech     {text, language}        → audio/wav

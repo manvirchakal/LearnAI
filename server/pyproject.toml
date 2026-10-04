@@ -13,8 +13,11 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
     "pydantic-settings>=2.0",
+    "httpx>=0.27",
 
-    # AWS Bedrock (Claude LLM — only remaining AWS dependency)
+    # LLM providers: OpenAI-compatible (vLLM) and AWS Bedrock
+    "langchain-openai>=1.0",
+    "openai>=1.40",
     "boto3>=1.35",
     "langchain-aws>=1.0",
 
@@ -25,18 +28,11 @@ dependencies = [
     # MCP
     "fastmcp>=4.0",
 
-    # Local AI: STT
-    "faster-whisper>=1.0",
-
-    # Local AI: TTS
-    "pyttsx3>=2.90",
-
-    # Local AI: Translation
-    "argostranslate>=1.9",
-
-    # Local AI: Embeddings + Vector store
-    "sentence-transformers>=3.0",
+    # Vector store (embeddings come from the model server, or [local-ml])
     "chromadb>=1.0",
+
+    # TTS (espeak-ng on Linux)
+    "pyttsx3>=2.90",
 
     # PDF processing
     "PyMuPDF>=1.24",
@@ -53,9 +49,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# In-process models (EMBEDDING_PROVIDER=local, STT_PROVIDER=local,
+# TRANSLATION_PROVIDER=argos). Pulls in PyTorch: skip it on small ARM nodes.
+local-ml = [
+    "sentence-transformers>=3.0",
+    "faster-whisper>=1.0",
+    "argostranslate>=1.9",
+]
 dev = [
     "pytest>=8.0",
-    "httpx>=0.27",
 ]
 
 [tool.setuptools]

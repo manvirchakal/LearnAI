@@ -3,6 +3,7 @@ LangGraph document ingestion agent — turns an uploaded PDF into a studyable bo
 
     save_upload ▶ read_outline ─┬─(outline found)──────────────▶ normalize ▶ save_metadata ▶ END
                                 ├─(toc_pages given)▶ parse_toc_vision ─┘
+                                ├─(toc_pages, vision off)▶ vision_disabled ─▶ normalize
                                 └─(neither)────────────────────▶ normalize
 
 Section text extraction and embedding are not part of this graph: they run
@@ -18,6 +19,7 @@ from langgraph.graph import END, StateGraph
 
 from agents.base import DocumentState
 from core import storage
+from core.config import settings
 from services.book_service import parse_toc_with_llm
 from services.storage_service import save_book_metadata, save_upload
 from utils.pdf_utils import extract_toc, page_count, pages_to_images
@@ -78,9 +80,13 @@ def node_save_metadata(state: DocumentState) -> dict:
 
 
 def route_after_outline(state: DocumentState) -> str:
-    if state["raw_toc"]:
+    if state["raw_toc"] or not state.get("toc_pages"):
         return "normalize"
-    return "vision" if state.get("toc_pages") else "normalize"
+    return "vision" if settings.LLM_VISION_ENABLED else "vision_disabled"
+
+
+def node_vision_disabled(state: DocumentState) -> dict:
+    return {"error": "TOC pages were given but LLM_VISION_ENABLED is off; the book was imported as one section"}
 
 
 def build_document_graph():
@@ -88,14 +94,17 @@ def build_document_graph():
     g.add_node("save_upload", node_save_upload)
     g.add_node("read_outline", node_read_outline)
     g.add_node("parse_toc_vision", node_parse_toc_vision)
+    g.add_node("vision_disabled", node_vision_disabled)
     g.add_node("normalize", node_normalize)
     g.add_node("save_metadata", node_save_metadata)
 
     g.set_entry_point("save_upload")
     g.add_edge("save_upload", "read_outline")
     g.add_conditional_edges("read_outline", route_after_outline,
-                            {"normalize": "normalize", "vision": "parse_toc_vision"})
+                            {"normalize": "normalize", "vision": "parse_toc_vision",
+                             "vision_disabled": "vision_disabled"})
     g.add_edge("parse_toc_vision", "normalize")
+    g.add_edge("vision_disabled", "normalize")
     g.add_edge("normalize", "save_metadata")
     g.add_edge("save_metadata", END)
     return g.compile()
