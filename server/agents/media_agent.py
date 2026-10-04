@@ -52,9 +52,10 @@ def node_store(state: MediaState) -> dict:
         "video_url": state["source_url"],
         "video_id": state["video_id"] or None,
     }
-    save_transcription_metadata(state["user_id"], job_id, metadata)
     save_transcription_content(state["user_id"], job_id, state["transcript"])
     collection_id = create_default_collection("transcriptions", job_id, metadata, state["user_id"])
+    metadata["collection_id"] = collection_id  # lets the UI study this transcript on its own
+    save_transcription_metadata(state["user_id"], job_id, metadata)
     return {"job_id": job_id, "metadata": metadata, "collection_id": collection_id}
 
 

@@ -3,9 +3,19 @@ import { AppBar, IconButton, Toolbar, Typography, Box } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import { useUIStore } from "@/store/uiStore";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const NAV = [
+  { href: "/upload", label: "Upload" },
+  { href: "/library", label: "Library" },
+  { href: "/collections", label: "Collections" },
+  { href: "/media", label: "Media" },
+  { href: "/questionnaire", label: "Profile" },
+];
 
 export default function TopNav({ showMenuButton = false }: { showMenuButton?: boolean }) {
   const { toggleSidebar } = useUIStore();
+  const pathname = usePathname();
 
   return (
     <AppBar position="fixed" color="default" elevation={1} sx={{ bgcolor: "white", zIndex: 1300 }}>
@@ -22,21 +32,20 @@ export default function TopNav({ showMenuButton = false }: { showMenuButton?: bo
         </Link>
         <Box sx={{ flexGrow: 1 }} />
         <Box sx={{ display: "flex", gap: 2 }}>
-          <Link href="/upload" style={{ textDecoration: "none" }}>
-            <Typography variant="body2" sx={{ color: "text.secondary", cursor: "pointer", "&:hover": { color: "primary.main" } }}>
-              Upload
-            </Typography>
-          </Link>
-          <Link href="/library" style={{ textDecoration: "none" }}>
-            <Typography variant="body2" sx={{ color: "text.secondary", cursor: "pointer", "&:hover": { color: "primary.main" } }}>
-              Library
-            </Typography>
-          </Link>
-          <Link href="/questionnaire" style={{ textDecoration: "none" }}>
-            <Typography variant="body2" sx={{ color: "text.secondary", cursor: "pointer", "&:hover": { color: "primary.main" } }}>
-              Profile
-            </Typography>
-          </Link>
+          {NAV.map(({ href, label }) => {
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            return (
+              <Link key={href} href={href} style={{ textDecoration: "none" }}>
+                <Typography variant="body2" sx={{
+                  color: active ? "primary.main" : "text.secondary",
+                  fontWeight: active ? 600 : 400,
+                  "&:hover": { color: "primary.main" },
+                }}>
+                  {label}
+                </Typography>
+              </Link>
+            );
+          })}
         </Box>
       </Toolbar>
     </AppBar>

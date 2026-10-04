@@ -6,14 +6,15 @@ import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 import { errorMessage } from "@/api/client";
 import { useRegenerateGame } from "@/api/study";
-import { useStudySession } from "./StudySession";
+import { NotYet, useStudySession } from "./StudySession";
 
 export default function GamePanel() {
-  const { fileId, sectionId, status, materials, activity } = useStudySession();
-  const regenerate = useRegenerateGame(fileId, sectionId);
+  const { unit, status, materials, activity } = useStudySession();
+  const regenerate = useRegenerateGame(unit);
 
   if (regenerate.isPending) return <Spinner label="Designing a new game…" />;
   if (!materials) {
+    if (status === "idle") return <NotYet />;
     return status === "error"
       ? <Box sx={{ p: 4, textAlign: "center" }}><Typography color="text.secondary">Game unavailable.</Typography></Box>
       : <Spinner label={activity ?? "Generating game…"} />;
@@ -36,7 +37,7 @@ export default function GamePanel() {
         </>
       ) : (
         <Box sx={{ p: 2, textAlign: "center" }}>
-          <Typography color="text.secondary" gutterBottom>No game was generated for this section.</Typography>
+          <Typography color="text.secondary" gutterBottom>No game was generated yet.</Typography>
           {newGame}
         </Box>
       )}

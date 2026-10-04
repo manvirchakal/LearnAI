@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from core.dependencies import get_user_id
 from services.storage_service import (
+    list_notes_metadata,
     save_notes_metadata,
     save_notes_content,
     load_notes_metadata,
@@ -77,6 +78,8 @@ def process_notes(
             logger.warning(f"Embedding notes {notes_id} failed: {e}")
 
         collection_id = create_default_collection("notes", notes_id, metadata, user_id)
+        metadata["collection_id"] = collection_id
+        save_notes_metadata(user_id, notes_id, metadata)
 
         return {
             "message": "Notes processed successfully",
@@ -88,6 +91,11 @@ def process_notes(
     except Exception as e:
         logger.error(f"Error processing notes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("")
+def list_notes(user_id: str = Depends(get_user_id)):
+    return sorted(list_notes_metadata(user_id), key=lambda m: m.get("upload_date", ""), reverse=True)
 
 
 @router.get("/{notes_id}")

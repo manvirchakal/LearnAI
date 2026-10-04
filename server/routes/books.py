@@ -31,15 +31,10 @@ from core.dependencies import get_user_id
 from models.book import BookDetail, BookSummary
 from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
 from services import book_service
-from utils.streaming_utils import sse
+from utils.streaming_utils import SSE_HEADERS, sse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/books", tags=["books"])
-
-# no-transform stops gzip in intermediaries (including Next.js's rewrite proxy)
-# from buffering the stream; X-Accel-Buffering does the same for nginx.
-SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
-
 
 def _section_or_404(user_id: str, file_id: str, section_id: str) -> None:
     try:

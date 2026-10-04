@@ -1,6 +1,7 @@
 "use client";
 import { Alert, Box, Divider, Typography } from "@mui/material";
 import dynamic from "next/dynamic";
+import AddToCollectionButton from "@/components/collections/AddToCollectionButton";
 import AppShell from "@/components/layout/AppShell";
 import ChatPanel from "@/components/study/ChatPanel";
 import DiagramPanel from "@/components/study/DiagramPanel";
@@ -10,6 +11,7 @@ import { StudySessionProvider } from "@/components/study/StudySession";
 import StudyTabs from "@/components/study/StudyTabs";
 import Spinner from "@/components/ui/Spinner";
 import { sectionPdfUrl, useBook } from "@/api/books";
+import { sectionUnit } from "@/api/study";
 import { useUIStore } from "@/store/uiStore";
 
 // react-pdf touches browser-only APIs at import time
@@ -48,18 +50,26 @@ export default function StudyPage({ params }: PageProps) {
     );
   }
 
+  const unit = sectionUnit(fileId, sectionId);
+
   return (
     <AppShell book={book} activeSectionId={sectionId}>
-      <StudySessionProvider key={sectionId} fileId={fileId} sectionId={sectionId}>
+      <StudySessionProvider key={unit} unit={unit}>
         <Box sx={{ display: "flex", height: "calc(100vh - 64px)" }}>
           <Box sx={{ flex: 1, minWidth: 0, overflowY: "auto", borderRight: "1px solid #e9ecef" }}>
-            <Box sx={{ p: 3, pb: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                {chapter?.number} · {chapter?.title} · pp. {section.start_page}–{section.end_page}
-              </Typography>
-              <Typography variant="h6" fontWeight={700}>
-                {section.title}
-              </Typography>
+            <Box sx={{ p: 3, pb: 1, display: "flex", alignItems: "flex-start", gap: 2 }}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {chapter?.number} · {chapter?.title} · pp. {section.start_page}–{section.end_page}
+                </Typography>
+                <Typography variant="h6" fontWeight={700}>
+                  {section.title}
+                </Typography>
+              </Box>
+              <AddToCollectionButton
+                kind="textbook_sections"
+                item={{ file_id: fileId, section_id: sectionId, title: `${book.title}: ${section.title}` }}
+              />
             </Box>
             <Divider />
             <NarrativePanel />
@@ -68,7 +78,7 @@ export default function StudyPage({ params }: PageProps) {
           <Box sx={{ width: 480, flexShrink: 0, display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
             <StudyTabs />
             <Box sx={{ flex: 1, minHeight: 0, overflowY: activeTab === "chat" ? "hidden" : "auto" }}>
-              {activeTab === "chat" && <ChatPanel fileId={fileId} sectionId={sectionId} />}
+              {activeTab === "chat" && <ChatPanel unit={unit} />}
               {activeTab === "game" && <GamePanel />}
               {activeTab === "diagram" && <DiagramPanel />}
               {activeTab === "pdf" && (

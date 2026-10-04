@@ -3,33 +3,40 @@ import apiClient, { API_BASE, USER_ID, isStatus } from "./client";
 import { readSSE } from "@/lib/sse";
 import type { GameResponse, StudyMaterials, StudyStreamEvent } from "@/types/study";
 
-export const studyKey = (fileId: string, sectionId: string) => ["study", fileId, sectionId] as const;
+/**
+ * A study unit is anything with the study/game/chat endpoints under one path:
+ * a book section or a collection.
+ */
+export type StudyUnit = string;
 
-const sectionPath = (fileId: string, sectionId: string) => `/books/${fileId}/sections/${sectionId}`;
+export const sectionUnit = (fileId: string, sectionId: string): StudyUnit =>
+  `/books/${fileId}/sections/${encodeURIComponent(sectionId)}`;
 
-/** Cached study materials, or null if this section hasn't been generated yet. Never generates. */
-export const useStudyMaterials = (fileId: string, sectionId: string) =>
+export const collectionUnit = (collectionId: string): StudyUnit => `/collections/${collectionId}`;
+
+export const studyKey = (unit: StudyUnit) => ["study", unit] as const;
+
+/** Cached study materials, or null if this unit hasn't been generated yet. Never generates. */
+export const useStudyMaterials = (unit: StudyUnit) =>
   useQuery<StudyMaterials | null>({
-    queryKey: studyKey(fileId, sectionId),
+    queryKey: studyKey(unit),
     queryFn: () =>
       apiClient
-        .get(`${sectionPath(fileId, sectionId)}/study`)
+        .get(`${unit}/study`)
         .then((r) => r.data)
         .catch((e) => {
           if (isStatus(e, 404)) return null;
           throw e;
         }),
-    enabled: !!fileId && !!sectionId,
     staleTime: Infinity,
   });
 
 /** Generate (or fetch cached) study materials as a stream of SSE events. */
 export async function* streamStudyMaterials(
-  fileId: string,
-  sectionId: string,
+  unit: StudyUnit,
   { force = false, signal }: { force?: boolean; signal?: AbortSignal } = {},
 ): AsyncGenerator<StudyStreamEvent> {
-  const res = await fetch(`${API_BASE}${sectionPath(fileId, sectionId)}/study/stream`, {
+  const res = await fetch(`${API_BASE}${unit}/study/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-User-Id": USER_ID },
     body: JSON.stringify({ force_regenerate: force }),
@@ -42,11 +49,11 @@ export async function* streamStudyMaterials(
   for await (const e of readSSE(res)) yield e as StudyStreamEvent;
 }
 
-export const useRegenerateGame = (fileId: string, sectionId: string) => {
+export const useRegenerateGame = (unit: StudyUnit) => {
   const qc = useQueryClient();
   return useMutation<GameResponse, Error, void>({
-    mutationFn: () => apiClient.post(`${sectionPath(fileId, sectionId)}/game`).then((r) => r.data),
+    mutationFn: () => apiClient.post(`${unit}/game`).then((r) => r.data),
     onSuccess: ({ game_code }) =>
-      qc.setQueryData<StudyMaterials | null>(studyKey(fileId, sectionId), (prev) => prev && { ...prev, game_code }),
+      qc.setQueryData<StudyMaterials | null>(studyKey(unit), (prev) => prev && { ...prev, game_code }),
   });
 };

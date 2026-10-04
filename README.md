@@ -3,7 +3,7 @@
 LearnAI turns a textbook PDF into a personalized study experience. For every section of a book it generates, tailored to the learner's VARK learning style:
 
 - **Narrative.** A rewritten explanation that streams in as it is written.
-- **Game.** An interactive React mini-game generated for the section.
+- **Game.** An interactive React mini-game generated for the section, run in a sandboxed iframe.
 - **Diagrams.** Mermaid diagrams of the key concepts.
 - **Tutor chat.** Chat grounded in the section text plus retrieval over everything the learner has uploaded.
 
@@ -30,8 +30,10 @@ The in-process alternatives need `pip install ".[local-ml]"`, which pulls in PyT
 ```
 client/  Next.js 14 (App Router) · React 18 · TypeScript · MUI 6 + Tailwind · TanStack Query · Zustand
   app/         routes: /home /upload /library /questionnaire /study/[fileId] /study/[fileId]/[sectionId]
+               /collections /collections/[id] /media /media/{transcriptions,presentations,notes}/[id]
   api/         typed hooks per backend resource (books, study, chat, profile, media, …)
-  components/  ui/ (primitives) · layout/ · study/ · game/ · upload/ · library/ · shared/
+  components/  ui/ (primitives) · layout/ · study/ · game/ · upload/ · library/ · collections/ · media/ · shared/
+  public/sandbox/  the game frame: a static page + runtime that compiles and renders generated games
   types/       API contracts mirrored from server/models
   store/       UI preferences only (server state lives in TanStack Query)
 
@@ -48,7 +50,7 @@ server/  FastAPI · LangGraph · FastMCP
 
 **The study model.**
 - **Books and sections.** An uploaded PDF becomes a *book*. Its outline (or the vision model's reading of its printed TOC) is normalized into chapters and *sections*. Each section gets a stable id such as `ch3.s2` and an explicit page range. Sections are the unit of study, and every generated artifact is cached per section.
-- **Collections.** Collections are an optional grouping of sections, transcripts, slides and notes. You can study and chat over them too.
+- **Collections.** Collections group sections, transcripts, slides and notes. A collection has the same study guide, game, diagrams and chat as a section, generated over all of its materials. Every upload also gets a hidden single-item collection, so a lecture or a slide deck can be studied on its own ("Study" on its page). Changing a collection's materials discards its generated study guide; its chat history is kept.
 
 **Agents.**
 - **Document agent:** `save_upload → read_outline → (vision TOC) → normalize → save_metadata`. Section text is then indexed in the background.
@@ -57,6 +59,12 @@ server/  FastAPI · LangGraph · FastMCP
 - **Media agent:** `acquire_audio → transcribe → store → embed`.
 
 **Streaming.** The narrative streams over SSE straight out of the content graph, using LangGraph's `messages` stream mode. Stage events follow as each node finishes.
+
+**Game sandbox.** Generated game code never runs in the app's own page:
+
+- **The frame.** `DynamicGameComponent` renders `public/sandbox/game.html` in an iframe with `sandbox="allow-scripts"` and no `allow-same-origin`. The frame therefore has an opaque origin: it can't read the app's DOM, cookies or storage, call the API, or navigate the page.
+- **Running a game.** The frame loads React and MathJax from `public/vendor`. When it posts `ready`, the parent sends the game code with `postMessage`. The frame compiles it with the same contract as before and posts back errors and its content height.
+- **Headers.** Next.js serves `/sandbox/*` with a CSP that re-applies the sandbox and sets `connect-src 'none'` (no fetch, XHR or WebSocket, and images only from `data:`/`blob:`), so the frame stays isolated even if opened directly. Sandbox scripts are loaded with CORS so game error messages aren't hidden.
 
 ## Running locally
 
@@ -196,11 +204,16 @@ cd client && npm run type-check && npm run lint && npm run build
 | `GET`/`POST` | `/books/{file_id}/sections/{section_id}/chat` | Chat history / send a message |
 | `GET`/`PUT` | `/profile`, `GET /profile/questionnaire` | VARK learning profile |
 | `POST` | `/media/youtube`, `/media/lectures`, `/media/presentations` | Transcribe / ingest media |
-| | `/collections/...`, `/notes`, `/accessibility/{translate,speech}` | Collections, notes, translation and TTS |
+| `GET` | `/media/transcriptions[/{job_id}]`, `/media/presentations[/{id}]` | List media / one transcript or deck |
+| `GET`/`POST` | `/notes`, `GET /notes/{notes_id}` | List / upload notes (PDF or image), one note |
+| `GET`/`POST` | `/collections` | List (`?include_auto=true` adds per-upload ones) / create `{name, materials}` |
+| `GET`/`PATCH`/`DELETE` | `/collections/{id}` | One collection / rename `{name}` / delete |
+| `PUT` | `/collections/{id}/materials` | Replace materials |
+| | `/collections/{id}/study`, `/study/stream`, `/game`, `/chat` | Same as for a section |
+| `POST` | `/accessibility/{translate,speech}` | Translation and TTS |
 
 ## Known limitations
 
-- **Generated games run as same-origin JavaScript.** This is fine for a single local user. Before multi-user deployment, games should run in a sandboxed iframe.
 - **No authentication.** `X-User-Id` is trusted as-is. Keep the ingress on your LAN, or put auth in front of it (e.g. Traefik basic-auth or forward-auth middleware).
 - **One server replica.** Storage and the vector index are local to the server pod.
 - **Image notes aren't OCR'd.** Only PDF notes have their text extracted.

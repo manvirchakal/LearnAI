@@ -131,5 +131,7 @@ def process_presentation(pptx_bytes: bytes, filename: str, user_id: str) -> dict
         logger.warning(f"Embedding presentation {presentation_id} failed: {e}")
 
     collection_id = create_default_collection("presentations", presentation_id, metadata, user_id)
+    metadata["collection_id"] = collection_id
+    save_presentation_metadata(user_id, presentation_id, metadata)
     return {"presentation_id": presentation_id, "metadata": metadata, "collection_id": collection_id,
             "slides": [{"title": s["title"], "content": s["content"], "notes": s["notes"]} for s in slides]}

@@ -1,13 +1,15 @@
 "use client";
 import { Box, TextField, Typography, Alert } from "@mui/material";
 import YouTubeIcon from "@mui/icons-material/YouTube";
+import Link from "next/link";
 import { useState } from "react";
 import Button from "@/components/ui/Button";
+import { errorMessage } from "@/api/client";
 import { useTranscribeYouTube } from "@/api/media";
 
 export default function YouTubeInput() {
   const [url, setUrl] = useState("");
-  const { mutate: transcribe, isPending, isSuccess, error, reset } = useTranscribeYouTube();
+  const { mutate: transcribe, data, isPending, isSuccess, error, reset } = useTranscribeYouTube();
 
   const isValidYouTubeUrl = (s: string) =>
     /^https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]+/.test(s);
@@ -42,15 +44,20 @@ export default function YouTubeInput() {
           Transcribe
         </Button>
       </Box>
+      {isPending && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Downloading and transcribing; long videos take a few minutes.
+        </Typography>
+      )}
 
       {isSuccess && (
         <Alert severity="success" sx={{ mt: 1.5 }}>
-          Transcription started! Check the library when it finishes.
+          Transcribed &ldquo;{data.title}&rdquo;. <Link href={`/media/transcriptions/${data.job_id}`}>View transcript</Link>
         </Alert>
       )}
       {error && (
         <Alert severity="error" sx={{ mt: 1.5 }}>
-          Failed to start transcription.
+          Transcription failed: {errorMessage(error)}
         </Alert>
       )}
     </Box>

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 from services.book_service import get_section_text
 from services.storage_service import (
+    delete_collection_data,
     save_collection,
     load_collection,
     list_collections,
@@ -17,6 +18,14 @@ from core import storage
 logger = logging.getLogger(__name__)
 
 
+MATERIAL_KINDS = ("textbook_sections", "transcriptions", "presentations", "notes")
+
+
+def _normalize(materials: Dict) -> Dict:
+    """Every material kind present as a list, so clients can rely on the shape."""
+    return {**materials, **{k: list(materials.get(k) or []) for k in MATERIAL_KINDS}}
+
+
 def create_collection(name: str, materials: Dict, user_id: str) -> dict:
     collection_id = str(uuid.uuid4())
     collection = {
@@ -24,7 +33,7 @@ def create_collection(name: str, materials: Dict, user_id: str) -> dict:
         "name": name,
         "created_date": datetime.now().isoformat(),
         "user_id": user_id,
-        "materials": materials,
+        "materials": _normalize(materials),
     }
     save_collection(user_id, collection_id, collection)
     return collection
@@ -37,23 +46,35 @@ def get_collection(collection_id: str, user_id: str) -> dict:
     return col
 
 
-def list_user_collections(user_id: str) -> List[dict]:
-    """Return all collections with more than one material."""
-    results = []
-    for col in list_collections(user_id):
-        total = sum(len(v) for v in col.get("materials", {}).values() if isinstance(v, list))
-        if total > 1:
-            results.append(col)
-    return results
+def list_user_collections(user_id: str, include_auto: bool = False) -> List[dict]:
+    """
+    The user's collections, newest first. Single-material collections created
+    automatically for each upload ("auto") are left out unless asked for.
+    """
+    results = [c for c in list_collections(user_id) if include_auto or not c.get("auto")]
+    return sorted(results, key=lambda c: c.get("created_date", ""), reverse=True)
 
 
 def update_collection_materials(collection_id: str, materials: Dict, user_id: str) -> dict:
-    col = load_collection(user_id, collection_id)
-    if col.get("user_id") != user_id:
-        raise PermissionError("Not authorized to modify this collection")
-    col["materials"] = materials
+    col = get_collection(collection_id, user_id)
+    col["materials"] = _normalize(materials)
+    save_collection(user_id, collection_id, col)
+    # Generated study materials described the old contents; chat history is kept
+    storage.delete(f"narratives/{user_id}/collections/{collection_id}.json")
+    return col
+
+
+def rename_collection(collection_id: str, name: str, user_id: str) -> dict:
+    col = get_collection(collection_id, user_id)
+    col["name"] = name
     save_collection(user_id, collection_id, col)
     return col
+
+
+def delete_collection(collection_id: str, user_id: str) -> None:
+    """Delete a collection and what was generated for it (not its materials)."""
+    get_collection(collection_id, user_id)
+    delete_collection_data(user_id, collection_id)
 
 
 def create_default_collection(
@@ -67,6 +88,7 @@ def create_default_collection(
         "name": f"{material_metadata.get('original_filename', 'Untitled')} Collection",
         "created_date": datetime.now().isoformat(),
         "user_id": user_id,
+        "auto": True,
         "materials": {
             "textbook_sections": [],
             "transcriptions": [],

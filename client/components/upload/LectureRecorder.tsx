@@ -2,6 +2,7 @@
 import { Alert, Box, LinearProgress, TextField, Typography } from "@mui/material";
 import MicIcon from "@mui/icons-material/Mic";
 import StopIcon from "@mui/icons-material/Stop";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import Button from "@/components/ui/Button";
 import { errorMessage } from "@/api/client";
@@ -17,7 +18,7 @@ export default function LectureRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { mutate: transcribe, isSuccess, error } = useTranscribeLecture();
+  const { mutate: transcribe, data, isSuccess, error } = useTranscribeLecture();
 
   const startRecording = async () => {
     try {
@@ -96,7 +97,7 @@ export default function LectureRecorder() {
         )}
       </Box>
 
-      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Transcript saved — it&apos;s available as a collection for study.</Alert>}
+      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Transcript saved. <Link href={`/media/transcriptions/${data.job_id}`}>View transcript</Link></Alert>}
       {error && <Alert severity="error" sx={{ mt: 2 }}>Transcription failed: {errorMessage(error)}</Alert>}
     </Box>
   );

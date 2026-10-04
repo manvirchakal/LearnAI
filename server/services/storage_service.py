@@ -86,6 +86,12 @@ def load_collection(user_id: str, collection_id: str) -> dict:
     return storage.load_json(f"collections/{user_id}/{collection_id}.json")
 
 
+def delete_collection_data(user_id: str, collection_id: str) -> None:
+    storage.delete(f"collections/{user_id}/{collection_id}.json")
+    storage.delete(f"narratives/{user_id}/collections/{collection_id}.json")
+    storage.delete(f"chat-history/{user_id}/collections/{collection_id}.json")
+
+
 def list_collections(user_id: str) -> List[dict]:
     keys = storage.list_json_keys(f"collections/{user_id}/")
     results = []
@@ -148,6 +154,22 @@ def list_presentation_metadata(user_id: str) -> List[dict]:
 
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
+
+def list_notes_metadata(user_id: str) -> List[dict]:
+    results = []
+    for key in storage.list_json_keys(f"notes/{user_id}/metadata/"):
+        try:
+            results.append(storage.load_json(key))
+        except Exception:
+            pass
+    return results
+
+
+def load_transcription(user_id: str, job_id: str) -> dict:
+    """Metadata and transcript text; FileNotFoundError if either is missing."""
+    metadata = storage.load_json(f"transcriptions/{user_id}/metadata/{job_id}.json")
+    return {"metadata": metadata, "transcript": storage.load_text(f"transcriptions/{user_id}/content/{job_id}.txt")}
+
 
 def save_notes_metadata(user_id: str, notes_id: str, metadata: dict) -> None:
     storage.save_json(f"notes/{user_id}/metadata/{notes_id}.json", metadata)

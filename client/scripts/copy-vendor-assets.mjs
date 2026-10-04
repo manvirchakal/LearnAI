@@ -12,6 +12,9 @@ const assets = [
   ["mathjax/es5", "mathjax"],
   // pdf.js worker for react-pdf; Next 14's minifier can't bundle pdfjs-dist 4's worker
   ["pdfjs-dist/build/pdf.worker.min.mjs", "pdf.worker.min.mjs"],
+  // React UMD builds for the sandboxed game frame (public/sandbox/game.html)
+  ["react/umd/react.production.min.js", "react/react.production.min.js"],
+  ["react-dom/umd/react-dom.production.min.js", "react/react-dom.production.min.js"],
 ];
 
 for (const [from, to] of assets) {

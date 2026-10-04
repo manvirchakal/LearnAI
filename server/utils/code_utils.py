@@ -10,7 +10,7 @@ GAME_CODE_SYSTEM_PROMPT = """Create a fully functional React component for the f
 
 {game_idea}
 
-The component will be rendered within a DynamicGameComponent via:
+The component runs inside a sandboxed iframe with no network access, compiled via:
   const factory = new Function('React', 'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'MathJax', `return function Game() {{ <your code> }}`);
 Your code is the BODY of the Game function: declare state/handlers, then end with `return React.createElement(...)`.
 MathJax is a React component that typesets LaTeX children, e.g. React.createElement(MathJax, null, "\\(x^2\\)").
@@ -20,7 +20,7 @@ Requirements:
 2. Use React.createElement for all element creation (no JSX)
 3. Return a single root element (usually a div) containing all other elements
 4. Ensure all variables and functions are properly declared
-5. Do not use any external libraries or components not provided
+5. Do not use any external libraries or components not provided; do not fetch, load scripts or use storage
 6. Provide ONLY the JavaScript code, without any explanations or markdown formatting
 7. Do not include 'return function Game() {{' at the beginning or '}}' at the end
 8. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
@@ -40,7 +40,7 @@ Generate the game code now, no explanations or comments, just the code:"""
 
 
 def wrap_game_body(code: str) -> str:
-    """The exact shape the frontend executes (see DynamicGameComponent)."""
+    """The exact shape the frontend executes (client/public/sandbox/game-runtime.js)."""
     return f"function Game() {{\n{code}\n}}"
 
 

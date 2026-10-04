@@ -7,12 +7,14 @@ import { useEffect, useRef, useState } from "react";
 import Button from "@/components/ui/Button";
 import { errorMessage } from "@/api/client";
 import { useChatHistory, useSendMessage } from "@/api/chat";
+import type { StudyUnit } from "@/api/study";
 import { useUIStore } from "@/store/uiStore";
 import type { ChatMessage } from "@/types/chat";
 
 interface Props {
-  fileId: string;
-  sectionId: string;
+  unit: StudyUnit;
+  /** What the learner is chatting about, e.g. "this section" */
+  subject?: string;
 }
 
 function Bubble({ msg, pending = false }: { msg: ChatMessage; pending?: boolean }) {
@@ -47,13 +49,13 @@ function Bubble({ msg, pending = false }: { msg: ChatMessage; pending?: boolean 
   );
 }
 
-export default function ChatPanel({ fileId, sectionId }: Props) {
+export default function ChatPanel({ unit, subject = "this section" }: Props) {
   const { language } = useUIStore();
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const { data } = useChatHistory(fileId, sectionId);
-  const send = useSendMessage(fileId, sectionId);
+  const { data } = useChatHistory(unit);
+  const send = useSendMessage(unit);
   const history = data?.history;
 
   useEffect(() => {
@@ -72,7 +74,7 @@ export default function ChatPanel({ fileId, sectionId }: Props) {
         {!history?.length && !send.isPending && (
           <Box sx={{ textAlign: "center", mt: 2 }}>
             <SmartToyIcon sx={{ fontSize: 32, color: "text.disabled", mb: 1 }} />
-            <Typography color="text.secondary" variant="body2">Ask anything about this section.</Typography>
+            <Typography color="text.secondary" variant="body2">Ask anything about {subject}.</Typography>
           </Box>
         )}
         {history?.map((msg, i) => <Bubble key={i} msg={msg} />)}
@@ -91,7 +93,7 @@ export default function ChatPanel({ fileId, sectionId }: Props) {
         <TextField
           fullWidth
           size="small"
-          placeholder="Ask a question about this section…"
+          placeholder={`Ask a question about ${subject}…`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {

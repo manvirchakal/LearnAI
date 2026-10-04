@@ -1,6 +1,8 @@
 "use client";
 import { Box, Typography, Grid } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import FolderSpecialIcon from "@mui/icons-material/FolderSpecial";
+import OndemandVideoIcon from "@mui/icons-material/OndemandVideo";
 import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
 import PsychologyIcon from "@mui/icons-material/Psychology";
 import Link from "next/link";
@@ -12,13 +14,25 @@ const tiles = [
     href: "/upload",
     icon: <CloudUploadIcon sx={{ fontSize: 40, color: "primary.main" }} />,
     title: "Upload Material",
-    desc: "Add PDFs, YouTube lectures, or presentations.",
+    desc: "Add PDFs, YouTube videos, lectures, slides or notes.",
   },
   {
     href: "/library",
     icon: <LibraryBooksIcon sx={{ fontSize: 40, color: "primary.main" }} />,
     title: "My Library",
     desc: "Browse and study your uploaded textbooks.",
+  },
+  {
+    href: "/collections",
+    icon: <FolderSpecialIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    title: "Collections",
+    desc: "Study sections, lectures and slides together.",
+  },
+  {
+    href: "/media",
+    icon: <OndemandVideoIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    title: "Media",
+    desc: "Your transcripts, slide decks and notes.",
   },
   {
     href: "/questionnaire",

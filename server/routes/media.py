@@ -4,6 +4,7 @@ Media API — transcripts (YouTube, recorded/uploaded lectures) and presentation
     POST /media/youtube           {video_url}           (media agent)
     POST /media/lectures          multipart audio+title (media agent)
     GET  /media/transcriptions
+    GET  /media/transcriptions/{job_id}      metadata + transcript
     POST /media/presentations     multipart .pptx
     GET  /media/presentations
     GET  /media/presentations/{presentation_id}
@@ -20,6 +21,7 @@ from services.storage_service import (
     list_transcription_metadata,
     load_presentation_metadata,
     load_presentation_slide,
+    load_transcription,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +54,16 @@ def transcribe_lecture(
 
 @router.get("/transcriptions")
 def list_transcriptions(user_id: str = Depends(get_user_id)):
-    return list_transcription_metadata(user_id)
+    return sorted(list_transcription_metadata(user_id),
+                  key=lambda m: m.get("transcription_date", ""), reverse=True)
+
+
+@router.get("/transcriptions/{job_id}")
+def get_transcription(job_id: str, user_id: str = Depends(get_user_id)):
+    try:
+        return load_transcription(user_id, job_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Transcription not found")
 
 
 @router.post("/presentations")
@@ -68,7 +79,7 @@ def upload_presentation(presentation: UploadFile = File(...), user_id: str = Dep
 
 @router.get("/presentations")
 def list_presentations(user_id: str = Depends(get_user_id)):
-    return list_presentation_metadata(user_id)
+    return sorted(list_presentation_metadata(user_id), key=lambda m: m.get("upload_date", ""), reverse=True)
 
 
 @router.get("/presentations/{presentation_id}")

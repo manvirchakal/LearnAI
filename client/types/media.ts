@@ -6,6 +6,8 @@ export interface TranscriptionMetadata {
   source_type: "upload" | "youtube";
   video_url?: string | null;
   video_id?: string | null;
+  /** The collection created for this transcript alone (absent on older uploads) */
+  collection_id?: string;
 }
 
 export interface TranscriptionResult {
@@ -16,6 +18,11 @@ export interface TranscriptionResult {
   collection_id: string;
 }
 
+export interface TranscriptionDetail {
+  metadata: TranscriptionMetadata;
+  transcript: string;
+}
+
 export interface PresentationMetadata {
   presentation_id: string;
   original_filename: string;
@@ -23,6 +30,7 @@ export interface PresentationMetadata {
   total_slides: number;
   has_speaker_notes: boolean;
   slide_titles: string[];
+  collection_id?: string;
 }
 
 export interface SlideContent {
@@ -36,4 +44,33 @@ export interface PresentationResult {
   collection_id: string;
   metadata: PresentationMetadata;
   slides: SlideContent[];
+}
+
+export interface PresentationDetail {
+  metadata: PresentationMetadata;
+  slides: SlideContent[];
+}
+
+export interface NotesMetadata {
+  notes_id: string;
+  original_filename: string;
+  upload_date: string;
+  file_type: string;
+  processing_status: string;
+  collection_id?: string;
+}
+
+export interface NotesTextBlock {
+  text: string;
+}
+
+export interface NotesDetail {
+  metadata: NotesMetadata;
+  content: { text_content: NotesTextBlock[] };
+}
+
+export interface NotesResult {
+  notes_id: string;
+  metadata: NotesMetadata;
+  collection_id: string;
 }

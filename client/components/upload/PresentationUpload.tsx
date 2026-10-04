@@ -1,17 +1,19 @@
 "use client";
 import { Box, Typography, Alert } from "@mui/material";
 import SlideshowIcon from "@mui/icons-material/Slideshow";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import Button from "@/components/ui/Button";
+import { errorMessage } from "@/api/client";
 import { useProcessPresentation } from "@/api/media";
 
 export default function PresentationUpload() {
   const [file, setFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { mutate: upload, isPending, isSuccess, error, reset } = useProcessPresentation();
+  const { mutate: upload, data, isPending, isSuccess, error, reset } = useProcessPresentation();
 
   const handleFile = (f: File) => {
-    if (!f.name.match(/\.(pptx?|odp)$/i)) return;
+    if (!/\.pptx$/i.test(f.name)) return;
     setFile(f);
     reset();
   };
@@ -35,7 +37,7 @@ export default function PresentationUpload() {
         <input
           ref={inputRef}
           type="file"
-          accept=".ppt,.pptx,.odp"
+          accept=".pptx"
           style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
         />
@@ -46,8 +48,13 @@ export default function PresentationUpload() {
         )}
       </Box>
 
-      {isSuccess && <Alert severity="success" sx={{ mt: 1.5 }}>Presentation processed and saved!</Alert>}
-      {error && <Alert severity="error" sx={{ mt: 1.5 }}>Failed to process presentation.</Alert>}
+      {isSuccess && (
+        <Alert severity="success" sx={{ mt: 1.5 }}>
+          {data.metadata.total_slides} slides saved.{" "}
+          <Link href={`/media/presentations/${data.presentation_id}`}>View slides</Link>
+        </Alert>
+      )}
+      {error && <Alert severity="error" sx={{ mt: 1.5 }}>Failed to process presentation: {errorMessage(error)}</Alert>}
     </Box>
   );
 }

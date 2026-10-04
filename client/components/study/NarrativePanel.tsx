@@ -1,5 +1,6 @@
 "use client";
 import { Alert, Box, LinearProgress, Typography } from "@mui/material";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
 import Button from "@/components/ui/Button";
@@ -9,13 +10,25 @@ import { useStudySession } from "./StudySession";
 export default function NarrativePanel() {
   const { status, materials, streamingText, activity, error, generate } = useStudySession();
 
-  if (status === "loading") return <Spinner label="Loading section…" />;
+  if (status === "loading") return <Spinner label="Loading…" />;
+
+  if (status === "idle") {
+    return (
+      <Box sx={{ p: 4, textAlign: "center" }}>
+        <AutoAwesomeIcon sx={{ fontSize: 36, color: "primary.main", mb: 1 }} />
+        <Typography gutterBottom>
+          Turn these materials into a personalized narrative, a game and diagrams.
+        </Typography>
+        <Button variant="contained" onClick={() => generate(false)} sx={{ mt: 1 }}>Generate study guide</Button>
+      </Box>
+    );
+  }
 
   if (status === "error" && !materials) {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error" action={<Button size="small" onClick={() => generate(false)}>Retry</Button>}>
-          Couldn&apos;t generate this section: {error}
+          Couldn&apos;t generate the study guide: {error}
         </Alert>
       </Box>
     );
@@ -40,7 +53,7 @@ export default function NarrativePanel() {
         <MarkdownRenderer content={text} math={!streaming} />
       ) : (
         <Typography color="text.secondary" variant="body2">
-          Personalizing this section to your learning profile…
+          Personalizing this material to your learning profile…
         </Typography>
       )}
     </Box>

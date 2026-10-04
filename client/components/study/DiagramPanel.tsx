@@ -2,12 +2,13 @@
 import { Box, Typography } from "@mui/material";
 import MermaidDiagram from "@/components/shared/MermaidDiagram";
 import Spinner from "@/components/ui/Spinner";
-import { useStudySession } from "./StudySession";
+import { NotYet, useStudySession } from "./StudySession";
 
 export default function DiagramPanel() {
   const { status, materials, activity } = useStudySession();
 
   if (!materials) {
+    if (status === "idle") return <NotYet />;
     return status === "error"
       ? <Box sx={{ p: 4, textAlign: "center" }}><Typography color="text.secondary">Diagrams unavailable.</Typography></Box>
       : <Spinner label={activity ?? "Generating diagrams…"} />;
@@ -16,7 +17,7 @@ export default function DiagramPanel() {
   if (materials.diagrams.length === 0) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
-        <Typography color="text.secondary">No diagrams for this section.</Typography>
+        <Typography color="text.secondary">No diagrams were generated.</Typography>
       </Box>
     );
   }
