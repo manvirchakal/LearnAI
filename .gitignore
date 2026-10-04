@@ -43,3 +43,6 @@ server/data/
 
 # Next.js
 .next/
+
+# Deployment secrets
+deploy/k8s/secret.env

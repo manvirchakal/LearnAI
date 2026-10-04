@@ -1,7 +1,7 @@
 """
 Table-of-contents normalization.
 
-Raw TOCs come from two places (the PDF's embedded outline, or Claude vision
+Raw TOCs come from two places (the PDF's embedded outline, or the vision model's
 parsing of the TOC pages) and have no stable identifiers or end pages. Every
 TOC is normalized here into:
 

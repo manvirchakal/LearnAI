@@ -1,0 +1,49 @@
+# Model servers for LearnAI on the GPU host (one vLLM process per model).
+#   docker compose up -d   →  chat :8001  ·  embeddings :8002  ·  whisper :8003
+#
+# Sized for a single 24 GB GPU; adjust --gpu-memory-utilization so the three
+# fractions fit your card, or move Whisper/embeddings to a second GPU.
+# Flags track recent vLLM releases; check `vllm serve --help` for yours.
+x-vllm: &vllm
+  image: vllm/vllm-openai:latest
+  ipc: host
+  restart: unless-stopped
+  volumes:
+    - hf-cache:/root/.cache/huggingface
+  environment:
+    HF_TOKEN: ${HF_TOKEN:-}
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - {driver: nvidia, count: all, capabilities: [gpu]}
+
+services:
+  chat:
+    <<: *vllm
+    ports: ["8001:8000"]
+    # Vision-capable, so scanned tables of contents can be parsed
+    command: >
+      --model Qwen/Qwen2.5-VL-7B-Instruct
+      --max-model-len 32768
+      --limit-mm-per-prompt '{"image": 6}'
+      --gpu-memory-utilization 0.70
+
+  embeddings:
+    <<: *vllm
+    ports: ["8002:8000"]
+    command: >
+      --model BAAI/bge-small-en-v1.5
+      --runner pooling
+      --gpu-memory-utilization 0.05
+
+  whisper:
+    <<: *vllm
+    ports: ["8003:8000"]
+    # The image needs vLLM's audio extras (librosa, soundfile)
+    command: >
+      --model openai/whisper-large-v3-turbo
+      --gpu-memory-utilization 0.15
+
+volumes:
+  hf-cache:

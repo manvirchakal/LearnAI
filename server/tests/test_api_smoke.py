@@ -1,5 +1,5 @@
 """End-to-end API smoke tests: upload → structure → study → game → chat → delete."""
-import fitz
+import pymupdf as fitz
 
 from tests.conftest import FakeLLM, make_pdf
 

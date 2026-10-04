@@ -9,18 +9,21 @@ LearnAI turns a textbook PDF into a personalized study experience. For every sec
 
 It can also transcribe YouTube videos and recorded lectures and ingest slide decks and notes, and it offers translation and text-to-speech.
 
-All processing runs locally except the LLM itself: **Claude via AWS Bedrock** is the only cloud dependency.
+Everything runs on your own hardware. The models are served by **vLLM** (or any OpenAI-compatible server) on a GPU host on the local network. **Claude via AWS Bedrock** remains available as an alternative LLM provider.
 
-| Concern | Implementation |
-|---|---|
-| PDF text, outline, page rendering | PyMuPDF |
-| Printed table-of-contents parsing (when a PDF has no outline) | Claude vision |
-| Speech-to-text | faster-whisper |
-| Text-to-speech | pyttsx3 (espeak on Linux) |
-| Translation | argostranslate (models download once per language pair) |
-| Embeddings / RAG | sentence-transformers + ChromaDB |
-| Storage | Local filesystem under `server/data/` |
-| Auth | None yet: identity is the `X-User-Id` header (default `default`) |
+| Concern | Default (`openai` providers → vLLM) | In-process alternative |
+|---|---|---|
+| Chat / generation | `LLM_PROVIDER=openai`, e.g. Qwen2.5-VL-7B-Instruct | `bedrock` (Claude) |
+| Printed table-of-contents parsing (when a PDF has no outline) | The same vision-capable model | |
+| Embeddings / RAG | `/v1/embeddings` (e.g. bge-small) + ChromaDB | `local`: sentence-transformers |
+| Speech-to-text | `/v1/audio/transcriptions` (Whisper), audio chunked with ffmpeg | `local`: faster-whisper |
+| Translation | The chat model | `argos`: argostranslate |
+| Text-to-speech | pyttsx3 (espeak-ng) | |
+| PDF text, outline, page rendering | PyMuPDF | |
+| Storage | Local filesystem under `DATA_DIR` | |
+| Auth | None yet: identity is the `X-User-Id` header (default `default`) | |
+
+The in-process alternatives need `pip install ".[local-ml]"`, which pulls in PyTorch. The default server image leaves them out, so it stays small enough for Raspberry Pi nodes.
 
 ## Architecture
 
@@ -38,13 +41,13 @@ server/  FastAPI · LangGraph · FastMCP
   services/    single-purpose operations: books, storage, RAG, media, profile, accessibility
   models/      Pydantic request/response models
   utils/       pure helpers: prompts, TOC normalization, game-code and diagram cleanup, SSE
-  core/        config, local storage, vector store, Bedrock client
+  core/        config, local storage, vector store, LLM client (vLLM / Bedrock)
   mcp_server/  the same local services exposed as MCP tools, mounted at /mcp
   tests/       offline end-to-end API tests (fake LLM + embeddings)
 ```
 
 **The study model.**
-- **Books and sections.** An uploaded PDF becomes a *book*. Its outline (or Claude's reading of its printed TOC) is normalized into chapters and *sections*. Each section gets a stable id such as `ch3.s2` and an explicit page range. Sections are the unit of study, and every generated artifact is cached per section.
+- **Books and sections.** An uploaded PDF becomes a *book*. Its outline (or the vision model's reading of its printed TOC) is normalized into chapters and *sections*. Each section gets a stable id such as `ch3.s2` and an explicit page range. Sections are the unit of study, and every generated artifact is cached per section.
 - **Collections.** Collections are an optional grouping of sections, transcripts, slides and notes. You can study and chat over them too.
 
 **Agents.**
@@ -60,9 +63,9 @@ server/  FastAPI · LangGraph · FastMCP
 ### Prerequisites
 
 - Python 3.11+ and Node 20+
-- `ffmpeg`, needed by yt-dlp and faster-whisper for some formats
+- `ffmpeg`, needed by yt-dlp and for chunking audio sent to a remote Whisper
 - On Linux, `espeak-ng` for text-to-speech
-- AWS credentials that can invoke Claude models on Bedrock
+- A model server: vLLM (see [deploy/vllm](deploy/vllm/docker-compose.yml)) or another OpenAI-compatible endpoint, or AWS credentials for Claude on Bedrock
 
 ### Backend
 
@@ -70,11 +73,11 @@ server/  FastAPI · LangGraph · FastMCP
 cd server
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env        # set AWS credentials/region and Bedrock model ids
+cp .env.example .env        # point OPENAI_BASE_URL / EMBEDDING_BASE_URL / STT_BASE_URL at your model servers
 uvicorn main:app --reload   # http://localhost:8000 — API docs at /docs, MCP at /mcp
 ```
 
-The embedding and Whisper models download on first use.
+`GET /health/dependencies` reports whether each configured model server is reachable and serves the configured model.
 
 ### Frontend
 
@@ -87,7 +90,7 @@ npm run dev                 # http://localhost:3000
 
 The browser only talks to Next.js. Requests to `/api-backend/*` are proxied to `API_URL` (default `http://localhost:8000`).
 
-### Without AWS credentials
+### Without a model server
 
 `tests/fake_server.py` serves the real API with a scripted fake LLM and fake embeddings. Use it for UI work:
 
@@ -95,10 +98,68 @@ The browser only talks to Next.js. Requests to `/api-backend/*` are proxied to `
 cd server && FAKE_TOKEN_DELAY=0.1 python -m tests.fake_server
 ```
 
+## Deployment
+
+### Images
+
+CI (`.github/workflows/ci.yml`) runs the tests, then builds `linux/amd64` and `linux/arm64` images and pushes them to GHCR:
+
+- `ghcr.io/manvirchakal/learnai-server`
+- `ghcr.io/manvirchakal/learnai-client`
+
+Pushes to `main` are tagged `latest`; branches get their branch name, plus `sha-<short>` and semver tags for `v*` releases.
+
+If the packages are private, either make them public in GitHub's package settings or give the cluster an image pull secret.
+
+- **Server image:** about 1.2 GB. It contains no PyTorch; add `--build-arg EXTRAS=local-ml` to bundle the in-process models. It runs as uid 10001 with data in `/data`, and its health checks are `/health` (liveness) and `/health/ready` (storage writable).
+- **Client image:** about 300 MB. Next.js runs in standalone mode. `API_URL` is read at runtime by the `/api-backend` proxy route, so the same image works in every environment.
+
+### Model host (vLLM)
+
+[`deploy/vllm/docker-compose.yml`](deploy/vllm/docker-compose.yml) runs one vLLM process per model on the GPU host:
+
+| Port | Model |
+|---|---|
+| `:8001` | Chat + vision: Qwen2.5-VL-7B-Instruct |
+| `:8002` | Embeddings: bge-small-en-v1.5 |
+| `:8003` | Whisper large-v3-turbo |
+
+Check the flags against your vLLM version and GPU memory.
+
+Keep `LLM_MAX_OUTPUT_TOKENS` plus the prompt under `--max-model-len`. Source material is clipped to `LLM_MAX_SOURCE_CHARS`, about 4 characters per token.
+
+### k3s (Raspberry Pi cluster)
+
+```bash
+# 1. Point the config at the GPU host
+$EDITOR deploy/k8s/server.env          # OPENAI_BASE_URL, EMBEDDING_BASE_URL, STT_BASE_URL, models
+$EDITOR deploy/k8s/ingress.yaml        # hostname
+# 2. Deploy
+kubectl apply -k deploy/k8s
+kubectl -n learnai get pods
+kubectl -n learnai exec deploy/learnai-server -- \
+  python -c "import urllib.request;print(urllib.request.urlopen('http://localhost:8000/health/dependencies').read().decode())"
+```
+
+How the manifests behave:
+
+- **Server:** a single replica with the `Recreate` strategy, because it owns the data volume (files plus embedded Chroma). The 20 Gi PVC uses k3s's `local-path` provisioner by default. Switch to Longhorn or NFS if the pod must be able to move between nodes.
+- **Client:** stateless; scale it freely.
+- **Ingress:** Traefik routes `/` to the client and `/mcp` to the server.
+
+Generation requests stream or wait for minutes, which Traefik allows by default.
+
+Images need a 64-bit OS on the Pis (arm64).
+
+### Single machine
+
+`docker compose up -d` serves the app at http://localhost:3000 using `server/.env`.
+
 ## Tests and checks
 
 ```bash
-cd server && pytest                         # upload → structure → study (incl. SSE) → game → chat → delete, MCP tools
+cd server && pytest                         # upload → structure → study (incl. SSE) → game → chat → delete,
+                                            # MCP tools, and the vLLM/OpenAI provider path against a fake server
 cd client && npm run type-check && npm run lint && npm run build
 ```
 
@@ -120,5 +181,6 @@ cd client && npm run type-check && npm run lint && npm run build
 ## Known limitations
 
 - **Generated games run as same-origin JavaScript.** This is fine for a single local user. Before multi-user deployment, games should run in a sandboxed iframe.
-- **No authentication.** `X-User-Id` is trusted as-is.
+- **No authentication.** `X-User-Id` is trusted as-is. Keep the ingress on your LAN, or put auth in front of it (e.g. Traefik basic-auth or forward-auth middleware).
+- **One server replica.** Storage and the vector index are local to the server pod.
 - **Image notes aren't OCR'd.** Only PDF notes have their text extracted.

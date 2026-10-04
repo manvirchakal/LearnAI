@@ -56,7 +56,7 @@ def validate_js_syntax(code: str) -> bool:
 
 
 def post_process_game_code(code: str) -> str:
-    """Clean up Claude-generated game code into a bare Game function body."""
+    """Clean up LLM-generated game code into a bare Game function body."""
     code = code.strip()
     # Strip markdown code fences if present
     code = re.sub(r"^```(?:javascript|jsx?|js)?\s*\n?", "", code)

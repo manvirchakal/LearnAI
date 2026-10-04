@@ -1,8 +1,8 @@
 import axios, { AxiosError } from "axios";
 
 /**
- * All requests go through the Next.js rewrite at /api-backend (see
- * next.config.mjs), so the browser only ever talks to one origin.
+ * All requests go through the Next.js proxy at /api-backend (see
+ * app/api-backend/[...path]/route.ts), so the browser only ever talks to one origin.
  */
 export const API_BASE = "/api-backend";
 

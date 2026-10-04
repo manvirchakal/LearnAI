@@ -1,0 +1,29 @@
+# kubectl apply -k deploy/k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: learnai
+
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - server.yaml
+  - client.yaml
+  - ingress.yaml
+
+configMapGenerator:
+  - name: learnai-server-config
+    envs: [server.env]
+
+# Optional secrets (OPENAI_API_KEY for a vLLM --api-key, AWS keys for Bedrock):
+#   cp secret.env.example secret.env && edit, then uncomment
+# secretGenerator:
+#   - name: learnai-server-secrets
+#     envs: [secret.env]
+
+images:
+  - name: learnai-server
+    newName: ghcr.io/manvirchakal/learnai-server
+    newTag: latest
+  - name: learnai-client
+    newName: ghcr.io/manvirchakal/learnai-client
+    newTag: latest

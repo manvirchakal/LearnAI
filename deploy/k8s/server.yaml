@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learnai-server
+  labels: {app.kubernetes.io/name: learnai, app.kubernetes.io/component: server}
+spec:
+  # Exactly one: the server owns /data (local files + embedded Chroma) and
+  # runs indexing in-process. Recreate so old and new pods never share it.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app.kubernetes.io/name: learnai, app.kubernetes.io/component: server}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: learnai, app.kubernetes.io/component: server}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: server
+          image: learnai-server
+          ports:
+            - {name: http, containerPort: 8000}
+          envFrom:
+            - configMapRef: {name: learnai-server-config}
+            - secretRef: {name: learnai-server-secrets, optional: true}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: learnai-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: learnai-server
+  labels: {app.kubernetes.io/name: learnai, app.kubernetes.io/component: server}
+spec:
+  selector: {app.kubernetes.io/name: learnai, app.kubernetes.io/component: server}
+  ports:
+    - {name: http, port: 8000, targetPort: http}

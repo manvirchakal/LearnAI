@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime
 
-import fitz
+import pymupdf as fitz
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from core.dependencies import get_user_id

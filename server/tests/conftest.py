@@ -15,7 +15,7 @@ _DATA = tempfile.mkdtemp(prefix="learnai-test-")
 os.environ["DATA_DIR"] = _DATA
 os.environ["CHROMA_DIR"] = os.path.join(_DATA, "vectorstore")
 
-import fitz  # noqa: E402
+import pymupdf as fitz  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from langchain_core.language_models import BaseChatModel  # noqa: E402
 from langchain_core.messages import AIMessage, AIMessageChunk  # noqa: E402

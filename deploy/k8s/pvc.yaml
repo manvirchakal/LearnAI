@@ -1,0 +1,13 @@
+# Uploads, generated materials, chat history and the Chroma index.
+# k3s ships the local-path provisioner: the volume lives on one node and the
+# server pod is scheduled there. Use Longhorn/NFS if it must be able to move.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: learnai-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: longhorn
