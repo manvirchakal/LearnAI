@@ -1,80 +1,113 @@
 "use client";
-import { Box, Typography, Grid } from "@mui/material";
-import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import FolderSpecialIcon from "@mui/icons-material/FolderSpecial";
-import OndemandVideoIcon from "@mui/icons-material/OndemandVideo";
-import LibraryBooksIcon from "@mui/icons-material/LibraryBooks";
-import PsychologyIcon from "@mui/icons-material/Psychology";
+import {
+  ArrowRightIcon,
+  BrainIcon,
+  ChevronRightIcon,
+  CloudUploadIcon,
+  FolderHeartIcon,
+  LibraryIcon,
+  MonitorPlayIcon,
+  SparklesIcon,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import AppShell from "@/components/layout/AppShell";
-import Card from "@/components/ui/Card";
+import PageHeader, { PageContainer } from "@/components/shared/PageHeader";
+import { cn } from "@/lib/utils";
 
-const tiles = [
+interface Tile {
+  href: string;
+  icon: LucideIcon;
+  title: string;
+  desc: string;
+  /** Tailwind classes for the icon chip, using chart tokens so dark mode works */
+  accent: string;
+}
+
+const tiles: Tile[] = [
   {
     href: "/upload",
-    icon: <CloudUploadIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    icon: CloudUploadIcon,
     title: "Upload Material",
     desc: "Add PDFs, YouTube videos, lectures, slides or notes.",
+    accent: "bg-chart-1/10 text-chart-1 ring-chart-1/20",
   },
   {
     href: "/library",
-    icon: <LibraryBooksIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    icon: LibraryIcon,
     title: "My Library",
     desc: "Browse and study your uploaded textbooks.",
+    accent: "bg-chart-2/10 text-chart-2 ring-chart-2/20",
   },
   {
     href: "/collections",
-    icon: <FolderSpecialIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    icon: FolderHeartIcon,
     title: "Collections",
     desc: "Study sections, lectures and slides together.",
+    accent: "bg-chart-3/10 text-chart-3 ring-chart-3/20",
   },
   {
     href: "/media",
-    icon: <OndemandVideoIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    icon: MonitorPlayIcon,
     title: "Media",
     desc: "Your transcripts, slide decks and notes.",
+    accent: "bg-chart-4/10 text-chart-4 ring-chart-4/20",
   },
   {
     href: "/questionnaire",
-    icon: <PsychologyIcon sx={{ fontSize: 40, color: "primary.main" }} />,
+    icon: BrainIcon,
     title: "Learning Profile",
     desc: "Discover your VARK learning style.",
+    accent: "bg-chart-5/10 text-chart-5 ring-chart-5/20",
   },
 ];
 
 export default function HomePage() {
   return (
     <AppShell>
-      <Box sx={{ p: 4 }}>
-        <Typography variant="h4" fontWeight={700} gutterBottom>
-          Welcome to LearnAI
-        </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-          Upload your study material and let AI tailor the experience to your learning style.
-        </Typography>
+      <PageContainer>
+        <div className="relative mb-6 overflow-hidden rounded-2xl border bg-card p-5 shadow-xs sm:mb-8 sm:p-8">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-chart-2/10"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-24 -right-24 size-64 rounded-full bg-primary/10 blur-3xl"
+          />
+          <PageHeader
+            className="relative mb-0"
+            icon={SparklesIcon}
+            eyebrow="Your AI study companion"
+            title="Welcome to LearnAI"
+            description="Upload your study material and let AI tailor the experience to your learning style."
+          />
+        </div>
 
-        <Grid container spacing={3}>
-          {tiles.map((tile) => (
-            <Grid item xs={12} sm={6} md={4} key={tile.href}>
-              <Link href={tile.href} style={{ textDecoration: "none" }}>
-                <Card
-                  sx={{
-                    cursor: "pointer",
-                    transition: "transform 0.15s, box-shadow 0.15s",
-                    "&:hover": { transform: "translateY(-3px)", boxShadow: "0 6px 20px rgba(0,0,0,0.1)" },
-                  }}
-                >
-                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1.5 }}>
-                    {tile.icon}
-                    <Typography fontWeight={700} variant="h6">{tile.title}</Typography>
-                    <Typography variant="body2" color="text.secondary">{tile.desc}</Typography>
-                  </Box>
-                </Card>
-              </Link>
-            </Grid>
+        {/* Phones: compact rows; larger screens: cards */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+          {tiles.map(({ href, icon: Icon, title, desc, accent }) => (
+            <Link
+              key={href}
+              href={href}
+              className="group flex items-center gap-4 rounded-xl border bg-card p-4 shadow-xs transition outline-none active:scale-[0.99] sm:flex-col sm:items-stretch sm:p-5 sm:hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl ring-1", accent)}>
+                <Icon className="size-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-semibold tracking-tight">{title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
+              </div>
+              <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground sm:hidden" />
+              <span className="hidden items-center gap-1 text-sm font-medium text-primary sm:inline-flex">
+                Open
+                <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </span>
+            </Link>
           ))}
-        </Grid>
-      </Box>
+        </div>
+      </PageContainer>
     </AppShell>
   );
 }

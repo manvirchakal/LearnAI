@@ -1,40 +1,31 @@
 "use client";
-import { Box } from "@mui/material";
 import { ReactNode } from "react";
-import TopNav from "./TopNav";
-import Sidebar, { DRAWER_WIDTH } from "./Sidebar";
-import { useUIStore } from "@/store/uiStore";
+import { cn } from "@/lib/utils";
 import type { BookDetail } from "@/types/book";
+import MobileNav from "./MobileNav";
+import Sidebar from "./Sidebar";
+import TopNav from "./TopNav";
 
 interface Props {
   children: ReactNode;
   /** When set, shows the book's table of contents in a sidebar */
   book?: BookDetail;
   activeSectionId?: string;
+  /** Study screens bring their own bottom bar on phones */
+  mobileNav?: boolean;
 }
 
-export default function AppShell({ children, book, activeSectionId }: Props) {
-  const { sidebarOpen } = useUIStore();
-  const withSidebar = !!book && sidebarOpen;
-
+export default function AppShell({ children, book, activeSectionId, mobileNav = true }: Props) {
   return (
-    <Box sx={{ display: "flex" }}>
+    <div className="min-h-svh bg-background">
       <TopNav showMenuButton={!!book} />
-      {book && <Sidebar book={book} activeSectionId={activeSectionId} />}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          minWidth: 0,
-          mt: "64px",
-          ml: withSidebar ? 0 : book ? `-${DRAWER_WIDTH}px` : 0,
-          transition: "margin 225ms cubic-bezier(0.0, 0, 0.2, 1) 0ms",
-          minHeight: "calc(100vh - 64px)",
-          bgcolor: "#f8f9fa",
-        }}
-      >
-        {children}
-      </Box>
-    </Box>
+      <div className="flex">
+        {book && <Sidebar book={book} activeSectionId={activeSectionId} />}
+        <main className={cn("min-h-[calc(100svh-3.5rem)] min-w-0 flex-1", mobileNav && "max-md:pb-[var(--bottom-bar)]")}>
+          {children}
+        </main>
+      </div>
+      {mobileNav && <MobileNav />}
+    </div>
   );
 }

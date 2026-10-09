@@ -6,12 +6,12 @@ LangGraph chat agent — tutoring chat grounded in one study unit.
 History is persisted per (scope, unit_id) as [{"role": "user"|"assistant", "content": str}].
 """
 import logging
-from typing import Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional, Tuple
 
 from langgraph.graph import END, StateGraph
 
 from agents.base import ChatState
-from core.llm import invoke_llm_with_history
+from core.llm import invoke_llm_with_history, message_text
 from services.accessibility_service import translate_text
 from services.profile_service import get_learning_profile
 from services.rag_service import retrieve_context
@@ -102,10 +102,9 @@ def get_history(user_id: str, scope: str, unit_id: str) -> List[Dict]:
     return load_chat_history(user_id, scope, unit_id)
 
 
-def run_chat_agent(message: str, context_text: str, user_id: str, scope: str, unit_id: str,
-                   rag_file_id: Optional[str] = None, language: str = "en") -> Dict:
-    """Answer one chat turn. Returns {"reply", "history"}."""
-    initial: ChatState = {
+def _initial_state(message: str, context_text: str, user_id: str, scope: str, unit_id: str,
+                   rag_file_id: Optional[str], language: str) -> ChatState:
+    return {
         "user_message": message,
         "query_message": message,
         "user_id": user_id,
@@ -121,7 +120,40 @@ def run_chat_agent(message: str, context_text: str, user_id: str, scope: str, un
         "ai_response": "",
         "error": None,
     }
-    result = chat_graph.invoke(initial)
+
+
+def run_chat_agent(message: str, context_text: str, user_id: str, scope: str, unit_id: str,
+                   rag_file_id: Optional[str] = None, language: str = "en") -> Dict:
+    """Answer one chat turn. Returns {"reply", "history"}."""
+    result = chat_graph.invoke(_initial_state(message, context_text, user_id, scope, unit_id, rag_file_id, language))
     if result.get("error"):
         raise RuntimeError(result["error"])
     return {"reply": result["ai_response"], "history": result["history"]}
+
+
+async def stream_chat_agent(message: str, context_text: str, user_id: str, scope: str, unit_id: str,
+                            rag_file_id: Optional[str] = None,
+                            language: str = "en") -> AsyncIterator[Tuple[str, str]]:
+    """
+    Answer one chat turn, yielding events as they happen:
+        ("stage", str)   a graph node finished
+        ("token", str)   reply text as the model writes it
+    In English the reply streams token by token; otherwise it's translated
+    after generation and arrives as one token. Raises if the turn failed.
+    """
+    state = _initial_state(message, context_text, user_id, scope, unit_id, rag_file_id, language)
+    stream_tokens = language == "en"
+    async for mode, chunk in chat_graph.astream(state, stream_mode=["messages", "updates"]):
+        if mode == "messages":
+            msg, meta = chunk
+            if stream_tokens and meta.get("langgraph_node") == "llm_call":
+                token = message_text(msg)
+                if token:
+                    yield "token", token
+            continue
+        for node, update in chunk.items():
+            if (update or {}).get("error"):
+                raise RuntimeError(update["error"])
+            yield "stage", node
+            if node == "translate_output" and not stream_tokens:
+                yield "token", (update or {}).get("ai_response") or ""

@@ -1,7 +1,8 @@
 "use client";
-import { Box, Typography } from "@mui/material";
 import { useQueryClient } from "@tanstack/react-query";
+import { SparklesIcon } from "lucide-react";
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { EmptyState } from "@/components/shared/States";
 import { errorMessage } from "@/api/client";
 import { streamStudyMaterials, studyKey, useStudyMaterials, type StudyUnit } from "@/api/study";
 import type { StudyMaterials, StudyStage } from "@/types/study";
@@ -17,9 +18,22 @@ interface StudySession {
   streamingText: string;
   /** What the agent is doing now, for progress labels */
   activity: string | null;
+  /** Pipeline stages finished so far in the current generation */
+  completed: StudyStage[];
   error: string | null;
   generate: (force?: boolean) => void;
 }
+
+/** The generation pipeline, in order, for progress displays. */
+export const STUDY_STEPS: { stage: StudyStage; label: string }[] = [
+  { stage: "rag", label: "Finding related material" },
+  { stage: "narrative", label: "Writing your personalized narrative" },
+  { stage: "game_idea", label: "Designing a game" },
+  { stage: "game_code", label: "Building the game" },
+  { stage: "validate_code", label: "Testing the game" },
+  { stage: "diagrams", label: "Drawing diagrams" },
+  { stage: "save", label: "Saving" },
+];
 
 /** Label for the work that starts after `stage` finishes. */
 const NEXT_ACTIVITY: Record<StudyStage, string | null> = {
@@ -55,6 +69,7 @@ export function StudySessionProvider({
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [activity, setActivity] = useState<string | null>(null);
+  const [completed, setCompleted] = useState<StudyStage[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -66,12 +81,17 @@ export function StudySessionProvider({
       setStreaming(true);
       setStreamingText("");
       setActivity("Getting started…");
+      setCompleted([]);
       setStreamError(null);
       try {
         let finished = false;
         for await (const e of streamStudyMaterials(unit, { force, signal: controller.signal })) {
           if (e.event === "token") setStreamingText((t) => t + e.data);
-          else if (e.event === "stage") setActivity(NEXT_ACTIVITY[e.data] ?? null);
+          else if (e.event === "stage") {
+            const stage = e.data;
+            setActivity(NEXT_ACTIVITY[stage] ?? null);
+            setCompleted((done) => (done.includes(stage) ? done : [...done, stage]));
+          }
           else if (e.event === "error") throw new Error(e.data);
           else if (e.event === "done") {
             qc.setQueryData(studyKey(unit), e.data);
@@ -93,6 +113,8 @@ export function StudySessionProvider({
 
   // First visit to a unit: nothing cached, so start generating
   useEffect(() => {
+    // Starts an external stream; its state updates are the point
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (autoGenerate && cached.isSuccess && cached.data === null) generate(false);
   }, [autoGenerate, cached.isSuccess, cached.data, generate]);
   useEffect(() => () => abortRef.current?.abort(), [unit]);
@@ -116,6 +138,7 @@ export function StudySessionProvider({
         materials: cached.data ?? null,
         streamingText,
         activity,
+        completed,
         error,
         generate: (force) => void generate(force),
       }}
@@ -134,8 +157,10 @@ export function useStudySession(): StudySession {
 /** Placeholder for the game and diagram panels before anything is generated. */
 export function NotYet() {
   return (
-    <Box sx={{ p: 4, textAlign: "center" }}>
-      <Typography color="text.secondary" variant="body2">Generate the study guide first.</Typography>
-    </Box>
+    <EmptyState
+      icon={SparklesIcon}
+      title="Nothing here yet"
+      description="Generate the study guide first, and this fills in automatically."
+    />
   );
 }

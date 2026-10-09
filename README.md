@@ -28,11 +28,13 @@ The in-process alternatives need the `local-ml` extra (`uv sync --extra local-ml
 ## Architecture
 
 ```
-client/  Next.js 14 (App Router) · React 18 · TypeScript · MUI 6 + Tailwind · TanStack Query · Zustand
+client/  Next.js 16 (App Router) · React 19 · TypeScript · Tailwind 4 + shadcn/ui · Vercel AI SDK + AI Elements
+         · TanStack Query · Zustand
   app/         routes: /home /upload /library /questionnaire /study/[fileId] /study/[fileId]/[sectionId]
                /collections /collections/[id] /media /media/{transcriptions,presentations,notes}/[id]
   api/         typed hooks per backend resource (books, study, chat, profile, media, …)
-  components/  ui/ (primitives) · layout/ · study/ · game/ · upload/ · library/ · collections/ · media/ · shared/
+  components/  ui/ (shadcn/ui) · ai-elements/ (AI Elements: conversation, message, prompt input, …)
+               · layout/ · study/ · game/ · upload/ · library/ · collections/ · media/ · shared/
   public/sandbox/  the game frame: a static page + runtime that compiles and renders generated games
   types/       API contracts mirrored from server/models
   store/       UI preferences only (server state lives in TanStack Query)
@@ -55,7 +57,7 @@ server/  FastAPI · LangGraph · FastMCP
 **Agents.**
 - **Document agent:** `save_upload → read_outline → (vision TOC) → normalize → save_metadata`. Section text is then indexed in the background.
 - **Content agent:** `load_cached → rag → narrative → game_idea → game_code ⇄ validate_code → diagrams → save`. A cache hit short-circuits the run. Game code is syntax-checked and retried up to 2 times. A separate game-only graph regenerates just the game.
-- **Chat agent:** `load_context → translate_input → rag_retrieve → llm_call → translate_output → save_history`.
+- **Chat agent:** `load_context → translate_input → rag_retrieve → llm_call → translate_output → save_history`. The web client streams it through `/chat/stream`, which speaks the [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol), so `useChat` consumes the backend directly. The server keeps the history, so each request carries only the new message.
 - **Media agent:** `acquire_audio → transcribe → store → embed`.
 
 **Streaming.** The narrative streams over SSE straight out of the content graph, using LangGraph's `messages` stream mode. Stage events follow as each node finishes.
@@ -201,6 +203,7 @@ cd client && npm run type-check && npm run lint && npm run build
 | `POST` | `/books/{file_id}/sections/{section_id}/study/stream` | Same as SSE: `token`, `stage`, `done`, `error` |
 | `POST` | `/books/{file_id}/sections/{section_id}/game` | Regenerate the game |
 | `GET`/`POST` | `/books/{file_id}/sections/{section_id}/chat` | Chat history / send a message |
+| `POST` | `/books/{file_id}/sections/{section_id}/chat/stream` | Same, streamed as an AI SDK UI message stream (`{message, language}`) |
 | `GET`/`PUT` | `/profile`, `GET /profile/questionnaire` | VARK learning profile |
 | `POST` | `/media/youtube`, `/media/lectures`, `/media/presentations` | Transcribe / ingest media |
 | `GET` | `/media/transcriptions[/{job_id}]`, `/media/presentations[/{id}]` | List media / one transcript or deck |
@@ -208,7 +211,7 @@ cd client && npm run type-check && npm run lint && npm run build
 | `GET`/`POST` | `/collections` | List (`?include_auto=true` adds per-upload ones) / create `{name, materials}` |
 | `GET`/`PATCH`/`DELETE` | `/collections/{id}` | One collection / rename `{name}` / delete |
 | `PUT` | `/collections/{id}/materials` | Replace materials |
-| | `/collections/{id}/study`, `/study/stream`, `/game`, `/chat` | Same as for a section |
+| | `/collections/{id}/study`, `/study/stream`, `/game`, `/chat`, `/chat/stream` | Same as for a section |
 | `POST` | `/accessibility/{translate,speech}` | Translation and TTS |
 
 ## Known limitations

@@ -1,8 +1,11 @@
 "use client";
-import { Alert, Box, Typography } from "@mui/material";
+import { LibraryIcon, UploadIcon } from "lucide-react";
+import Link from "next/link";
 import AppShell from "@/components/layout/AppShell";
-import BookGrid from "@/components/library/BookGrid";
-import Spinner from "@/components/ui/Spinner";
+import BookGrid, { BookGridSkeleton } from "@/components/library/BookGrid";
+import PageHeader, { PageContainer } from "@/components/shared/PageHeader";
+import { ErrorAlert } from "@/components/shared/States";
+import { Button } from "@/components/ui/button";
 import { useBooks } from "@/api/books";
 import { errorMessage } from "@/api/client";
 
@@ -11,15 +14,24 @@ export default function LibraryPage() {
 
   return (
     <AppShell>
-      <Box sx={{ p: 4 }}>
-        <Typography variant="h5" fontWeight={700} gutterBottom>My Library</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          {books.length} {books.length === 1 ? "book" : "books"}
-        </Typography>
-        {isPending && <Spinner label="Loading library…" />}
-        {error && <Alert severity="error">Failed to load library: {errorMessage(error)}</Alert>}
+      <PageContainer>
+        <PageHeader
+          icon={LibraryIcon}
+          title="My Library"
+          description={isPending ? "Loading your books…" : `${books.length} ${books.length === 1 ? "book" : "books"}`}
+          actions={
+            <Button asChild>
+              <Link href="/upload">
+                <UploadIcon />
+                Upload PDF
+              </Link>
+            </Button>
+          }
+        />
+        {isPending && <BookGridSkeleton />}
+        {error && <ErrorAlert title="Failed to load library">{errorMessage(error)}</ErrorAlert>}
         {!isPending && !error && <BookGrid books={books} />}
-      </Box>
+      </PageContainer>
     </AppShell>
   );
 }

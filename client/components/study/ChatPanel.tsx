@@ -1,12 +1,30 @@
 "use client";
-import { Alert, Avatar, Box, Paper, TextField, Typography } from "@mui/material";
-import PersonIcon from "@mui/icons-material/Person";
-import SendIcon from "@mui/icons-material/Send";
-import SmartToyIcon from "@mui/icons-material/SmartToy";
-import { useEffect, useRef, useState } from "react";
-import Button from "@/components/ui/Button";
-import { errorMessage } from "@/api/client";
-import { useChatHistory, useSendMessage } from "@/api/chat";
+import { useChat } from "@ai-sdk/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { DefaultChatTransport, type UIMessage } from "ai";
+import { CheckIcon, CopyIcon, GraduationCapIcon, RotateCcwIcon } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "@/components/ai-elements/prompt-input";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import { ErrorAlert, LoadingState } from "@/components/shared/States";
+import { Button } from "@/components/ui/button";
+import { API_BASE, USER_ID, errorMessage } from "@/api/client";
+import { chatKey, useChatHistory } from "@/api/chat";
 import type { StudyUnit } from "@/api/study";
 import { useUIStore } from "@/store/uiStore";
 import type { ChatMessage } from "@/types/chat";
@@ -17,107 +35,182 @@ interface Props {
   subject?: string;
 }
 
-function Bubble({ msg, pending = false }: { msg: ChatMessage; pending?: boolean }) {
-  const isUser = msg.role === "user";
+const SUGGESTIONS = [
+  "Summarize the key ideas",
+  "Explain it like I'm new to this",
+  "Quiz me with three questions",
+  "Give me a real-world example",
+];
+
+/** Label for the work after a chat-graph node finishes (data-stage parts from the server). */
+const NEXT_ACTIVITY: Record<string, string> = {
+  load_context: "Reading the material…",
+  translate_input: "Searching your materials…",
+  rag_retrieve: "Thinking…",
+  llm_call: "Translating…",
+};
+
+const textOf = (m: UIMessage) =>
+  m.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
+
+const toUIMessages = (history: ChatMessage[]): UIMessage[] =>
+  history.map((m, i) => ({ id: `history-${i}`, role: m.role, parts: [{ type: "text", text: m.content }] }));
+
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <Box sx={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", gap: 1, alignItems: "flex-start" }}>
-      {!isUser && (
-        <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main", mt: 0.5 }}>
-          <SmartToyIcon sx={{ fontSize: 16 }} />
-        </Avatar>
-      )}
-      <Paper
-        elevation={0}
-        sx={{
-          maxWidth: "80%",
-          p: 1.5,
-          borderRadius: 2,
-          opacity: pending ? 0.7 : 1,
-          bgcolor: isUser ? "primary.main" : "white",
-          color: isUser ? "white" : "text.primary",
-          border: isUser ? "none" : "1px solid #e9ecef",
-        }}
-      >
-        <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{msg.content}</Typography>
-      </Paper>
-      {isUser && (
-        <Avatar sx={{ width: 28, height: 28, bgcolor: "secondary.main", mt: 0.5 }}>
-          <PersonIcon sx={{ fontSize: 16 }} />
-        </Avatar>
-      )}
-    </Box>
+    <MessageAction
+      tooltip={copied ? "Copied" : "Copy"}
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </MessageAction>
   );
 }
 
-export default function ChatPanel({ unit, subject = "this section" }: Props) {
+function ChatConversation({ unit, subject, initial }: Required<Props> & { initial: UIMessage[] }) {
+  const qc = useQueryClient();
   const { language } = useUIStore();
-  const [input, setInput] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [activity, setActivity] = useState<string | null>(null);
 
-  const { data } = useChatHistory(unit);
-  const send = useSendMessage(unit);
-  const history = data?.history;
+  // The server keeps the history; each request carries just the new message.
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport<UIMessage>({
+        api: `${API_BASE}${unit}/chat/stream`,
+        headers: { "X-User-Id": USER_ID },
+        prepareSendMessagesRequest: ({ messages, body }) => {
+          const lastUser = messages.findLast((m) => m.role === "user");
+          return { body: { message: lastUser ? textOf(lastUser) : "", language: body?.language ?? "en" } };
+        },
+      }),
+    [unit],
+  );
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [history, send.isPending]);
+  const { messages, sendMessage, regenerate, status, stop, error, clearError } = useChat({
+    id: unit,
+    messages: initial,
+    transport,
+    onData: (part) => {
+      if (part.type === "data-stage") setActivity(NEXT_ACTIVITY[part.data as string] ?? null);
+    },
+    onFinish: () => {
+      setActivity(null);
+      void qc.invalidateQueries({ queryKey: chatKey(unit) });
+    },
+    onError: () => setActivity(null),
+  });
 
-  const handleSend = () => {
-    const message = input.trim();
-    if (!message || send.isPending) return;
-    send.mutate({ message, language }, { onSuccess: () => setInput("") });
+  const send = (text: string) => {
+    if (!text.trim() || status === "submitted" || status === "streaming") return;
+    clearError();
+    void sendMessage({ text: text.trim() }, { body: { language } });
   };
 
+  const last = messages.at(-1);
+  const waiting = status === "submitted" || (status === "streaming" && last?.role === "assistant" && !textOf(last));
+
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, p: 2 }}>
-      <Box sx={{ flex: 1, overflowY: "auto", mb: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
-        {!history?.length && !send.isPending && (
-          <Box sx={{ textAlign: "center", mt: 2 }}>
-            <SmartToyIcon sx={{ fontSize: 32, color: "text.disabled", mb: 1 }} />
-            <Typography color="text.secondary" variant="body2">Ask anything about {subject}.</Typography>
-          </Box>
-        )}
-        {history?.map((msg, i) => <Bubble key={i} msg={msg} />)}
-        {send.isPending && (
-          <>
-            <Bubble msg={{ role: "user", content: send.variables.message }} pending />
-            <Bubble msg={{ role: "assistant", content: "Thinking…" }} pending />
-          </>
-        )}
-        <div ref={bottomRef} />
-      </Box>
+    <div className="flex h-full min-h-0 flex-col">
+      <Conversation className="min-h-0">
+        <ConversationContent className="gap-6 px-4 py-5">
+          {messages.length === 0 ? (
+            <ConversationEmptyState className="py-10">
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/15">
+                <GraduationCapIcon className="size-6" />
+              </span>
+              <div className="space-y-1">
+                <h3 className="font-medium">Your study buddy</h3>
+                <p className="text-sm text-muted-foreground">Ask anything about {subject}.</p>
+              </div>
+            </ConversationEmptyState>
+          ) : (
+            messages.map((m) => {
+              const text = textOf(m);
+              if (m.role === "assistant" && !text) return null;
+              const isLast = m.id === last?.id;
+              return (
+                <Message key={m.id} from={m.role}>
+                  <MessageContent>
+                    {m.role === "assistant" ? (
+                      <MessageResponse isAnimating={isLast && status === "streaming"}>{text}</MessageResponse>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{text}</p>
+                    )}
+                  </MessageContent>
+                  {m.role === "assistant" && !(isLast && status === "streaming") && (
+                    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
+                      <CopyAction text={text} />
+                    </MessageActions>
+                  )}
+                </Message>
+              );
+            })
+          )}
+          {waiting && (
+            <Message from="assistant">
+              <MessageContent>
+                <Shimmer className="text-sm">{activity ?? "Thinking…"}</Shimmer>
+              </MessageContent>
+            </Message>
+          )}
+          {error && (
+            <ErrorAlert
+              action={
+                <Button size="sm" variant="outline" onClick={() => void regenerate({ body: { language } })}>
+                  <RotateCcwIcon />
+                  Retry
+                </Button>
+              }
+            >
+              {errorMessage(error)}
+            </ErrorAlert>
+          )}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
-      {send.error && <Alert severity="error" sx={{ mb: 1 }}>{errorMessage(send.error)}</Alert>}
-
-      <Box sx={{ display: "flex", gap: 1 }}>
-        <TextField
-          fullWidth
-          size="small"
-          placeholder={`Ask a question about ${subject}…`}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          multiline
-          maxRows={4}
-          disabled={send.isPending}
-          sx={{ bgcolor: "white" }}
-        />
-        <Button
-          variant="contained"
-          onClick={handleSend}
-          disabled={!input.trim()}
-          loading={send.isPending}
-          sx={{ minWidth: 44, px: 1.5 }}
-          aria-label="Send"
-        >
-          <SendIcon fontSize="small" />
-        </Button>
-      </Box>
-    </Box>
+      <div className="space-y-3 border-t bg-background/60 p-3">
+        {messages.length === 0 && (
+          <Suggestions>
+            {SUGGESTIONS.map((s) => (
+              <Suggestion key={s} suggestion={s} onClick={send} className="text-xs" />
+            ))}
+          </Suggestions>
+        )}
+        <PromptInput onSubmit={({ text }) => send(text)}>
+          <PromptInputBody>
+            <PromptInputTextarea placeholder={`Ask about ${subject}…`} className="min-h-12" />
+          </PromptInputBody>
+          <PromptInputFooter>
+            <PromptInputTools>
+              <span className="px-2 text-xs text-muted-foreground pointer-coarse:hidden">Enter to send · Shift+Enter for a new line</span>
+            </PromptInputTools>
+            <PromptInputSubmit status={status} onStop={stop} />
+          </PromptInputFooter>
+        </PromptInput>
+      </div>
+    </div>
   );
+}
+
+/** Tutoring chat for a study unit, streamed with the AI SDK's useChat. */
+export default function ChatPanel({ unit, subject = "this section" }: Props) {
+  const history = useChatHistory(unit);
+
+  if (history.isPending) return <LoadingState label="Loading conversation…" />;
+  if (history.error) {
+    return (
+      <div className="p-4">
+        <ErrorAlert title="Couldn't load the conversation">{errorMessage(history.error)}</ErrorAlert>
+      </div>
+    );
+  }
+  // Seeds useChat with the stored history; it keeps its own state from then on
+  return <ChatConversation key={unit} unit={unit} subject={subject} initial={toUIMessages(history.data.history)} />;
 }

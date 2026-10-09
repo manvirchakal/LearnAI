@@ -1,7 +1,8 @@
 "use client";
-import { Alert, Box, Typography } from "@mui/material";
+import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import Button from "@/components/ui/Button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 /**
  * Runs AI-generated game code in a sandboxed iframe (public/sandbox/game.html).
@@ -32,18 +33,16 @@ type SandboxMessage =
 
 function GameError({ message, onRetry, onReload }: { message: string; onRetry?: () => void; onReload: () => void }) {
   return (
-    <Alert
-      severity="warning"
-      sx={{ mb: 1 }}
-      action={
-        <Box sx={{ display: "flex", gap: 1 }}>
-          <Button size="small" onClick={onReload}>Restart</Button>
-          {onRetry && <Button size="small" onClick={onRetry}>New game</Button>}
-        </Box>
-      }
-    >
-      <Typography variant="body2" gutterBottom>This game hit an error.</Typography>
-      <Typography variant="caption" fontFamily="monospace" sx={{ wordBreak: "break-word" }}>{message}</Typography>
+    <Alert className="border-amber-500/40 bg-amber-500/5 text-amber-900 dark:text-amber-200">
+      <TriangleAlertIcon />
+      <AlertTitle>This game hit an error</AlertTitle>
+      <AlertDescription>
+        <code className="block font-mono text-xs break-words">{message}</code>
+        <div className="mt-2 flex gap-2">
+          <Button size="sm" variant="outline" onClick={onReload}>Restart</Button>
+          {onRetry && <Button size="sm" variant="outline" onClick={onRetry}>New game</Button>}
+        </div>
+      </AlertDescription>
     </Alert>
   );
 }
@@ -54,8 +53,12 @@ export default function DynamicGameComponent({ gameCode, onRetry }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [height, setHeight] = useState(MIN_HEIGHT);
 
-  useEffect(() => {
+  const restart = () => {
     setError(null);
+    setRun((n) => n + 1);
+  };
+
+  useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       // Only the frame we created; its origin is opaque ("null"), so match on the window
       if (e.source !== frameRef.current?.contentWindow) return;
@@ -74,9 +77,10 @@ export default function DynamicGameComponent({ gameCode, onRetry }: Props) {
   }, [gameCode, run]);
 
   return (
-    <Box>
-      {error && <GameError message={error} onRetry={onRetry} onReload={() => setRun((n) => n + 1)} />}
-      <Box sx={{ width: "100%", bgcolor: "white", borderRadius: 1, border: "1px solid #e9ecef", overflow: "hidden" }}>
+    <div className="space-y-3">
+      {error && <GameError message={error} onRetry={onRetry} onReload={restart} />}
+      {/* The game draws on white regardless of theme */}
+      <div className="w-full overflow-hidden rounded-xl border bg-white shadow-xs">
         <iframe
           key={run}
           ref={frameRef}
@@ -86,7 +90,7 @@ export default function DynamicGameComponent({ gameCode, onRetry }: Props) {
           referrerPolicy="no-referrer"
           style={{ display: "block", width: "100%", height, border: 0 }}
         />
-      </Box>
-    </Box>
+      </div>
+    </div>
   );
 }

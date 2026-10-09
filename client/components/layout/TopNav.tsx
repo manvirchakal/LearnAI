@@ -1,53 +1,65 @@
 "use client";
-import { AppBar, IconButton, Toolbar, Typography, Box } from "@mui/material";
-import MenuIcon from "@mui/icons-material/Menu";
-import { useUIStore } from "@/store/uiStore";
+import { GraduationCapIcon, ListTreeIcon, PanelLeftIcon, UserRoundIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const NAV = [
-  { href: "/upload", label: "Upload" },
-  { href: "/library", label: "Library" },
-  { href: "/collections", label: "Collections" },
-  { href: "/media", label: "Media" },
-  { href: "/questionnaire", label: "Profile" },
-];
+import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store/uiStore";
+import { NAV, isActivePath } from "./nav";
+import ThemeToggle from "./ThemeToggle";
 
 export default function TopNav({ showMenuButton = false }: { showMenuButton?: boolean }) {
-  const { toggleSidebar } = useUIStore();
+  const { toggleSidebar, setTocSheetOpen } = useUIStore();
+  const isMobile = useIsMobile();
   const pathname = usePathname();
+  const isActive = (href: string) => isActivePath(pathname, href);
 
   return (
-    <AppBar position="fixed" color="default" elevation={1} sx={{ bgcolor: "white", zIndex: 1300 }}>
-      <Toolbar>
+    <header className="sticky top-0 z-40 h-14 border-b bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60">
+      <div className="flex h-full items-center gap-2 px-3 sm:px-4">
         {showMenuButton && (
-          <IconButton edge="start" onClick={toggleSidebar} sx={{ mr: 2 }} aria-label="Toggle contents">
-            <MenuIcon />
-          </IconButton>
+          <Button variant="ghost" size="icon" onClick={() => (isMobile ? setTocSheetOpen(true) : toggleSidebar())} aria-label="Toggle contents">
+            {isMobile ? <ListTreeIcon /> : <PanelLeftIcon />}
+          </Button>
         )}
-        <Link href="/home" style={{ textDecoration: "none" }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: "primary.main", cursor: "pointer" }}>
-            LearnAI
-          </Typography>
+        <Link href="/home" className="mr-2 flex items-center gap-2 rounded-md px-1 font-semibold tracking-tight">
+          <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-chart-2 text-primary-foreground shadow-sm">
+            <GraduationCapIcon className="size-4" />
+          </span>
+          <span className="text-[15px]">LearnAI</span>
         </Link>
-        <Box sx={{ flexGrow: 1 }} />
-        <Box sx={{ display: "flex", gap: 2 }}>
-          {NAV.map(({ href, label }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
-            return (
-              <Link key={href} href={href} style={{ textDecoration: "none" }}>
-                <Typography variant="body2" sx={{
-                  color: active ? "primary.main" : "text.secondary",
-                  fontWeight: active ? 600 : 400,
-                  "&:hover": { color: "primary.main" },
-                }}>
-                  {label}
-                </Typography>
-              </Link>
-            );
-          })}
-        </Box>
-      </Toolbar>
-    </AppBar>
+
+        <nav className="ml-auto hidden items-center gap-1 md:flex">
+          {NAV.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                isActive(href) && "bg-accent text-accent-foreground",
+              )}
+            >
+              <Icon className="size-4" />
+              {label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-1 md:ml-2">
+          <ThemeToggle />
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            className={cn("md:hidden", isActive("/questionnaire") && "bg-accent text-accent-foreground")}
+          >
+            <Link href="/questionnaire" aria-label="Learning profile">
+              <UserRoundIcon />
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </header>
   );
 }

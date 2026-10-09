@@ -1,8 +1,7 @@
-import type { Metadata } from "next";
-import "@fontsource/roboto/300.css";
-import "@fontsource/roboto/400.css";
-import "@fontsource/roboto/500.css";
-import "@fontsource/roboto/700.css";
+import type { Metadata, Viewport } from "next";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "katex/dist/katex.min.css";
 import Providers from "./providers";
 import "./globals.css";
 
@@ -11,10 +10,20 @@ export const metadata: Metadata = {
   description: "AI-powered personalized learning platform",
 };
 
+/** Mobile browser chrome matches the page background in either theme */
+export const viewport: Viewport = {
+  // Lets the bottom bars pad for the home indicator via env(safe-area-inset-*)
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f9fafb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0d13" },
+  ],
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body id="__next">
+    <html lang="en" suppressHydrationWarning>
+      <body>
         <Providers>{children}</Providers>
       </body>
     </html>
