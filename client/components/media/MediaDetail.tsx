@@ -1,13 +1,13 @@
 "use client";
-import { Alert, Box, Typography } from "@mui/material";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import SchoolIcon from "@mui/icons-material/School";
+import { ArrowLeftIcon, GraduationCapIcon, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { ReactNode } from "react";
 import AddToCollectionButton from "@/components/collections/AddToCollectionButton";
 import AppShell from "@/components/layout/AppShell";
-import Button from "@/components/ui/Button";
-import Spinner from "@/components/ui/Spinner";
+import PageHeader, { PageContainer } from "@/components/shared/PageHeader";
+import { ErrorAlert } from "@/components/shared/States";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/api/client";
 import type { MaterialRef } from "@/lib/materials";
 import type { MaterialKind } from "@/types/collection";
@@ -18,6 +18,10 @@ interface Props {
   error: unknown;
   title?: string;
   subtitle?: ReactNode;
+  /** Icon shown next to the title */
+  icon?: LucideIcon;
+  /** Small label above the title (e.g. a source badge) */
+  eyebrow?: ReactNode;
   kind: MaterialKind;
   item?: MaterialRef;
   /** The collection created for this upload alone, for studying it by itself */
@@ -25,36 +29,69 @@ interface Props {
   children?: ReactNode;
 }
 
+function DetailSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading">
+      <div className="mb-8 flex items-start gap-3">
+        <Skeleton className="size-10 shrink-0 rounded-xl" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-7 w-3/4 max-w-md" />
+          <Skeleton className="h-4 w-1/2 max-w-xs" />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-xl border bg-card p-6 shadow-xs">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <Skeleton key={i} className="h-4" style={{ width: `${95 - ((i * 17) % 35)}%` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Shared frame for a single transcript, slide deck or notes page. */
-export default function MediaDetail({ tab, isPending, error, title, subtitle, kind, item, collectionId, children }: Props) {
+export default function MediaDetail({
+  tab, isPending, error, title, subtitle, icon, eyebrow, kind, item, collectionId, children,
+}: Props) {
   return (
     <AppShell>
-      <Box sx={{ p: 4, maxWidth: 900, mx: "auto" }}>
-        <Link href={`/media?tab=${tab}`} style={{ textDecoration: "none" }}>
-          <Button size="small" startIcon={<ArrowBackIcon fontSize="small" />} sx={{ mb: 2, ml: -1 }}>Media</Button>
-        </Link>
-        {isPending && <Spinner label="Loading…" />}
-        {!isPending && error != null && <Alert severity="error">{errorMessage(error)}</Alert>}
+      <PageContainer className="max-w-4xl">
+        <Button asChild variant="ghost" size="sm" className="mb-4 -ml-2 text-muted-foreground hover:text-foreground">
+          <Link href={`/media?tab=${tab}`}>
+            <ArrowLeftIcon />
+            Media
+          </Link>
+        </Button>
+        {isPending && <DetailSkeleton />}
+        {!isPending && error != null && (
+          <ErrorAlert title="Couldn't load this item">{errorMessage(error)}</ErrorAlert>
+        )}
         {!isPending && title && (
           <>
-            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2, mb: 3, flexWrap: "wrap" }}>
-              <Box sx={{ flex: 1, minWidth: 240 }}>
-                <Typography variant="h5" fontWeight={700} sx={{ wordBreak: "break-word" }}>{title}</Typography>
-                {subtitle && <Typography variant="body2" color="text.secondary">{subtitle}</Typography>}
-              </Box>
-              <Box sx={{ display: "flex", gap: 1 }}>
-                {collectionId && (
-                  <Link href={`/collections/${collectionId}`} style={{ textDecoration: "none" }}>
-                    <Button size="small" variant="contained" startIcon={<SchoolIcon fontSize="small" />}>Study</Button>
-                  </Link>
-                )}
-                {item && <AddToCollectionButton kind={kind} item={item} />}
-              </Box>
-            </Box>
+            <PageHeader
+              icon={icon}
+              eyebrow={eyebrow}
+              title={<span className="break-words">{title}</span>}
+              description={subtitle}
+              actions={
+                (collectionId || item) && (
+                  <>
+                    {collectionId && (
+                      <Button asChild size="sm">
+                        <Link href={`/collections/${collectionId}`}>
+                          <GraduationCapIcon />
+                          Study
+                        </Link>
+                      </Button>
+                    )}
+                    {item && <AddToCollectionButton kind={kind} item={item} />}
+                  </>
+                )
+              }
+            />
             {children}
           </>
         )}
-      </Box>
+      </PageContainer>
     </AppShell>
   );
 }

@@ -1,12 +1,17 @@
 "use client";
-import { Alert, Box, LinearProgress, TextField, Typography } from "@mui/material";
-import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
+import { CloudUploadIcon, FileTextIcon, UploadIcon, XIcon } from "lucide-react";
 import { useCallback, useState } from "react";
-import Button from "@/components/ui/Button";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { ErrorAlert } from "@/components/shared/States";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { useUploadBook } from "@/api/books";
 import { errorMessage } from "@/api/client";
-import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
+import SuccessAlert from "./ResultAlert";
 
 export default function FileUploadZone() {
   const [dragOver, setDragOver] = useState(false);
@@ -37,94 +42,106 @@ export default function FileUploadZone() {
     if (!file || !tocValid) return;
     upload(
       { file, tocPages: tocPages || undefined },
-      { onSuccess: (book) => router.push(`/study/${book.file_id}`) },
+      {
+        onSuccess: (book) => {
+          toast.success(`Uploaded “${book.title}”`);
+          router.push(`/study/${book.file_id}`);
+        },
+      },
     );
   };
 
   return (
-    <Box sx={{ maxWidth: 520, mx: "auto" }}>
-      <Box
+    <div className="flex flex-col gap-4">
+      <label
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
-        component="label"
         htmlFor="pdf-upload-input"
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 1.5,
-          p: 5,
-          border: "2px dashed",
-          borderColor: dragOver ? "primary.main" : "#dee2e6",
-          borderRadius: 3,
-          bgcolor: dragOver ? "primary.50" : "white",
-          cursor: "pointer",
-          transition: "all 0.15s",
-          "&:hover": { borderColor: "primary.main", bgcolor: "#f0f7ff" },
-        }}
+        className={cn(
+          "group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition",
+          dragOver
+            ? "border-primary bg-primary/5"
+            : "border-border bg-muted/30 hover:border-primary/50 hover:bg-primary/5",
+          isPending && "pointer-events-none opacity-70",
+        )}
       >
         <input
           id="pdf-upload-input"
           type="file"
           accept=".pdf"
-          style={{ display: "none" }}
+          className="hidden"
           onChange={handleChange}
         />
 
         {file ? (
           <>
-            <InsertDriveFileIcon sx={{ fontSize: 48, color: "primary.main" }} />
-            <Typography fontWeight={600}>{file.name}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {(file.size / 1024 / 1024).toFixed(2)} MB
-            </Typography>
+            <span className="flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
+              <FileTextIcon className="size-6" />
+            </span>
+            <div className="min-w-0 max-w-full">
+              <p className="truncate font-medium">{file.name}</p>
+              <p className="text-sm text-muted-foreground">
+                {(file.size / 1024 / 1024).toFixed(2)} MB · click to choose another file
+              </p>
+            </div>
           </>
         ) : (
           <>
-            <CloudUploadIcon sx={{ fontSize: 48, color: "text.disabled" }} />
-            <Typography fontWeight={600} color="text.secondary">
-              Drop your PDF here, or click to browse
-            </Typography>
-            <Typography variant="caption" color="text.disabled">PDF files only</Typography>
+            <span
+              className={cn(
+                "flex size-12 items-center justify-center rounded-xl bg-background text-muted-foreground shadow-xs ring-1 ring-border transition group-hover:text-primary",
+                dragOver && "text-primary",
+              )}
+            >
+              <CloudUploadIcon className="size-6" />
+            </span>
+            <div>
+              <p className="font-medium">
+                Drop your PDF here, or <span className="text-primary">click to browse</span>
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">PDF files only</p>
+            </div>
           </>
         )}
-      </Box>
+      </label>
 
-      {isPending && <LinearProgress sx={{ mt: 2, borderRadius: 1 }} />}
       {file && !isSuccess && (
-        <TextField
-          fullWidth
-          size="small"
-          sx={{ mt: 2 }}
-          label="Table of contents pages (optional)"
-          placeholder="e.g. 5-9"
-          value={tocPages}
-          onChange={(e) => setTocPages(e.target.value.trim())}
-          error={!tocValid}
-          helperText={
-            tocValid
+        <div className="grid gap-2">
+          <Label htmlFor="toc-pages">
+            Table of contents pages <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <Input
+            id="toc-pages"
+            placeholder="e.g. 5-9"
+            value={tocPages}
+            onChange={(e) => setTocPages(e.target.value.trim())}
+            aria-invalid={!tocValid}
+            disabled={isPending}
+          />
+          <p className={cn("text-xs", tocValid ? "text-muted-foreground" : "text-destructive")}>
+            {tocValid
               ? "Only needed if the PDF has no built-in outline; the printed TOC on these pages is read by Claude."
-              : "Use a page range like 5-9"
-          }
-        />
+              : "Use a page range like 5-9"}
+          </p>
+        </div>
       )}
-      {error && <Alert severity="error" sx={{ mt: 2 }}>Upload failed: {errorMessage(error)}</Alert>}
-      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Upload complete! Opening your book…</Alert>}
+
+      {error && <ErrorAlert title="Upload failed">{errorMessage(error)}</ErrorAlert>}
+      {isSuccess && <SuccessAlert>Upload complete! Opening your book…</SuccessAlert>}
 
       {file && !isSuccess && (
-        <Button
-          fullWidth
-          variant="contained"
-          sx={{ mt: 2 }}
-          loading={isPending}
-          disabled={!tocValid}
-          onClick={handleUpload}
-        >
-          Upload PDF
-        </Button>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="ghost" disabled={isPending} onClick={() => { setFile(null); setTocPages(""); }}>
+            <XIcon />
+            Clear
+          </Button>
+          <Button disabled={!tocValid || isPending} onClick={handleUpload}>
+            {isPending ? <Spinner /> : <UploadIcon />}
+            {isPending ? "Uploading & parsing…" : "Upload PDF"}
+          </Button>
+        </div>
       )}
-    </Box>
+    </div>
   );
 }

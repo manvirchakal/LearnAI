@@ -14,6 +14,7 @@ are studied together, with the same study/game/chat endpoints as a section.
     POST   /collections/{id}/game           regenerate game
     GET    /collections/{id}/chat           history
     POST   /collections/{id}/chat           send message
+    POST   /collections/{id}/chat/stream    same, as an AI SDK UI message stream
 """
 import logging
 from typing import Dict
@@ -22,7 +23,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from agents.chat_agent import get_history, run_chat_agent
+from agents.chat_agent import get_history, run_chat_agent, stream_chat_agent
 from agents.content_agent import load_cached_materials, run_content_agent, run_game_agent, stream_content_agent
 from core.dependencies import get_user_id
 from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
@@ -37,6 +38,7 @@ from services.collection_service import (
 )
 from utils.prompt_utils import format_content_for_prompt
 from utils.streaming_utils import SSE_HEADERS, sse
+from utils.ui_stream import UI_STREAM_HEADERS, chat_ui_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/collections", tags=["collections"])
@@ -195,3 +197,12 @@ def collection_chat(collection_id: str, body: ChatRequest, user_id: str = Depend
     except Exception as e:
         logger.exception("Collection chat failed")
         raise HTTPException(status_code=502, detail=f"Chat failed: {e}")
+
+
+@router.post("/{collection_id}/chat/stream")
+async def stream_collection_chat(collection_id: str, body: ChatRequest, user_id: str = Depends(get_user_id)):
+    text = await run_in_threadpool(_collection_text, collection_id, user_id)
+    events = stream_chat_agent(body.message, text, user_id, scope="collections", unit_id=collection_id,
+                               language=body.language)
+    return StreamingResponse(chat_ui_stream(events, logger), media_type="text/event-stream",
+                             headers=UI_STREAM_HEADERS)

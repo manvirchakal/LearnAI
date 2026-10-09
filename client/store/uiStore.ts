@@ -8,12 +8,15 @@ interface UIStore {
   ttsEnabled: boolean;
   language: string;
   activeTab: StudyTab;
+  /** Contents sheet on small screens (the desktop rail uses sidebarOpen) */
+  tocSheetOpen: boolean;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   setTtsEnabled: (enabled: boolean) => void;
   setLanguage: (lang: string) => void;
   setActiveTab: (tab: StudyTab) => void;
+  setTocSheetOpen: (open: boolean) => void;
 }
 
 export const useUIStore = create<UIStore>()(
@@ -23,12 +26,14 @@ export const useUIStore = create<UIStore>()(
       ttsEnabled: false,
       language: "en",
       activeTab: "chat",
+      tocSheetOpen: false,
 
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setTtsEnabled: (ttsEnabled) => set({ ttsEnabled }),
       setLanguage: (language) => set({ language }),
       setActiveTab: (activeTab) => set({ activeTab }),
+      setTocSheetOpen: (tocSheetOpen) => set({ tocSheetOpen }),
     }),
     {
       name: "learnai-ui",

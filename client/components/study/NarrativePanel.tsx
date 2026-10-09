@@ -1,36 +1,78 @@
 "use client";
-import { Alert, Box, LinearProgress, Typography } from "@mui/material";
-import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
-import RefreshIcon from "@mui/icons-material/Refresh";
-import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
-import Button from "@/components/ui/Button";
-import Spinner from "@/components/ui/Spinner";
-import { useStudySession } from "./StudySession";
+import { CheckCircle2Icon, CircleDashedIcon, LoaderCircleIcon, RefreshCwIcon, SparklesIcon } from "lucide-react";
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import Markdown from "@/components/shared/Markdown";
+import { ErrorAlert, LoadingState } from "@/components/shared/States";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { STUDY_STEPS, useStudySession } from "./StudySession";
+
+function GenerationProgress() {
+  const { completed, activity } = useStudySession();
+  const current = STUDY_STEPS.find((s) => !completed.includes(s.stage))?.stage;
+  return (
+    <ChainOfThought defaultOpen className="mb-6 rounded-xl border bg-card/60 p-4 shadow-xs">
+      <ChainOfThoughtHeader>
+        <Shimmer as="span" duration={2}>{activity ?? "Working…"}</Shimmer>
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent>
+        {STUDY_STEPS.map(({ stage, label }) => {
+          const done = completed.includes(stage);
+          const active = stage === current;
+          return (
+            <ChainOfThoughtStep
+              key={stage}
+              label={label}
+              status={done ? "complete" : active ? "active" : "pending"}
+              icon={done ? CheckCircle2Icon : active ? LoaderCircleIcon : CircleDashedIcon}
+              className={active ? "[&>div:first-child>svg]:animate-spin [&>div:first-child>svg]:text-primary" : undefined}
+            />
+          );
+        })}
+      </ChainOfThoughtContent>
+    </ChainOfThought>
+  );
+}
 
 export default function NarrativePanel() {
-  const { status, materials, streamingText, activity, error, generate } = useStudySession();
+  const { status, materials, streamingText, error, generate } = useStudySession();
 
-  if (status === "loading") return <Spinner label="Loading…" />;
+  if (status === "loading") return <LoadingState label="Loading your study guide…" />;
 
   if (status === "idle") {
     return (
-      <Box sx={{ p: 4, textAlign: "center" }}>
-        <AutoAwesomeIcon sx={{ fontSize: 36, color: "primary.main", mb: 1 }} />
-        <Typography gutterBottom>
-          Turn these materials into a personalized narrative, a game and diagrams.
-        </Typography>
-        <Button variant="contained" onClick={() => generate(false)} sx={{ mt: 1 }}>Generate study guide</Button>
-      </Box>
+      <div className="flex flex-col items-center px-6 py-16 text-center">
+        <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-chart-2 text-primary-foreground shadow-lg shadow-primary/20">
+          <SparklesIcon className="size-6" />
+        </span>
+        <h2 className="text-lg font-semibold tracking-tight">Make it yours</h2>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground text-pretty">
+          Turn these materials into a personalized narrative, an interactive game and diagrams.
+        </p>
+        <Button className="mt-5" onClick={() => generate(false)}>
+          <SparklesIcon />
+          Generate study guide
+        </Button>
+      </div>
     );
   }
 
   if (status === "error" && !materials) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error" action={<Button size="small" onClick={() => generate(false)}>Retry</Button>}>
-          Couldn&apos;t generate the study guide: {error}
-        </Alert>
-      </Box>
+      <div className="p-6">
+        <ErrorAlert
+          title="Couldn't generate the study guide"
+          action={<Button size="sm" variant="outline" onClick={() => generate(false)}>Retry</Button>}
+        >
+          {error}
+        </ErrorAlert>
+      </div>
     );
   }
 
@@ -38,24 +80,29 @@ export default function NarrativePanel() {
   const text = streaming && streamingText ? streamingText : materials?.narrative ?? "";
 
   return (
-    <Box sx={{ p: 3, maxWidth: 900 }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1, minHeight: 32 }}>
-        <Typography variant="caption" color="text.secondary">{streaming ? activity : ""}</Typography>
-        {!streaming && (
-          <Button size="small" variant="text" startIcon={<RefreshIcon fontSize="small" />} onClick={() => generate(true)}>
-            Regenerate
-          </Button>
-        )}
-      </Box>
-      {streaming && <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />}
-      {status === "error" && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-8">
+      {streaming && <GenerationProgress />}
+      {status === "error" && <ErrorAlert className="mb-6">{error}</ErrorAlert>}
       {text ? (
-        <MarkdownRenderer content={text} math={!streaming} />
+        <article className="text-[15px] leading-7">
+          <Markdown streaming={streaming}>{text}</Markdown>
+        </article>
       ) : (
-        <Typography color="text.secondary" variant="body2">
-          Personalizing this material to your learning profile…
-        </Typography>
+        <div className="space-y-3">
+          <Skeleton className="h-6 w-2/3" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-11/12" />
+          <Skeleton className="h-4 w-4/5" />
+        </div>
       )}
-    </Box>
+      {!streaming && materials && (
+        <div className="mt-10 flex justify-center border-t pt-6">
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => generate(true)}>
+            <RefreshCwIcon />
+            Regenerate study guide
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

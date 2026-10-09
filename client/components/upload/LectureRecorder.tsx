@@ -1,12 +1,15 @@
 "use client";
-import { Alert, Box, LinearProgress, TextField, Typography } from "@mui/material";
-import MicIcon from "@mui/icons-material/Mic";
-import StopIcon from "@mui/icons-material/Stop";
-import Link from "next/link";
+import { MicIcon, SquareIcon } from "lucide-react";
 import { useRef, useState } from "react";
-import Button from "@/components/ui/Button";
+import { toast } from "sonner";
+import { ErrorAlert } from "@/components/shared/States";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { errorMessage } from "@/api/client";
 import { useTranscribeLecture } from "@/api/media";
+import SuccessAlert from "./ResultAlert";
 
 type RecordingState = "idle" | "recording" | "processing";
 
@@ -34,7 +37,10 @@ export default function LectureRecorder() {
         setState("processing");
         transcribe(
           { audio: blob, filename: `lecture.${ext}`, title: title.trim() || `Lecture ${new Date().toLocaleString()}` },
-          { onSettled: () => setState("idle") },
+          {
+            onSuccess: () => toast.success("Lecture transcript saved"),
+            onSettled: () => setState("idle"),
+          },
         );
       };
 
@@ -44,7 +50,7 @@ export default function LectureRecorder() {
       setSeconds(0);
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
     } catch {
-      alert("Microphone access denied.");
+      toast.error("Microphone access denied.");
     }
   };
 
@@ -56,49 +62,58 @@ export default function LectureRecorder() {
   const fmt = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-        <MicIcon color="error" />
-        <Typography fontWeight={600}>Record Lecture</Typography>
-      </Box>
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="lecture-title">Lecture title</Label>
+        <Input
+          id="lecture-title"
+          placeholder="e.g. Week 3 — Thermodynamics"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          disabled={state !== "idle"}
+        />
+      </div>
 
-      <TextField
-        fullWidth
-        size="small"
-        label="Lecture title"
-        placeholder="e.g. Week 3 — Thermodynamics"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        disabled={state !== "idle"}
-        sx={{ mb: 2 }}
-      />
-
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <div className="flex flex-wrap items-center gap-3">
         {state === "idle" && (
-          <Button variant="contained" color="error" startIcon={<MicIcon />} onClick={startRecording}>
+          <Button variant="destructive" onClick={startRecording}>
+            <MicIcon />
             Start Recording
           </Button>
         )}
         {state === "recording" && (
           <>
-            <Button variant="outlined" color="error" startIcon={<StopIcon />} onClick={stopRecording}>
+            <Button
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={stopRecording}
+            >
+              <SquareIcon className="fill-current" />
               Stop
             </Button>
-            <Typography variant="body2" fontFamily="monospace" color="error.main">
-              ● {fmt(seconds)}
-            </Typography>
+            <span className="inline-flex items-center gap-2 rounded-full bg-destructive/10 px-3 py-1 font-mono text-sm text-destructive tabular-nums">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-75" />
+                <span className="relative inline-flex size-2 rounded-full bg-destructive" />
+              </span>
+              REC {fmt(seconds)}
+            </span>
           </>
         )}
         {state === "processing" && (
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="body2" gutterBottom>Transcribing…</Typography>
-            <LinearProgress />
-          </Box>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            <Spinner className="text-primary" />
+            Transcribing…
+          </div>
         )}
-      </Box>
+      </div>
 
-      {isSuccess && <Alert severity="success" sx={{ mt: 2 }}>Transcript saved. <Link href={`/media/transcriptions/${data.job_id}`}>View transcript</Link></Alert>}
-      {error && <Alert severity="error" sx={{ mt: 2 }}>Transcription failed: {errorMessage(error)}</Alert>}
-    </Box>
+      {isSuccess && (
+        <SuccessAlert href={`/media/transcriptions/${data.job_id}`} linkLabel="View transcript">
+          Transcript saved.
+        </SuccessAlert>
+      )}
+      {error && <ErrorAlert title="Transcription failed">{errorMessage(error)}</ErrorAlert>}
+    </div>
   );
 }

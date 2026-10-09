@@ -29,8 +29,8 @@ function backendUrl(path: string[], search: string): URL {
   return new URL(`${base}/${path.map(encodeURIComponent).join("/")}${search}`);
 }
 
-function proxy(req: Request, { params }: { params: { path: string[] } }): Promise<Response> {
-  const target = backendUrl(params.path, new URL(req.url).search);
+async function proxy(req: Request, { params }: { params: Promise<{ path: string[] }> }): Promise<Response> {
+  const target = backendUrl((await params).path, new URL(req.url).search);
   const headers: Record<string, string> = {};
   req.headers.forEach((value, key) => {
     if (!HOP_BY_HOP.has(key)) headers[key] = value;

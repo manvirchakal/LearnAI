@@ -1,19 +1,27 @@
 "use client";
-import AccountTreeIcon from "@mui/icons-material/AccountTree";
-import ForumIcon from "@mui/icons-material/Forum";
-import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
-import SportsEsportsIcon from "@mui/icons-material/SportsEsports";
-import Tabs from "@/components/ui/Tabs";
+import { FileTextIcon, Gamepad2Icon, MessagesSquareIcon, WorkflowIcon } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUIStore, type StudyTab } from "@/store/uiStore";
 
 const TABS = [
-  { value: "chat", label: "Chat", icon: <ForumIcon fontSize="small" /> },
-  { value: "game", label: "Game", icon: <SportsEsportsIcon fontSize="small" /> },
-  { value: "diagram", label: "Diagrams", icon: <AccountTreeIcon fontSize="small" /> },
-  { value: "pdf", label: "PDF", icon: <PictureAsPdfIcon fontSize="small" /> },
-];
+  { value: "chat", label: "Chat", icon: MessagesSquareIcon },
+  { value: "game", label: "Game", icon: Gamepad2Icon },
+  { value: "diagram", label: "Diagrams", icon: WorkflowIcon },
+  { value: "pdf", label: "PDF", icon: FileTextIcon },
+] as const;
 
 export default function StudyTabs() {
   const { activeTab, setActiveTab } = useUIStore();
-  return <Tabs items={TABS} value={activeTab} onChange={(v) => setActiveTab(v as StudyTab)} variant="fullWidth" />;
+  return (
+    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as StudyTab)} className="border-b p-2">
+      <TabsList className="w-full">
+        {TABS.map(({ value, label, icon: Icon }) => (
+          <TabsTrigger key={value} value={value} className="gap-1.5">
+            <Icon />
+            <span className="hidden sm:inline">{label}</span>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
+  );
 }

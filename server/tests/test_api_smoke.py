@@ -89,6 +89,28 @@ def test_chat_persists_role_content_history(client, book, llm):
     assert client.get(base).json()["history"] == data["history"]
 
 
+def test_chat_stream_speaks_ai_sdk_protocol(client, book, llm):
+    import json
+    base = f"/books/{book['file_id']}/sections/ch1.s1/chat"
+    with client.stream("POST", f"{base}/stream", json={"message": "Explain it"}) as r:
+        assert r.status_code == 200, r.read()
+        assert r.headers["x-vercel-ai-ui-message-stream"] == "v1"
+        frames = [f.removeprefix("data: ") for f in r.read().decode().strip().split("\n\n")]
+
+    assert frames[-1] == "[DONE]"
+    chunks = [json.loads(f) for f in frames[:-1]]
+    types = [c["type"] for c in chunks]
+    assert types[0] == "start" and types[-1] == "finish" and "error" not in types
+    assert "data-stage" in types and all(c["transient"] for c in chunks if c["type"] == "data-stage")
+    deltas = [c["delta"] for c in chunks if c["type"] == "text-delta"]
+    assert len(deltas) > 1
+    assert types.index("text-start") < types.index("text-delta") and "text-end" in types
+
+    history = client.get(base).json()["history"]
+    assert history[0] == {"role": "user", "content": "Explain it"}
+    assert history[1] == {"role": "assistant", "content": "".join(deltas)}
+
+
 def test_delete_book_removes_everything(client, llm):
     r = client.post("/books", files={"file": ("tmp.pdf", make_pdf(3, outline=False), "application/pdf")})
     file_id = r.json()["file_id"]

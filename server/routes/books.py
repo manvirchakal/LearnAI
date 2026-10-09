@@ -13,6 +13,7 @@ Books API — uploaded PDFs and their sections, the primary unit of study.
     POST   /books/{file_id}/sections/{section_id}/game    regenerate game (content agent, game graph)
     GET    /books/{file_id}/sections/{section_id}/chat    history
     POST   /books/{file_id}/sections/{section_id}/chat    send message (chat agent)
+    POST   /books/{file_id}/sections/{section_id}/chat/stream  same, as an AI SDK UI message stream
 
 Handlers that call the LLM or touch PDFs are sync `def` so FastAPI runs them
 in its threadpool instead of blocking the event loop.
@@ -24,7 +25,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 
-from agents.chat_agent import get_history, run_chat_agent
+from agents.chat_agent import get_history, run_chat_agent, stream_chat_agent
 from agents.content_agent import load_cached_materials, run_content_agent, run_game_agent, stream_content_agent
 from agents.document_agent import run_document_agent
 from core.dependencies import get_user_id
@@ -32,6 +33,7 @@ from models.book import BookDetail, BookSummary
 from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
 from services import book_service
 from utils.streaming_utils import SSE_HEADERS, sse
+from utils.ui_stream import UI_STREAM_HEADERS, chat_ui_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/books", tags=["books"])
@@ -180,3 +182,12 @@ def send_chat(file_id: str, section_id: str, body: ChatRequest, user_id: str = D
     except Exception as e:
         logger.exception("Chat failed")
         raise HTTPException(status_code=502, detail=f"Chat failed: {e}")
+
+
+@router.post("/{file_id}/sections/{section_id}/chat/stream")
+async def stream_chat(file_id: str, section_id: str, body: ChatRequest, user_id: str = Depends(get_user_id)):
+    text = await run_in_threadpool(_section_text, user_id, file_id, section_id)
+    events = stream_chat_agent(body.message, text, user_id, scope=file_id, unit_id=section_id,
+                               rag_file_id=file_id, language=body.language)
+    return StreamingResponse(chat_ui_stream(events, logger), media_type="text/event-stream",
+                             headers=UI_STREAM_HEADERS)

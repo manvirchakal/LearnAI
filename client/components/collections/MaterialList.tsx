@@ -1,25 +1,41 @@
 "use client";
-import { Alert, Box, IconButton, List, ListItem, ListItemIcon, ListItemText, ListSubheader, Tooltip, Typography } from "@mui/material";
-import CloseIcon from "@mui/icons-material/Close";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import EditNoteIcon from "@mui/icons-material/EditNote";
-import MenuBookIcon from "@mui/icons-material/MenuBook";
-import OndemandVideoIcon from "@mui/icons-material/OndemandVideo";
-import SlideshowIcon from "@mui/icons-material/Slideshow";
+import { BookOpenIcon, FileTextIcon, ListPlusIcon, PresentationIcon, VideoIcon, XIcon, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { ReactNode } from "react";
-import Button from "@/components/ui/Button";
+import { toast } from "sonner";
+import { ErrorAlert } from "@/components/shared/States";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { errorMessage } from "@/api/client";
 import { useUpdateCollectionMaterials } from "@/api/collections";
 import { KIND_LABELS, materialHref, materialId, withoutMaterial, type MaterialRef } from "@/lib/materials";
+import { cn } from "@/lib/utils";
 import { MATERIAL_KINDS, type Collection, type MaterialKind } from "@/types/collection";
 
-export const KIND_ICONS: Record<MaterialKind, ReactNode> = {
-  textbook_sections: <MenuBookIcon fontSize="small" color="primary" />,
-  transcriptions: <OndemandVideoIcon fontSize="small" color="error" />,
-  presentations: <SlideshowIcon fontSize="small" color="warning" />,
-  notes: <DescriptionOutlinedIcon fontSize="small" color="success" />,
+/** Icon and accent colour for each material kind. */
+export const KIND_ICONS: Record<MaterialKind, LucideIcon> = {
+  textbook_sections: BookOpenIcon,
+  transcriptions: VideoIcon,
+  presentations: PresentationIcon,
+  notes: FileTextIcon,
 };
+
+export const KIND_TONES: Record<MaterialKind, string> = {
+  textbook_sections: "bg-chart-1/10 text-chart-1 ring-chart-1/20",
+  transcriptions: "bg-chart-2/10 text-chart-2 ring-chart-2/20",
+  presentations: "bg-chart-3/10 text-chart-3 ring-chart-3/20",
+  notes: "bg-chart-4/10 text-chart-4 ring-chart-4/20",
+};
+
+/** Small tinted square holding a kind's icon. */
+export function KindIcon({ kind, className }: { kind: MaterialKind; className?: string }) {
+  const Icon = KIND_ICONS[kind];
+  return (
+    <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md ring-1", KIND_TONES[kind], className)}>
+      <Icon className="size-3.5" />
+    </span>
+  );
+}
 
 function label(kind: MaterialKind, ref: MaterialRef): string {
   const r = ref as unknown as Record<string, string | undefined>;
@@ -31,48 +47,68 @@ export default function MaterialList({ collection, onEdit }: { collection: Colle
   const update = useUpdateCollectionMaterials();
 
   const remove = (kind: MaterialKind, ref: MaterialRef) =>
-    update.mutate({ collectionId: collection.collection_id, materials: withoutMaterial(collection.materials, kind, ref) });
+    update.mutate(
+      { collectionId: collection.collection_id, materials: withoutMaterial(collection.materials, kind, ref) },
+      { onSuccess: () => toast.success(`Removed “${label(kind, ref)}”`) },
+    );
+
+  const kinds = MATERIAL_KINDS.filter((k) => collection.materials[k].length);
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
-        <Button size="small" variant="outlined" startIcon={<EditNoteIcon fontSize="small" />} onClick={onEdit}>
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">In this collection</p>
+        <Button size="sm" variant="outline" onClick={onEdit}>
+          <ListPlusIcon />
           Choose materials
         </Button>
-      </Box>
-      {update.error && <Alert severity="error" sx={{ mb: 1 }}>{errorMessage(update.error)}</Alert>}
-      {MATERIAL_KINDS.every((k) => !collection.materials[k].length) && (
-        <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: "center" }}>Nothing here yet.</Typography>
+      </div>
+      {update.error && <ErrorAlert>{errorMessage(update.error)}</ErrorAlert>}
+      {!kinds.length && (
+        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+          Nothing here yet.
+        </div>
       )}
-      {MATERIAL_KINDS.filter((k) => collection.materials[k].length).map((kind) => (
-        <List key={kind} dense disablePadding
-          subheader={<ListSubheader disableSticky sx={{ lineHeight: "32px", px: 1 }}>{KIND_LABELS[kind].many}</ListSubheader>}>
-          {(collection.materials[kind] as MaterialRef[]).map((ref) => (
-            <ListItem
-              key={materialId(kind, ref)}
-              sx={{ px: 1 }}
-              secondaryAction={
-                <Tooltip title="Remove from collection">
-                  <span>
-                    <IconButton edge="end" size="small" onClick={() => remove(kind, ref)} disabled={update.isPending}
-                      aria-label={`Remove ${label(kind, ref)}`}>
-                      <CloseIcon fontSize="small" />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              }
-            >
-              <ListItemIcon sx={{ minWidth: 32 }}>{KIND_ICONS[kind]}</ListItemIcon>
-              <ListItemText
-                primary={
-                  <Link href={materialHref(kind, ref)} style={{ color: "inherit" }}>{label(kind, ref)}</Link>
-                }
-                primaryTypographyProps={{ variant: "body2", noWrap: true }}
-              />
-            </ListItem>
-          ))}
-        </List>
+      {kinds.map((kind) => (
+        <section key={kind} className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2 px-1">
+            <h3 className="text-sm font-medium">{KIND_LABELS[kind].many}</h3>
+            <Badge variant="secondary" className="tabular-nums">{collection.materials[kind].length}</Badge>
+          </div>
+          <ul className="divide-y overflow-hidden rounded-xl border bg-card shadow-xs">
+            {(collection.materials[kind] as MaterialRef[]).map((ref) => {
+              const text = label(kind, ref);
+              return (
+                <li key={materialId(kind, ref)} className="group flex items-center gap-3 px-3 py-2 transition-colors hover:bg-accent/50">
+                  <KindIcon kind={kind} />
+                  <Link
+                    href={materialHref(kind, ref)}
+                    title={text}
+                    className="min-w-0 flex-1 truncate text-sm underline-offset-4 hover:underline"
+                  >
+                    {text}
+                  </Link>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="text-muted-foreground opacity-100 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                        onClick={() => remove(kind, ref)}
+                        disabled={update.isPending}
+                        aria-label={`Remove ${text}`}
+                      >
+                        <XIcon />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Remove from collection</TooltipContent>
+                  </Tooltip>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       ))}
-    </Box>
+    </div>
   );
 }
