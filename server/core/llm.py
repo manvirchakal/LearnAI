@@ -60,7 +60,7 @@ def model_name(role: Role = "text") -> str:
     return _BEDROCK_DEFAULTS[role] if settings.LLM_PROVIDER == "bedrock" else _served_model()
 
 
-def get_llm(role: Role = "text", max_tokens: int = 4096, temperature: float = 0.7) -> BaseChatModel:
+def get_llm(role: Role = "text", max_tokens: int = 4096, temperature: float = 1.0) -> BaseChatModel:
     """Chat model for a role, with max_tokens capped at LLM_MAX_OUTPUT_TOKENS."""
     max_tokens = min(max_tokens, settings.LLM_MAX_OUTPUT_TOKENS)
     if settings.LLM_PROVIDER == "bedrock":
