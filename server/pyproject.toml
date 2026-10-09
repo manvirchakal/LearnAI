@@ -56,6 +56,9 @@ local-ml = [
     "faster-whisper>=1.0",
     "argostranslate>=1.9",
 ]
+
+[dependency-groups]
+# `uv sync` installs this group by default; images use --no-dev
 dev = [
     "pytest>=8.0",
 ]

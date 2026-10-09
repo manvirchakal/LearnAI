@@ -64,6 +64,64 @@ def test_remote_embeddings_batched(vllm, monkeypatch):
     assert [r["count"] for r in vllm.requests if r["path"] == "embeddings"] == [2, 1]
 
 
+def test_local_embeddings_load_once_and_encode_serially(monkeypatch):
+    # Background indexing and request-time RAG embed concurrently; two loads or
+    # overlapping encodes on MPS segfault the process
+    import functools
+    import threading
+    import time
+
+    import numpy as np
+
+    loads, active, overlaps = [], [], []
+
+    class FakeModel:
+        def encode(self, texts, show_progress_bar=False):
+            active.append(1)
+            overlaps.append(len(active) > 1)
+            time.sleep(0.01)
+            active.pop()
+            return np.zeros((len(texts), 4))
+
+    def load():
+        loads.append(1)
+        time.sleep(0.05)
+        return FakeModel()
+
+    monkeypatch.setattr(settings, "EMBEDDING_PROVIDER", "local")
+    monkeypatch.setattr(core.vectorstore, "_local_model", functools.lru_cache(maxsize=1)(load))
+    threads = [threading.Thread(target=REAL_EMBED, args=(["x"],)) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(loads) == 1
+    assert len(overlaps) == 8 and not any(overlaps)
+
+
+def test_chroma_client_opened_once_under_concurrency(monkeypatch):
+    import functools
+    import threading
+    import time
+
+    opens = []
+
+    def open_client():
+        opens.append(1)
+        time.sleep(0.05)
+        return object()
+
+    monkeypatch.setattr(core.vectorstore, "_open_chroma_client", functools.lru_cache(maxsize=1)(open_client))
+    clients = []
+    threads = [threading.Thread(target=lambda: clients.append(core.vectorstore._chroma_client())) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(opens) == 1
+    assert len(clients) == 8 and len(set(map(id, clients))) == 1
+
+
 def test_collection_names_fit_chroma_limits():
     name = core.vectorstore._collection_name("u" * 64, "documents")
     assert len(name) <= 63

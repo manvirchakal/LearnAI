@@ -23,7 +23,7 @@ Everything runs on your own hardware. The models are served by **vLLM** (or any 
 | Storage | Local filesystem under `DATA_DIR` | |
 | Auth | None yet: identity is the `X-User-Id` header (default `default`) | |
 
-The in-process alternatives need `pip install ".[local-ml]"`, which pulls in PyTorch. The default server image leaves them out, so it stays small enough for Raspberry Pi nodes.
+The in-process alternatives need the `local-ml` extra (`uv sync --extra local-ml`), which pulls in PyTorch. The default server image leaves them out, so it stays small enough for Raspberry Pi nodes.
 
 ## Architecture
 
@@ -70,7 +70,7 @@ server/  FastAPI · LangGraph · FastMCP
 
 ### Prerequisites
 
-- Python 3.11+ and Node 20+
+- [uv](https://docs.astral.sh/uv/) (it installs the Python version pinned in `server/.python-version`, 3.12) and Node 20+
 - `ffmpeg`, needed by yt-dlp and for chunking audio sent to a remote Whisper
 - On Linux, `espeak-ng` for text-to-speech
 - A model server: vLLM (see [deploy/vllm](deploy/vllm/docker-compose.yml)) or another OpenAI-compatible endpoint, or AWS credentials for Claude on Bedrock
@@ -79,10 +79,9 @@ server/  FastAPI · LangGraph · FastMCP
 
 ```bash
 cd server
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync                     # creates .venv from uv.lock; add --extra local-ml for in-process models
 cp .env.example .env        # point OPENAI_BASE_URL / EMBEDDING_BASE_URL / STT_BASE_URL at your model servers
-uvicorn main:app --reload   # http://localhost:8000 — API docs at /docs, MCP at /mcp
+uv run uvicorn main:app --reload   # http://localhost:8000 — API docs at /docs, MCP at /mcp
 ```
 
 `GET /health/dependencies` reports whether each configured model server is reachable and serves the configured model.
@@ -103,7 +102,7 @@ The browser only talks to Next.js. Requests to `/api-backend/*` are proxied to `
 `tests/fake_server.py` serves the real API with a scripted fake LLM and fake embeddings. Use it for UI work:
 
 ```bash
-cd server && FAKE_TOKEN_DELAY=0.1 python -m tests.fake_server
+cd server && FAKE_TOKEN_DELAY=0.1 uv run python -m tests.fake_server
 ```
 
 ## Deployment
@@ -186,7 +185,7 @@ Images need a 64-bit OS on the Pis (arm64).
 ## Tests and checks
 
 ```bash
-cd server && pytest                         # upload → structure → study (incl. SSE) → game → chat → delete,
+cd server && uv run pytest                  # upload → structure → study (incl. SSE) → game → chat → delete,
                                             # MCP tools, and the vLLM/OpenAI provider path against a fake server
 cd client && npm run type-check && npm run lint && npm run build
 ```

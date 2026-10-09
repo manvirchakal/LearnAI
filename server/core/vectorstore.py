@@ -10,6 +10,7 @@ fresh index instead of mixing incompatible vectors.
 """
 import hashlib
 import logging
+import threading
 from functools import lru_cache
 from typing import List, Optional
 
@@ -20,9 +21,22 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Background indexing and request-time RAG embed from different threads. Loading
+# the local model twice at once, or encoding concurrently on MPS, segfaults the
+# process, so the local model is loaded and used by one thread at a time.
+_local_model_lock = threading.Lock()
+# The same two threads can also open the store together, and two concurrent
+# PersistentClient constructions for one path break each other
+_chroma_client_lock = threading.Lock()
+
+
+def _chroma_client() -> chromadb.PersistentClient:
+    with _chroma_client_lock:
+        return _open_chroma_client()
+
 
 @lru_cache(maxsize=1)
-def _chroma_client() -> chromadb.PersistentClient:
+def _open_chroma_client() -> chromadb.PersistentClient:
     return chromadb.PersistentClient(path=str(settings.CHROMA_DIR),
                                      settings=chromadb.Settings(anonymized_telemetry=False))
 
@@ -44,7 +58,8 @@ def _openai_client():
 
 def _embed(texts: List[str]) -> List[List[float]]:
     if settings.EMBEDDING_PROVIDER == "local":
-        return _local_model().encode(texts, show_progress_bar=False).tolist()
+        with _local_model_lock:
+            return _local_model().encode(texts, show_progress_bar=False).tolist()
     out: List[List[float]] = []
     step = settings.EMBEDDING_BATCH_SIZE
     for i in range(0, len(texts), step):
