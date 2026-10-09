@@ -73,7 +73,7 @@ export default function StudyPage({ params }: PageProps) {
                   <h1 className="text-2xl font-semibold tracking-tight text-balance">{section.title}</h1>
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {chapter?.number && <Badge variant="secondary">{chapter.number}</Badge>}
-                    <Badge variant="outline">pp. {section.start_page}–{section.end_page}</Badge>
+                    <Badge variant="outline" className="font-mono">pp. {section.start_page}–{section.end_page}</Badge>
                   </div>
                 </div>
                 <AddToCollectionButton

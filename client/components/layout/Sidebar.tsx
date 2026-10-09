@@ -69,7 +69,7 @@ function BookContents({ book, activeSectionId, onNavigate }: Props & { onNavigat
                           )}
                         >
                           {section.title}
-                          <span className="mt-0.5 block text-[11px] opacity-70">
+                          <span className="mt-0.5 block font-mono text-[11px] opacity-70">
                             pp. {section.start_page}–{section.end_page}
                           </span>
                         </Link>

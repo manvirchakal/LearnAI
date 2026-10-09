@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import "@fontsource-variable/inter";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "katex/dist/katex.min.css";
 import Providers from "./providers";
 import "./globals.css";
