@@ -1,5 +1,5 @@
 "use client";
-import { BookOpenIcon } from "lucide-react";
+import { BookOpenIcon, FileTextIcon, Gamepad2Icon, MessagesSquareIcon, WorkflowIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { use } from "react";
@@ -11,12 +11,11 @@ import DiagramPanel from "@/components/study/DiagramPanel";
 import GamePanel from "@/components/study/GamePanel";
 import NarrativePanel from "@/components/study/NarrativePanel";
 import { StudySessionProvider } from "@/components/study/StudySession";
-import StudyTabs from "@/components/study/StudyTabs";
+import SectionPager from "@/components/study/SectionPager";
+import StudyLayout from "@/components/study/StudyLayout";
 import { Badge } from "@/components/ui/badge";
 import { sectionPdfUrl, useBook } from "@/api/books";
 import { sectionUnit } from "@/api/study";
-import { cn } from "@/lib/utils";
-import { useUIStore } from "@/store/uiStore";
 
 // react-pdf touches browser-only APIs at import time
 const PDFViewer = dynamic(() => import("@/components/study/PDFViewer"), {
@@ -31,7 +30,6 @@ interface PageProps {
 export default function StudyPage({ params }: PageProps) {
   const { fileId, sectionId: rawSectionId } = use(params);
   const sectionId = decodeURIComponent(rawSectionId);
-  const { activeTab } = useUIStore();
   const { data: book, isPending } = useBook(fileId);
 
   const chapter = book?.chapters.find((c) => c.sections.some((s) => s.id === sectionId));
@@ -57,46 +55,48 @@ export default function StudyPage({ params }: PageProps) {
   const unit = sectionUnit(fileId, sectionId);
 
   return (
-    <AppShell book={book} activeSectionId={sectionId}>
+    <AppShell book={book} activeSectionId={sectionId} mobileNav={false}>
       <StudySessionProvider key={unit} unit={unit}>
-        <div className="flex flex-col lg:h-[calc(100svh-3.5rem)] lg:flex-row">
-          <div className="min-w-0 flex-1 lg:overflow-y-auto">
-            <header className="border-b bg-gradient-to-b from-accent/40 to-transparent px-4 pt-6 pb-5 sm:px-8">
-              <div className="mx-auto flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-start">
-                <div className="min-w-0 flex-1">
-                  <nav className="mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                    <BookOpenIcon className="size-3.5 shrink-0" />
-                    <Link href={`/study/${fileId}`} className="truncate hover:text-foreground">{book.title}</Link>
-                    <span>/</span>
-                    <span className="truncate">{chapter?.title}</span>
-                  </nav>
-                  <h1 className="text-2xl font-semibold tracking-tight text-balance">{section.title}</h1>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {chapter?.number && <Badge variant="secondary">{chapter.number}</Badge>}
-                    <Badge variant="outline" className="font-mono">pp. {section.start_page}–{section.end_page}</Badge>
+        <StudyLayout
+          guide={
+            <>
+              <header className="border-b bg-gradient-to-b from-accent/40 to-transparent px-4 pt-5 pb-4 sm:px-8 sm:pt-6 sm:pb-5">
+                <div className="mx-auto flex max-w-3xl items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <nav className="mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                      <BookOpenIcon className="size-3.5 shrink-0" />
+                      <Link href={`/study/${fileId}`} className="truncate hover:text-foreground">{book.title}</Link>
+                      <span>/</span>
+                      <span className="truncate">{chapter?.title}</span>
+                    </nav>
+                    <h1 className="text-xl font-semibold tracking-tight text-balance sm:text-2xl">{section.title}</h1>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {chapter?.number && <Badge variant="secondary">{chapter.number}</Badge>}
+                      <Badge variant="outline" className="font-mono">pp. {section.start_page}–{section.end_page}</Badge>
+                    </div>
                   </div>
+                  <AddToCollectionButton
+                    kind="textbook_sections"
+                    item={{ file_id: fileId, section_id: sectionId, title: `${book.title}: ${section.title}` }}
+                  />
                 </div>
-                <AddToCollectionButton
-                  kind="textbook_sections"
-                  item={{ file_id: fileId, section_id: sectionId, title: `${book.title}: ${section.title}` }}
-                />
-              </div>
-            </header>
-            <NarrativePanel />
-          </div>
-
-          <aside className="flex h-[85svh] w-full shrink-0 flex-col border-t bg-card/50 lg:h-auto lg:w-[460px] lg:border-t-0 lg:border-l xl:w-[520px]">
-            <StudyTabs />
-            <div className={cn("min-h-0 flex-1", activeTab === "chat" ? "overflow-hidden" : "overflow-y-auto")}>
-              {activeTab === "chat" && <ChatPanel unit={unit} />}
-              {activeTab === "game" && <GamePanel />}
-              {activeTab === "diagram" && <DiagramPanel />}
-              {activeTab === "pdf" && (
-                <PDFViewer key={sectionId} url={sectionPdfUrl(fileId, sectionId)} firstPage={section.start_page} />
-              )}
-            </div>
-          </aside>
-        </div>
+              </header>
+              <NarrativePanel />
+              <SectionPager book={book} sectionId={sectionId} />
+            </>
+          }
+          views={[
+            { value: "chat", label: "Chat", icon: MessagesSquareIcon, fill: true, content: <ChatPanel unit={unit} /> },
+            { value: "game", label: "Game", icon: Gamepad2Icon, content: <GamePanel /> },
+            { value: "diagram", label: "Diagrams", icon: WorkflowIcon, content: <DiagramPanel /> },
+            {
+              value: "pdf",
+              label: "PDF",
+              icon: FileTextIcon,
+              content: <PDFViewer key={sectionId} url={sectionPdfUrl(fileId, sectionId)} firstPage={section.start_page} />,
+            },
+          ]}
+        />
       </StudySessionProvider>
     </AppShell>
   );

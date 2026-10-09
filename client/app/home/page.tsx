@@ -2,6 +2,7 @@
 import {
   ArrowRightIcon,
   BrainIcon,
+  ChevronRightIcon,
   CloudUploadIcon,
   FolderHeartIcon,
   LibraryIcon,
@@ -65,7 +66,7 @@ export default function HomePage() {
   return (
     <AppShell>
       <PageContainer>
-        <div className="relative mb-8 overflow-hidden rounded-2xl border bg-card p-6 shadow-xs sm:p-8">
+        <div className="relative mb-6 overflow-hidden rounded-2xl border bg-card p-5 shadow-xs sm:mb-8 sm:p-8">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-chart-2/10"
@@ -83,21 +84,23 @@ export default function HomePage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Phones: compact rows; larger screens: cards */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           {tiles.map(({ href, icon: Icon, title, desc, accent }) => (
             <Link
               key={href}
               href={href}
-              className="group flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-xs transition outline-none hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="group flex items-center gap-4 rounded-xl border bg-card p-4 shadow-xs transition outline-none active:scale-[0.99] sm:flex-col sm:items-stretch sm:p-5 sm:hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              <span className={cn("flex size-11 items-center justify-center rounded-xl ring-1", accent)}>
+              <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl ring-1", accent)}>
                 <Icon className="size-5" />
               </span>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <h2 className="font-semibold tracking-tight">{title}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
               </div>
-              <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
+              <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground sm:hidden" />
+              <span className="hidden items-center gap-1 text-sm font-medium text-primary sm:inline-flex">
                 Open
                 <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
               </span>

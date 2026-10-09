@@ -122,4 +122,14 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+  :root {
+    /* Height of the phone bottom bars (app nav and study views), notch included */
+    --bottom-bar: calc(4rem + env(safe-area-inset-bottom));
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+  /* No double-tap zoom delay on controls */
+  a, button, [role="button"], input, label, select, textarea {
+    touch-action: manipulation;
+  }
 }

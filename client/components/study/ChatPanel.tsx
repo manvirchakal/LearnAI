@@ -144,7 +144,7 @@ function ChatConversation({ unit, subject, initial }: Required<Props> & { initia
                     )}
                   </MessageContent>
                   {m.role === "assistant" && !(isLast && status === "streaming") && (
-                    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100">
+                    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
                       <CopyAction text={text} />
                     </MessageActions>
                   )}
@@ -189,7 +189,7 @@ function ChatConversation({ unit, subject, initial }: Required<Props> & { initia
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
-              <span className="px-2 text-xs text-muted-foreground">Enter to send · Shift+Enter for a new line</span>
+              <span className="px-2 text-xs text-muted-foreground pointer-coarse:hidden">Enter to send · Shift+Enter for a new line</span>
             </PromptInputTools>
             <PromptInputSubmit status={status} onStop={stop} />
           </PromptInputFooter>

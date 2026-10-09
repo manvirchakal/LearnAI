@@ -12,7 +12,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <TooltipProvider delayDuration={300}>
           {children}
-          <Toaster richColors position="bottom-right" />
+          {/* On phones toasts sit above the bottom tab bar */}
+          <Toaster richColors position="bottom-right" mobileOffset={{ bottom: "calc(var(--bottom-bar) + 0.5rem)" }} />
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>

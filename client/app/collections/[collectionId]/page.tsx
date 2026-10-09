@@ -16,6 +16,7 @@ import ChatPanel from "@/components/study/ChatPanel";
 import DiagramPanel from "@/components/study/DiagramPanel";
 import GamePanel from "@/components/study/GamePanel";
 import NarrativePanel from "@/components/study/NarrativePanel";
+import StudyLayout from "@/components/study/StudyLayout";
 import { StudySessionProvider } from "@/components/study/StudySession";
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -25,7 +26,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { errorMessage } from "@/api/client";
 import { useCollection, useDeleteCollection, useRenameCollection } from "@/api/collections";
@@ -33,15 +33,6 @@ import { collectionUnit } from "@/api/study";
 import { formatDate, KIND_LABELS } from "@/lib/materials";
 import { cn } from "@/lib/utils";
 import { MATERIAL_KINDS, materialCount, type Collection } from "@/types/collection";
-
-type Tab = "materials" | "chat" | "game" | "diagram";
-
-const TABS = [
-  { value: "materials", label: "Materials", icon: ListIcon },
-  { value: "chat", label: "Chat", icon: MessagesSquareIcon },
-  { value: "game", label: "Game", icon: GamepadIcon },
-  { value: "diagram", label: "Diagrams", icon: NetworkIcon },
-] as const;
 
 function Title({ collection }: { collection: Collection }) {
   const [editing, setEditing] = useState(false);
@@ -111,7 +102,6 @@ export default function CollectionPage({ params }: { params: Promise<{ collectio
   const router = useRouter();
   const { data: collection, isPending, error } = useCollection(collectionId);
   const del = useDeleteCollection();
-  const [tab, setTab] = useState<Tab>("materials");
   const [picking, setPicking] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -138,10 +128,11 @@ export default function CollectionPage({ params }: { params: Promise<{ collectio
   const kinds = MATERIAL_KINDS.filter((k) => collection.materials[k].length);
 
   return (
-    <AppShell>
+    <AppShell mobileNav={false}>
       <StudySessionProvider key={unit} unit={unit} autoGenerate={false}>
-        <div className="flex flex-col lg:h-[calc(100svh-3.5rem)] lg:flex-row">
-          <div className="min-w-0 flex-1 lg:overflow-y-auto lg:border-r">
+        <StudyLayout
+          guide={
+            <>
             <header className="border-b bg-gradient-to-b from-primary/5 to-transparent px-4 pt-4 pb-5 sm:px-6">
               <Link
                 href="/collections"
@@ -207,32 +198,21 @@ export default function CollectionPage({ params }: { params: Promise<{ collectio
                 </Button>
               </EmptyState>
             )}
-          </div>
-
-          <aside className="flex h-[calc(100svh-3.5rem)] min-h-0 w-full shrink-0 flex-col border-t bg-card lg:h-auto lg:w-[480px] lg:border-t-0">
-            <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="gap-0">
-              <div className="overflow-x-auto border-b px-2">
-                <TabsList variant="line" className="h-11 w-full min-w-max">
-                  {TABS.map(({ value, label, icon: Icon }) => (
-                    <TabsTrigger key={value} value={value} className="gap-1.5 px-3">
-                      <Icon />
-                      {label}
-                      {value === "materials" && count > 0 && (
-                        <Badge variant="secondary" className="h-5 min-w-5 px-1.5 tabular-nums">{count}</Badge>
-                      )}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </div>
-            </Tabs>
-            <div className={cn("flex min-h-0 flex-1 flex-col", tab === "chat" ? "overflow-hidden" : "overflow-y-auto")}>
-              {tab === "materials" && <MaterialList collection={collection} onEdit={() => setPicking(true)} />}
-              {tab === "chat" && <ChatPanel unit={unit} subject="this collection" />}
-              {tab === "game" && <GamePanel />}
-              {tab === "diagram" && <DiagramPanel />}
-            </div>
-          </aside>
-        </div>
+            </>
+          }
+          views={[
+            {
+              value: "materials",
+              label: "Materials",
+              icon: ListIcon,
+              badge: count,
+              content: <MaterialList collection={collection} onEdit={() => setPicking(true)} />,
+            },
+            { value: "chat", label: "Chat", icon: MessagesSquareIcon, fill: true, content: <ChatPanel unit={unit} subject="this collection" /> },
+            { value: "game", label: "Game", icon: GamepadIcon, content: <GamePanel /> },
+            { value: "diagram", label: "Diagrams", icon: NetworkIcon, content: <DiagramPanel /> },
+          ]}
+        />
       </StudySessionProvider>
 
       <MaterialPicker collection={collection} open={picking} onClose={() => setPicking(false)} />

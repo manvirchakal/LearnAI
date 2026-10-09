@@ -94,7 +94,7 @@ export default function Sidebar(props: Props) {
   if (isMobile) {
     return (
       <Sheet open={tocSheetOpen} onOpenChange={setTocSheetOpen}>
-        <SheetContent side="left" className="w-80 bg-sidebar p-0">
+        <SheetContent side="left" className="w-[85vw] max-w-80 bg-sidebar p-0">
           <SheetTitle className="sr-only">Contents</SheetTitle>
           <BookContents {...props} onNavigate={() => setTocSheetOpen(false)} />
         </SheetContent>

@@ -54,9 +54,14 @@ export default function AddToCollectionButton({ kind, item, size = "small" }: Pr
 
   return (
     <>
-      <Button size={size === "small" ? "sm" : "default"} variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        size={size === "small" ? "sm" : "default"}
+        variant="outline"
+        onClick={() => setOpen(true)}
+        className={cn(size === "small" && "max-sm:size-8 max-sm:px-0")}
+      >
         <ListPlusIcon />
-        Add to collection
+        <span className={cn(size === "small" && "max-sm:sr-only")}>Add to collection</span>
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">

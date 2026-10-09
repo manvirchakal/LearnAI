@@ -39,6 +39,11 @@ export default function QuestionnairePage() {
   const save = useSaveProfile();
   const [retaking, setRetaking] = useState(false);
   const [step, setStep] = useState(0);
+  /** Each step starts at its first question */
+  const goTo = (next: number) => {
+    setStep(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const [answers, setAnswers] = useState<Partial<ProfileAnswers>>({});
 
   const categories = useMemo(
@@ -208,16 +213,22 @@ export default function QuestionnairePage() {
                       <label
                         key={score}
                         htmlFor={id}
-                        className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border px-1 py-2 text-center transition hover:bg-accent has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
+                        className="flex h-11 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border px-1 text-center transition hover:bg-accent active:scale-95 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5 has-[[data-state=checked]]:text-primary sm:h-auto sm:py-2"
                       >
-                        <RadioGroupItem id={id} value={String(score)} />
-                        <span className="text-[11px] leading-tight text-muted-foreground sm:text-xs">
+                        <RadioGroupItem id={id} value={String(score)} className="max-sm:sr-only" />
+                        {/* Phones: numbered pills with the scale's ends spelled out below */}
+                        <span aria-hidden className="text-base font-semibold tabular-nums sm:hidden">{score}</span>
+                        <span className="text-xs leading-tight text-muted-foreground max-sm:sr-only">
                           {SCALE_LABELS[score - scale.min] ?? score}
                         </span>
                       </label>
                     );
                   })}
                 </RadioGroup>
+                <div aria-hidden className="mt-1.5 flex justify-between px-1 text-[11px] text-muted-foreground sm:hidden">
+                  <span>{SCALE_LABELS[0]}</span>
+                  <span>{SCALE_LABELS[SCALE_LABELS.length - 1]}</span>
+                </div>
               </div>
             );
           })}
@@ -225,8 +236,9 @@ export default function QuestionnairePage() {
 
         {save.error && <ErrorAlert className="mt-4">{errorMessage(save.error)}</ErrorAlert>}
 
-        <div className="mt-6 flex items-center justify-between gap-2">
-          <Button variant="ghost" disabled={step === 0} onClick={() => setStep((s) => s - 1)}>
+        {/* Stays within thumb reach above the phone tab bar */}
+        <div className="sticky bottom-[calc(var(--bottom-bar)+0.5rem)] mt-6 flex items-center justify-between gap-2 rounded-xl max-md:border max-md:bg-background/90 max-md:p-2 max-md:shadow-lg max-md:backdrop-blur-lg md:static">
+          <Button variant="ghost" disabled={step === 0} onClick={() => goTo(step - 1)}>
             <ArrowLeftIcon />
             Back
           </Button>
@@ -236,7 +248,7 @@ export default function QuestionnairePage() {
               Save profile
             </Button>
           ) : (
-            <Button disabled={!stepComplete} onClick={() => setStep((s) => s + 1)}>
+            <Button disabled={!stepComplete} onClick={() => goTo(step + 1)}>
               Next
               <ArrowRightIcon />
             </Button>

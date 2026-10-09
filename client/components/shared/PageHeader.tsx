@@ -15,7 +15,7 @@ interface Props {
 
 export default function PageHeader({ title, description, icon: Icon, actions, eyebrow, className }: Props) {
   return (
-    <div className={cn("mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between", className)}>
+    <div className={cn("mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between", className)}>
       <div className="flex min-w-0 items-start gap-3">
         {Icon && (
           <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
@@ -35,5 +35,5 @@ export default function PageHeader({ title, description, icon: Icon, actions, ey
 
 /** Standard page padding and max width. */
 export function PageContainer({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:py-10", className)}>{children}</div>;
+  return <div className={cn("mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10", className)}>{children}</div>;
 }

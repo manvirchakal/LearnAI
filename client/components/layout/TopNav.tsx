@@ -1,48 +1,26 @@
 "use client";
-import {
-  BookOpenIcon,
-  FolderKanbanIcon,
-  GraduationCapIcon,
-  MenuIcon,
-  PanelLeftIcon,
-  PlayCircleIcon,
-  UploadIcon,
-  UserRoundIcon,
-} from "lucide-react";
+import { GraduationCapIcon, ListTreeIcon, PanelLeftIcon, UserRoundIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
+import { NAV, isActivePath } from "./nav";
 import ThemeToggle from "./ThemeToggle";
-
-const NAV = [
-  { href: "/upload", label: "Upload", icon: UploadIcon },
-  { href: "/library", label: "Library", icon: BookOpenIcon },
-  { href: "/collections", label: "Collections", icon: FolderKanbanIcon },
-  { href: "/media", label: "Media", icon: PlayCircleIcon },
-  { href: "/questionnaire", label: "Profile", icon: UserRoundIcon },
-];
 
 export default function TopNav({ showMenuButton = false }: { showMenuButton?: boolean }) {
   const { toggleSidebar, setTocSheetOpen } = useUIStore();
   const isMobile = useIsMobile();
   const pathname = usePathname();
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => isActivePath(pathname, href);
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-full items-center gap-2 px-3 sm:px-4">
         {showMenuButton && (
           <Button variant="ghost" size="icon" onClick={() => (isMobile ? setTocSheetOpen(true) : toggleSidebar())} aria-label="Toggle contents">
-            <PanelLeftIcon />
+            {isMobile ? <ListTreeIcon /> : <PanelLeftIcon />}
           </Button>
         )}
         <Link href="/home" className="mr-2 flex items-center gap-2 rounded-md px-1 font-semibold tracking-tight">
@@ -70,23 +48,16 @@ export default function TopNav({ showMenuButton = false }: { showMenuButton?: bo
 
         <div className="ml-auto flex items-center gap-1 md:ml-2">
           <ThemeToggle />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="md:hidden" aria-label="Menu">
-                <MenuIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              {NAV.map(({ href, label, icon: Icon }) => (
-                <DropdownMenuItem key={href} asChild className={cn(isActive(href) && "bg-accent")}>
-                  <Link href={href}>
-                    <Icon />
-                    {label}
-                  </Link>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            className={cn("md:hidden", isActive("/questionnaire") && "bg-accent text-accent-foreground")}
+          >
+            <Link href="/questionnaire" aria-label="Learning profile">
+              <UserRoundIcon />
+            </Link>
+          </Button>
         </div>
       </div>
     </header>

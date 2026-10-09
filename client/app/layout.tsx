@@ -12,6 +12,8 @@ export const metadata: Metadata = {
 
 /** Mobile browser chrome matches the page background in either theme */
 export const viewport: Viewport = {
+  // Lets the bottom bars pad for the home indicator via env(safe-area-inset-*)
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f9fafb" },
     { media: "(prefers-color-scheme: dark)", color: "#0b0d13" },
