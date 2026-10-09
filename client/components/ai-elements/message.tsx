@@ -12,7 +12,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { markdownPlugins, normalizeMath } from "@/components/shared/Markdown";
+import { markdownPlugins, normalizeMath, useMermaidTheme } from "@/components/shared/Markdown";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
@@ -319,8 +319,12 @@ export const MessageBranchPage = ({
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 export const MessageResponse = memo(
-  ({ className, children, ...props }: MessageResponseProps) => (
+  ({ className, children, ...props }: MessageResponseProps) => {
+    const { mermaid, mermaidKey } = useMermaidTheme();
+    return (
     <Streamdown
+      key={mermaidKey}
+      mermaid={mermaid}
       className={cn(
         "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
@@ -330,7 +334,8 @@ export const MessageResponse = memo(
     >
       {typeof children === "string" ? normalizeMath(children) : children}
     </Streamdown>
-  ),
+    );
+  },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating
