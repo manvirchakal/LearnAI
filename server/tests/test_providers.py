@@ -217,3 +217,11 @@ def test_budgets_follow_context_length(vllm, monkeypatch):
     monkeypatch.setattr(settings, "LLM_MAX_OUTPUT_TOKENS", 2000)
     monkeypatch.setattr(settings, "LLM_MAX_SOURCE_CHARS", 5000)
     assert (settings.max_output_tokens, settings.max_source_chars) == (2000, 5000)
+
+
+def test_bedrock_output_cap_stays_within_claude_limit(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MAX_OUTPUT_TOKENS", None)
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "bedrock")
+    assert settings.max_output_tokens == 8192
+    monkeypatch.setattr(settings, "LLM_MAX_OUTPUT_TOKENS", 4000)
+    assert settings.max_output_tokens == 4000

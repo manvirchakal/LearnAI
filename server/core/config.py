@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     # budgets below are derived from it, so this is the one number to change
     # when the model server changes.
     LLM_CONTEXT_TOKENS: int = 131_072
-    # Upper bound on generated tokens per call. Unset = a quarter of the context.
+    # Upper bound on generated tokens per call. Unset = a quarter of the context
+    # (8192 on Bedrock, the default Claude models' limit).
     LLM_MAX_OUTPUT_TOKENS: Optional[int] = None
     LLM_TIMEOUT_SECONDS: float = 600
     # Source material (a section, a collection) is truncated to this many
@@ -76,7 +77,11 @@ class Settings(BaseSettings):
     # ── Derived ───────────────────────────────────────────────────────────────
     @property
     def max_output_tokens(self) -> int:
-        return self.LLM_MAX_OUTPUT_TOKENS or self.LLM_CONTEXT_TOKENS // 4
+        if self.LLM_MAX_OUTPUT_TOKENS:
+            return self.LLM_MAX_OUTPUT_TOKENS
+        if self.LLM_PROVIDER == "bedrock":
+            return 8192  # the default Claude 3.5 models' output limit; Bedrock rejects more
+        return self.LLM_CONTEXT_TOKENS // 4
 
     @property
     def max_source_chars(self) -> int:
