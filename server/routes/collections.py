@@ -28,6 +28,7 @@ from agents.content_agent import load_cached_materials, run_content_agent, run_g
 from core.dependencies import get_user_id
 from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
 from services.collection_service import (
+    collection_sources,
     create_collection,
     delete_collection,
     get_collection,
@@ -190,9 +191,9 @@ def collection_chat_history(collection_id: str, user_id: str = Depends(get_user_
 
 @router.post("/{collection_id}/chat", response_model=ChatResponse)
 def collection_chat(collection_id: str, body: ChatRequest, user_id: str = Depends(get_user_id)):
-    text = _collection_text(collection_id, user_id)
+    _collection_text(collection_id, user_id)  # 404/403s, and indexes its sections for the tutor
     try:
-        return run_chat_agent(body.message, text, user_id, scope="collections",
+        return run_chat_agent(body.message, collection_sources(collection_id, user_id), user_id, scope="collections",
                               unit_id=collection_id, language=body.language)
     except Exception as e:
         logger.exception("Collection chat failed")
@@ -201,8 +202,9 @@ def collection_chat(collection_id: str, body: ChatRequest, user_id: str = Depend
 
 @router.post("/{collection_id}/chat/stream")
 async def stream_collection_chat(collection_id: str, body: ChatRequest, user_id: str = Depends(get_user_id)):
-    text = await run_in_threadpool(_collection_text, collection_id, user_id)
-    events = stream_chat_agent(body.message, text, user_id, scope="collections", unit_id=collection_id,
+    await run_in_threadpool(_collection_text, collection_id, user_id)  # as in collection_chat
+    sources = await run_in_threadpool(collection_sources, collection_id, user_id)
+    events = stream_chat_agent(body.message, sources, user_id, scope="collections", unit_id=collection_id,
                                language=body.language)
     return StreamingResponse(chat_ui_stream(events, logger), media_type="text/event-stream",
                              headers=UI_STREAM_HEADERS)

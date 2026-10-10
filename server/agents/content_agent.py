@@ -8,6 +8,9 @@ Full graph:
                                                             └─(retry)────┤
                                                                  diagrams ◀┘ ▶ save ▶ END
 
+validate_code plays the game briefly (utils/game_check.py). A retry continues
+the game code conversation with the error, so the model fixes its own game.
+
 Game graph (regenerate just the game for an existing unit):
     game_idea ▶ game_code ▶ validate_code ─(retry)▶ game_code
                                           └──────▶ save ▶ END
@@ -15,6 +18,7 @@ Game graph (regenerate just the game for an existing unit):
 import logging
 from typing import AsyncIterator, Optional, Tuple
 
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, StateGraph
 
 from agents.base import ContentState
@@ -22,7 +26,8 @@ from core.llm import invoke_llm, message_text
 from services.profile_service import get_learning_profile
 from services.rag_service import retrieve_context
 from services.storage_service import load_study_materials, save_study_materials
-from utils.code_utils import GAME_CODE_SYSTEM_PROMPT, post_process_game_code, validate_js_syntax
+from utils.code_utils import (GAME_CODE_FEEDBACK_PROMPT, GAME_CODE_SYSTEM_PROMPT, find_code_error,
+                              post_process_game_code)
 from utils.diagram_utils import DIAGRAM_SYSTEM_PROMPT, extract_mermaid_blocks, post_process_mermaid
 from utils.prompt_utils import build_game_idea_prompt, build_narrative_prompt, clip_source
 
@@ -66,18 +71,25 @@ def node_generate_game_idea(state: ContentState) -> dict:
 
 def node_generate_game_code(state: ContentState) -> dict:
     if not state.get("game_idea"):
-        return {"game_code": "", "code_valid": False}
+        return {"game_code": "", "game_messages": [], "code_error": None}
+    if state.get("code_error") and state.get("game_messages"):
+        feedback = GAME_CODE_FEEDBACK_PROMPT.format(error=state["code_error"])
+        messages = [*state["game_messages"], HumanMessage(content=feedback)]
+    else:
+        messages = [HumanMessage(content=GAME_CODE_SYSTEM_PROMPT.format(game_idea=state["game_idea"]))]
     try:
-        raw = invoke_llm(GAME_CODE_SYSTEM_PROMPT.format(game_idea=state["game_idea"]), max_tokens=4096)
-        return {"game_code": post_process_game_code(raw)}
+        reply = invoke_llm(messages, max_tokens=4096)
     except Exception as e:
         logger.error(f"Game code generation failed: {e}")
-        return {"game_code": ""}
+        return {"game_code": "", "game_messages": []}
+    return {"game_code": post_process_game_code(reply), "game_messages": [*messages, AIMessage(content=reply)]}
 
 
 def node_validate_game_code(state: ContentState) -> dict:
-    valid = bool(state["game_code"]) and validate_js_syntax(state["game_code"])
-    return {"code_valid": valid, "retries": state["retries"] + (0 if valid else 1)}
+    error = find_code_error(state["game_code"])
+    if error:
+        logger.info(f"Game code attempt {state['retries'] + 1} failed: {error}")
+    return {"code_error": error, "retries": state["retries"] + (1 if error else 0)}
 
 
 def node_generate_diagrams(state: ContentState) -> dict:
@@ -106,7 +118,7 @@ def route_after_cache(state: ContentState) -> str:
 
 
 def route_after_validation(state: ContentState) -> str:
-    if state["code_valid"] or not state.get("game_idea"):
+    if not state["code_error"] or not state.get("game_idea"):
         return "done"
     return "retry" if state["retries"] <= MAX_CODE_RETRIES else "done"
 
@@ -173,7 +185,8 @@ def _initial_state(source_text: str, user_id: str, scope: str, unit_id: str,
         "game_idea": "",
         "game_code": "",
         "diagrams": [],
-        "code_valid": False,
+        "game_messages": [],
+        "code_error": None,
         "retries": 0,
         "error": None,
     }

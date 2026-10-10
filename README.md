@@ -56,8 +56,9 @@ server/  FastAPI · LangGraph · FastMCP
 
 **Agents.**
 - **Document agent:** `save_upload → read_outline → (vision TOC) → normalize → save_metadata`. Section text is then indexed in the background.
-- **Content agent:** `load_cached → rag → narrative → game_idea → game_code ⇄ validate_code → diagrams → save`. A cache hit short-circuits the run. Game code is syntax-checked and retried up to 2 times. A separate game-only graph regenerates just the game.
-- **Chat agent:** `load_context → translate_input → rag_retrieve → llm_call → translate_output → save_history`. The web client streams it through `/chat/stream`, which speaks the [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol), so `useChat` consumes the backend directly. The server keeps the history, so each request carries only the new message.
+- **Content agent:** `load_cached → rag → narrative → game_idea → game_code ⇄ validate_code → diagrams → save`. A cache hit short-circuits the run. `validate_code` plays the game briefly in an embedded V8 (render, a few frames, a click on each button) with the sandbox's React. If it breaks, the error is sent as the next message in the same game code conversation for the model to fix, up to 2 times. A separate game-only graph regenerates just the game.
+- **Game check bundle.** The check runs `server/game_check/bundle.js`, which is committed because the server image has no Node. After changing `harness.js` or `env.js`, or when the client's React version changes, run `npm install && npm run build` in `server/game_check` (a test fails when the versions differ).
+- **Chat agent:** `load_context → translate_input → tutor → translate_output → save_history`. `tutor` is a LangChain ReAct agent (`create_agent`) with tools in `server/agents/tutor_tools.py`: `search_materials` finds passages and `read_materials` reads a source from an offset. Instead of the section text, its system prompt lists the chat's sources (id, title, length) so it can read them directly. Each tool response is capped in code (search previews share 6,000 characters, a read returns at most 4,000) and says where its text sits and how to read on. The web client streams it through `/chat/stream`, which speaks the [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol), so `useChat` consumes the backend directly. The server keeps the history, so each request carries only the new message.
 - **Media agent:** `acquire_audio → transcribe → store → embed`.
 
 **Streaming.** The narrative streams over SSE straight out of the content graph, using LangGraph's `messages` stream mode. Stage events follow as each node finishes.
@@ -205,7 +206,9 @@ cd client && npm run type-check && npm run lint && npm run build
 | `GET`/`POST` | `/books/{file_id}/sections/{section_id}/chat` | Chat history / send a message |
 | `POST` | `/books/{file_id}/sections/{section_id}/chat/stream` | Same, streamed as an AI SDK UI message stream (`{message, language}`) |
 | `GET`/`PUT` | `/profile`, `GET /profile/questionnaire` | VARK learning profile |
-| `POST` | `/media/youtube`, `/media/lectures`, `/media/presentations` | Transcribe / ingest media |
+| `POST` | `/media/youtube` | Start transcribing a video in the background; returns a task to poll |
+| `GET` | `/media/tasks/{task_id}` | A background task's stage, progress and, when done, result |
+| `POST` | `/media/lectures`, `/media/presentations` | Transcribe / ingest media |
 | `GET` | `/media/transcriptions[/{job_id}]`, `/media/presentations[/{id}]` | List media / one transcript or deck |
 | `GET`/`POST` | `/notes`, `GET /notes/{notes_id}` | List / upload notes (PDF or image), one note |
 | `GET`/`POST` | `/collections` | List (`?include_auto=true` adds per-upload ones) / create `{name, materials}` |

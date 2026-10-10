@@ -45,9 +45,11 @@ const SUGGESTIONS = [
 /** Label for the work after a chat-graph node finishes (data-stage parts from the server). */
 const NEXT_ACTIVITY: Record<string, string> = {
   load_context: "Reading the material…",
-  translate_input: "Searching your materials…",
-  rag_retrieve: "Thinking…",
-  llm_call: "Translating…",
+  translate_input: "Thinking…",
+  search_materials: "Searching your materials…",
+  read_materials: "Reading your materials…",
+  tools: "Thinking…",
+  tutor: "Translating…",
 };
 
 const textOf = (m: UIMessage) =>

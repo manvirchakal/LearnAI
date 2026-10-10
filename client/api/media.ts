@@ -10,11 +10,13 @@ import type {
   TranscriptionDetail,
   TranscriptionMetadata,
   TranscriptionResult,
+  TranscriptionTask,
 } from "@/types/media";
 
 export const mediaKeys = {
   transcriptions: ["media", "transcriptions"] as const,
   transcription: (jobId: string) => ["media", "transcriptions", jobId] as const,
+  task: (taskId: string) => ["media", "tasks", taskId] as const,
   presentations: ["media", "presentations"] as const,
   presentation: (id: string) => ["media", "presentations", id] as const,
   notes: ["media", "notes"] as const,
@@ -37,11 +39,33 @@ export const useTranscription = (jobId: string) =>
     staleTime: Infinity,
   });
 
-export const useTranscribeYouTube = () => {
-  const qc = useQueryClient();
-  return useMutation<TranscriptionResult, Error, string>({
+/** Starts transcribing a video on the server; follow it with useTranscriptionTask. */
+export const useTranscribeYouTube = () =>
+  useMutation<TranscriptionTask, Error, string>({
     mutationFn: (video_url) => apiClient.post("/media/youtube", { video_url }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: mediaKeys.transcriptions, exact: true }),
+  });
+
+const TASK_POLL_MS = 1000;
+
+/** Polls a transcription task until it finishes, then refreshes the transcript list and calls onDone. */
+export const useTranscriptionTask = (taskId: string | undefined, onDone?: (result: TranscriptionResult) => void) => {
+  const qc = useQueryClient();
+  return useQuery<TranscriptionTask>({
+    queryKey: mediaKeys.task(taskId ?? ""),
+    queryFn: async () => {
+      const task: TranscriptionTask = (await apiClient.get(`/media/tasks/${taskId}`)).data;
+      if (task.status === "done" && task.result) {
+        qc.invalidateQueries({ queryKey: mediaKeys.transcriptions, exact: true });
+        onDone?.(task.result);
+      }
+      return task;
+    },
+    enabled: !!taskId,
+    refetchInterval: (q) =>
+      q.state.error || q.state.data?.status === "done" || q.state.data?.status === "failed" ? false : TASK_POLL_MS,
+    refetchIntervalInBackground: true,
+    retry: 3, // ride out a blip; a 404 (expired, or the server restarted) ends it
+    staleTime: Infinity,
   });
 };
 

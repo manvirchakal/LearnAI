@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from services.book_service import get_section_text
+from services.rag_service import source_id
 from services.storage_service import (
     delete_collection_data,
     save_collection,
@@ -19,11 +20,21 @@ logger = logging.getLogger(__name__)
 
 
 MATERIAL_KINDS = ("textbook_sections", "transcriptions", "presentations", "notes")
+# The key a material of each kind is referenced by (older transcriptions use job_id)
+ID_KEYS = {"transcriptions": "transcription_id", "presentations": "presentation_id", "notes": "notes_id"}
 
 
 def _normalize(materials: Dict) -> Dict:
     """Every material kind present as a list, so clients can rely on the shape."""
     return {**materials, **{k: list(materials.get(k) or []) for k in MATERIAL_KINDS}}
+
+
+def _upgrade(col: dict) -> dict:
+    """Default collections for notes used to reference them by note_id."""
+    for note in col.get("materials", {}).get("notes", []):
+        if "note_id" in note:
+            note.setdefault("notes_id", note.pop("note_id"))
+    return col
 
 
 def create_collection(name: str, materials: Dict, user_id: str) -> dict:
@@ -40,7 +51,7 @@ def create_collection(name: str, materials: Dict, user_id: str) -> dict:
 
 
 def get_collection(collection_id: str, user_id: str) -> dict:
-    col = load_collection(user_id, collection_id)
+    col = _upgrade(load_collection(user_id, collection_id))
     if col.get("user_id") != user_id:
         raise PermissionError("Not authorized to access this collection")
     return col
@@ -51,7 +62,7 @@ def list_user_collections(user_id: str, include_auto: bool = False) -> List[dict
     The user's collections, newest first. Single-material collections created
     automatically for each upload ("auto") are left out unless asked for.
     """
-    results = [c for c in list_collections(user_id) if include_auto or not c.get("auto")]
+    results = [_upgrade(c) for c in list_collections(user_id) if include_auto or not c.get("auto")]
     return sorted(results, key=lambda c: c.get("created_date", ""), reverse=True)
 
 
@@ -82,7 +93,6 @@ def create_default_collection(
 ) -> str:
     """Create a single-item collection for a newly processed material."""
     collection_id = str(uuid.uuid4())
-    id_key = f"{material_type[:-1]}_id" if material_type.endswith("s") else f"{material_type}_id"
     collection = {
         "collection_id": collection_id,
         "name": f"{material_metadata.get('original_filename', 'Untitled')} Collection",
@@ -97,7 +107,7 @@ def create_default_collection(
         },
     }
     collection["materials"][material_type].append(
-        {id_key: material_id, "added_date": datetime.now().isoformat()}
+        {ID_KEYS[material_type]: material_id, "added_date": datetime.now().isoformat()}
     )
     save_collection(user_id, collection_id, collection)
     return collection_id
@@ -147,3 +157,18 @@ def get_collection_content(collection_id: str, user_id: str) -> Dict:
             pass
 
     return content
+
+
+def collection_sources(collection_id: str, user_id: str) -> List[Dict[str, str]]:
+    """The tutor's handles on a collection's materials: source ids (as ingested) and titles."""
+    materials = get_collection(collection_id, user_id).get("materials", {})
+    sources = [{"source": source_id(ref["file_id"], ref["section_id"]), "title": ref.get("title") or ref["section_id"]}
+               for ref in materials.get("textbook_sections", []) if ref.get("file_id") and ref.get("section_id")]
+    for kind, keys in (("transcriptions", ("transcription_id", "job_id")),
+                       ("presentations", ("presentation_id",)),
+                       ("notes", ("notes_id",))):
+        for item in materials.get(kind, []):
+            item_id = next((item[k] for k in keys if item.get(k)), None)
+            if item_id:
+                sources.append({"source": source_id(kind, item_id), "title": item.get("title") or kind})
+    return sources

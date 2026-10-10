@@ -1,7 +1,11 @@
 """Collections (CRUD, study stream, game, chat) and the media/notes listing endpoints."""
 import io
 import json
+import re
+import threading
+import time
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +26,7 @@ def own_user(client):
 
 @pytest.fixture
 def lecture(client, monkeypatch):
-    monkeypatch.setattr(agents.media_agent, "transcribe_file", lambda path: "Photosynthesis makes sugar.")
+    monkeypatch.setattr(agents.media_agent, "transcribe_file", lambda path, **_: "Photosynthesis makes sugar.")
     r = client.post("/media/lectures", data={"title": "Bio 101"},
                     files={"audio": ("lecture.wav", b"RIFF0000WAVEfmt ", "audio/wav")})
     assert r.status_code == 200, r.text
@@ -43,6 +47,59 @@ def presentation(client):
                                             "application/vnd.openxmlformats-officedocument.presentationml.presentation")})
     assert r.status_code == 200, r.text
     return r.json()
+
+
+def _poll(client, task_id: str, until=lambda task: task["status"] in ("done", "failed")) -> dict:
+    for _ in range(500):
+        task = client.get(f"/media/tasks/{task_id}").json()
+        if until(task):
+            return task
+        time.sleep(0.01)
+    raise AssertionError(f"task never got there: {task}")
+
+
+def test_youtube_transcribes_in_the_background_with_progress(client, monkeypatch):
+    gate = threading.Event()  # holds the transcription so the test sees it in progress
+
+    def download(url, dest, on_progress):
+        for n in range(1, 5):
+            on_progress(n / 4, "Cell Biology")
+        path = Path(dest) / "abc.m4a"
+        path.write_bytes(b"audio")
+        return path, "Cell Biology", "abc"
+
+    def transcribe(path, on_progress):
+        on_progress(0.5)
+        gate.wait(5)
+        on_progress(1.0)
+        return "Cells divide by mitosis."
+
+    monkeypatch.setattr(agents.media_agent, "download_youtube_audio", download)
+    monkeypatch.setattr(agents.media_agent, "transcribe_file", transcribe)
+    r = client.post("/media/youtube", json={"video_url": "https://youtu.be/abc"})
+    assert r.status_code == 202 and r.json()["status"] in ("queued", "running")
+    task_id = r.json()["task_id"]
+
+    task = _poll(client, task_id, until=lambda t: t["stage"] == "transcribing" and t["progress"] == 0.5)
+    assert task["status"] == "running" and task["title"] == "Cell Biology" and task["result"] is None
+    assert client.get(f"/media/tasks/{task_id}", headers={"X-User-Id": "someone-else"}).status_code == 404
+
+    gate.set()
+    done = _poll(client, task_id)
+    assert done["status"] == "done" and done["progress"] == 1.0 and not done["error"]
+    assert done["result"]["transcript"] == "Cells divide by mitosis." and done["result"]["title"] == "Cell Biology"
+    assert [t["job_id"] for t in client.get("/media/transcriptions").json()] == [done["result"]["job_id"]]
+
+
+def test_youtube_task_reports_failure(client, monkeypatch):
+    def download(url, dest, on_progress):
+        raise RuntimeError("Video unavailable")
+
+    monkeypatch.setattr(agents.media_agent, "download_youtube_audio", download)
+    task_id = client.post("/media/youtube", json={"video_url": "https://youtu.be/gone"}).json()["task_id"]
+    failed = _poll(client, task_id)
+    assert failed["status"] == "failed" and failed["error"] == "Video unavailable" and failed["result"] is None
+    assert client.get("/media/tasks/nope").status_code == 404
 
 
 def test_media_lists_and_details(client, lecture, presentation):
@@ -114,3 +171,31 @@ def test_collection_lifecycle(client, book, lecture, llm):
     assert client.get(f"/collections/{cid}").status_code == 404
     assert client.get(f"/collections/{cid}/chat").status_code == 404
     assert client.delete(f"/collections/{cid}").status_code == 404
+
+
+def test_notes_auto_collection_feeds_its_notes(client, llm):
+    notes = client.post("/notes", files={"notes": ("notes.pdf", make_pdf(4, outline=False), "application/pdf")}).json()
+    cid = notes["collection_id"]
+    refs = client.get(f"/collections/{cid}").json()["materials"]["notes"]
+    assert [r["notes_id"] for r in refs] == [notes["notes_id"]]
+
+    assert client.post(f"/collections/{cid}/study", json={}).status_code == 200
+    assert any("Page 3 content about topic 3" in prompt for prompt in llm.calls)
+
+
+def test_collections_saved_with_note_id_still_load(client):
+    from services.storage_service import save_collection
+    user = client.headers["X-User-Id"]
+    save_collection(user, "legacy", {"collection_id": "legacy", "name": "Old", "user_id": user, "auto": True,
+                                     "materials": {"notes": [{"note_id": "n1"}]}})
+    assert client.get("/collections/legacy").json()["materials"]["notes"] == [{"notes_id": "n1"}]
+
+
+def test_collection_tutor_searches_only_its_sources(client, book, lecture, llm):
+    col = client.post("/collections", json={"name": "Lecture only", "materials": {
+        "transcriptions": [{"transcription_id": lecture["job_id"]}]}}).json()
+    llm.tool_calls = [[("search_materials", {"query": "photosynthesis", "max_results": 8})]]
+    assert client.post(f"/collections/{col['collection_id']}/chat", json={"message": "hi"}).status_code == 200
+
+    found = llm.conversations[-1][-1].content
+    assert re.findall(r'source="([^"]+)"', found) == [f"transcriptions/{lecture['job_id']}"]

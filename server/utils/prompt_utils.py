@@ -1,7 +1,7 @@
 """
 Dynamic prompt construction utilities.
 """
-from typing import Dict
+from typing import Dict, List
 
 from core.config import settings
 
@@ -175,21 +175,17 @@ User's learning profile: {learning_profile}
 Now, provide a game idea that integrates concepts from the available materials."""
 
 
-def build_chat_prompt(
-    user_message: str,
-    extracted_text: str,
+def build_chat_system_prompt(
+    sources: List[Dict],
     generated_summary: str,
-    rag_context: str,
     learning_profile: str,
 ) -> str:
-    return f"""Here's the user's learning profile: {learning_profile}
+    listed = "\n".join(f'- source="{s["source"]}": {s["title"]} ({s["length"]} characters)' for s in sources)
+    return f"""You are LearnAI, a GenAI powered learning assistant that adjusts textbook content to the user's learning profile.
 
-You are LearnAI, a GenAI powered learning assistant that adjusts textbook content to the user's learning profile.
-The current section content is: {extracted_text[:3000]}
+Here's the user's learning profile: {learning_profile}
+The student is studying these sources:
+{listed or "(none yet)"}
 The generated summary of this section is: {generated_summary[:2000]}
-Relevant information: {rag_context[:2000]}
 
-Remember the context of the previous messages. Here's the student's latest question:
-{user_message}
-
-Provide a helpful, accurate, and concise answer based on the given context and conversation history. Answer but be concise (4-6 sentences)."""
+Provide a helpful, accurate, and concise answer to the student's latest question based on the given context and conversation history. Answer but be concise (4-6 sentences)."""

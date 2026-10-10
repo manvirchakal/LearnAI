@@ -12,7 +12,7 @@ import hashlib
 import logging
 import threading
 from functools import lru_cache
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import chromadb
 from chromadb import Collection
@@ -129,6 +129,32 @@ def query(
     docs = results.get("documents", [[]])[0]
     return docs
 
+
+
+def query_records(
+    user_id: str,
+    query_text: str,
+    top_k: int = 3,
+    collection_name: str = "documents",
+    where: Optional[dict] = None,
+) -> List[Tuple[str, str, dict]]:
+    """Top-k (id, text, metadata) for a query, best first."""
+    col = get_collection(user_id, collection_name)
+    count = col.count()
+    if count == 0:
+        return []
+    kwargs = dict(query_embeddings=[_embed([query_text])[0]], n_results=min(top_k, count),
+                  include=["documents", "metadatas"])
+    if where:
+        kwargs["where"] = where
+    results = col.query(**kwargs)
+    return list(zip(results["ids"][0], results["documents"][0], results["metadatas"][0]))
+
+
+def get_records(user_id: str, where: dict, collection_name: str = "documents") -> List[Tuple[str, str, dict]]:
+    """Every (id, text, metadata) matching a metadata filter, in no particular order."""
+    results = get_collection(user_id, collection_name).get(where=where, include=["documents", "metadatas"])
+    return list(zip(results["ids"], results["documents"], results["metadatas"]))
 
 def delete_user_collection(user_id: str, collection_name: str = "documents") -> None:
     try:

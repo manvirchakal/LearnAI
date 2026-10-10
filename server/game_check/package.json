@@ -1,0 +1,13 @@
+{
+  "name": "learnai-game-check",
+  "private": true,
+  "description": "Builds bundle.js: React + react-test-renderer + harness.js, run by utils/game_check.py in an embedded V8",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "react": "19.3.0",
+    "react-test-renderer": "19.3.0"
+  }
+}

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from core import storage
-from services.rag_service import ingest_section, delete_file_chunks
+from services.rag_service import delete_file_chunks, ingest_section, source_id
 from services.storage_service import (
     list_book_metadata,
     load_book_metadata,
@@ -118,6 +118,12 @@ def get_section_text(user_id: str, file_id: str, section_id: str) -> str:
     save_extracted_text(user_id, file_id, section_id, text)
     ingest_section(user_id, file_id, section_id, text)
     return text
+
+
+def section_source(user_id: str, file_id: str, section_id: str) -> Dict[str, str]:
+    """The tutor's handle on a section: its source id and a title."""
+    meta, section = get_section(user_id, file_id, section_id)
+    return {"source": source_id(file_id, section_id), "title": f"{meta.get('title', '')}: {section['title']}"}
 
 
 def get_section_pdf(user_id: str, file_id: str, section_id: str) -> Tuple[bytes, str]:

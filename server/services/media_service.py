@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from pptx import Presentation
 
@@ -61,31 +61,52 @@ def _split_audio(audio_path: Path, out_dir: Path) -> List[Path]:
     return sorted(out_dir.glob("chunk_*.mp3"))
 
 
-def _transcribe_remote(audio_path: Path) -> str:
+def _transcribe_remote(audio_path: Path, on_progress: Callable[[float], None]) -> str:
     with tempfile.TemporaryDirectory(prefix="learnai-stt-") as tmp:
         parts = []
-        for chunk in _split_audio(audio_path, Path(tmp)):
+        chunks = _split_audio(audio_path, Path(tmp))
+        for n, chunk in enumerate(chunks, 1):
             with open(chunk, "rb") as f:
                 result = _openai_client().audio.transcriptions.create(
                     model=settings.STT_MODEL, file=(chunk.name, f), response_format="json")
             parts.append(result.text.strip())
+            on_progress(n / len(chunks))
     return " ".join(p for p in parts if p)
 
 
-def transcribe_file(audio_path: str | Path) -> str:
-    """Transcribe a local audio/video file with the configured STT provider."""
-    if settings.STT_PROVIDER == "local":
-        segments, _ = _whisper_model().transcribe(str(audio_path), beam_size=5, vad_filter=True)
-        return " ".join(seg.text.strip() for seg in segments)
-    return _transcribe_remote(Path(audio_path))
+def _transcribe_local(audio_path: Path, on_progress: Callable[[float], None]) -> str:
+    segments, info = _whisper_model().transcribe(str(audio_path), beam_size=5, vad_filter=True)
+    parts = []
+    for seg in segments:  # transcribed lazily, in order
+        parts.append(seg.text.strip())
+        if info.duration:
+            on_progress(min(seg.end / info.duration, 1.0))
+    return " ".join(parts)
 
 
-def download_youtube_audio(url: str, dest_dir: str | Path) -> Tuple[Path, str, str]:
-    """Download the best audio stream. Returns (path, title, video_id)."""
+def transcribe_file(audio_path: str | Path, on_progress: Optional[Callable[[float], None]] = None) -> str:
+    """Transcribe a local audio/video file with the configured STT provider,
+    calling on_progress(fraction done) as it goes."""
+    transcribe = _transcribe_local if settings.STT_PROVIDER == "local" else _transcribe_remote
+    return transcribe(Path(audio_path), on_progress or (lambda _: None))
+
+
+def download_youtube_audio(url: str, dest_dir: str | Path,
+                           on_progress: Optional[Callable[[Optional[float], str], None]] = None,
+                           ) -> Tuple[Path, str, str]:
+    """Download the best audio stream, calling on_progress(fraction done or None
+    if the size is unknown, video title) as it goes. Returns (path, title, video_id)."""
     from yt_dlp import YoutubeDL
 
+    def hook(d: dict) -> None:
+        if on_progress and d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            fraction = min(d.get("downloaded_bytes", 0) / total, 1.0) if total else None
+            on_progress(fraction, (d.get("info_dict") or {}).get("title", ""))
+
     opts = {"format": "bestaudio/best", "outtmpl": str(Path(dest_dir) / "%(id)s.%(ext)s"),
-            "quiet": True, "no_warnings": True, "noplaylist": True}
+            "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
+            "progress_hooks": [hook]}
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         path = Path(ydl.prepare_filename(info))

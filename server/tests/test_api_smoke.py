@@ -1,4 +1,6 @@
 """End-to-end API smoke tests: upload → structure → study → game → chat → delete."""
+import re
+
 import pymupdf as fitz
 
 from tests.conftest import FakeLLM, make_pdf
@@ -74,7 +76,29 @@ def test_game_code_retries_until_valid(client, book, llm):
     assert r.status_code == 200
     assert r.json()["game_code"] == FakeLLM.VALID_GAME
     assert llm.game_codes == [], "both invalid attempts should have been consumed by retries"
+    # one conversation: task, attempt, error, attempt, error (then the valid reply)
+    assert [m.type for m in llm.conversations[-1]] == ["human", "ai", "human", "ai", "human"]
     assert client.get(f"{base}/study").json()["game_code"] == FakeLLM.VALID_GAME
+
+
+def test_game_error_fed_back_for_repair(client, book, llm):
+    base = f"/books/{book['file_id']}/sections/ch1.s2"
+    client.post(f"{base}/study", json={})
+    # Parses fine; breaks only once the student clicks Start
+    broken = (
+        'const [on, setOn] = useState(false);\n'
+        'if (!on) return React.createElement("button", {onClick: () => setOn(true)}, "Start");\n'
+        'return React.createElement("div", {color: "red"}, {id: "panel"}, "Playing");'
+    )
+    llm.game_codes = [broken]
+    r = client.post(f"{base}/game")
+    assert r.status_code == 200 and r.json()["game_code"] == FakeLLM.VALID_GAME
+
+    # The fix continues the game code conversation: task, the broken game, then the error
+    task, attempt, feedback = (m.content for m in llm.conversations[-1])
+    assert "Create a fully functional React component" in task and "A clicking game" in task
+    assert attempt == broken
+    assert 'clicking the <button> "Start"' in feedback and "Objects are not valid as a React child" in feedback
 
 
 def test_chat_persists_role_content_history(client, book, llm):
@@ -88,6 +112,20 @@ def test_chat_persists_role_content_history(client, book, llm):
     assert data["history"][1]["role"] == "assistant" and data["reply"]
     assert client.get(base).json()["history"] == data["history"]
 
+
+
+def test_chat_tutor_agent_sees_context_then_history(client, book, llm):
+    base = f"/books/{book['file_id']}/sections/ch1.s1/chat"
+    first = client.post(base, json={"message": "What is this about?"}).json()["reply"]
+    assert first == "(fake tutor) Here is a concise answer."
+    client.post(base, json={"message": "And then?"})
+
+    conversation = llm.conversations[-1]
+    assert [m.type for m in conversation] == ["system", "human", "ai", "human"]
+    assert "You are LearnAI" in conversation[0].content
+    assert re.search(rf'source="{book["file_id"]}/ch1\.s1": Sample Book: 1\.1 Basics \(\d+ characters\)',
+                     conversation[0].content)
+    assert [m.content for m in conversation[1:]] == ["What is this about?", first, "And then?"]
 
 def test_chat_stream_speaks_ai_sdk_protocol(client, book, llm):
     import json
@@ -110,6 +148,23 @@ def test_chat_stream_speaks_ai_sdk_protocol(client, book, llm):
     assert history[0] == {"role": "user", "content": "Explain it"}
     assert history[1] == {"role": "assistant", "content": "".join(deltas)}
 
+
+
+def test_chat_tutor_searches_materials_before_answering(client, book, llm):
+    import json
+    llm.tool_calls = [[("search_materials", {"query": "topic"})]]
+    base = f"/books/{book['file_id']}/sections/ch1.s1/chat"
+    with client.stream("POST", f"{base}/stream", json={"message": "What's the topic?"}) as r:
+        chunks = [json.loads(f.removeprefix("data: ")) for f in r.read().decode().strip().split("\n\n")[:-1]]
+
+    stages = [c["data"] for c in chunks if c["type"] == "data-stage"]
+    assert stages.index("search_materials") < stages.index("tools") < stages.index("tutor")
+    result = llm.conversations[-1][-1]
+    assert result.type == "tool" and f'source="{book['file_id']}/' in result.content
+
+    reply = "".join(c["delta"] for c in chunks if c["type"] == "text-delta")
+    assert reply == "(fake tutor) Here is a concise answer."
+    assert client.get(base).json()["history"][1] == {"role": "assistant", "content": reply}
 
 def test_delete_book_removes_everything(client, llm):
     r = client.post("/books", files={"file": ("tmp.pdf", make_pdf(3, outline=False), "application/pdf")})

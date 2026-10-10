@@ -3,6 +3,11 @@ JavaScript game code validation and post-processing.
 """
 import logging
 import re
+from typing import Optional
+
+import esprima
+
+from utils.game_check import find_game_error
 
 logger = logging.getLogger(__name__)
 
@@ -38,21 +43,35 @@ Requirements:
 
 Generate the game code now, no explanations or comments, just the code:"""
 
+# Sent as the next turn of the game code conversation when the code breaks, so
+# the model fixes its own game with the original task in view
+GAME_CODE_FEEDBACK_PROMPT = """That code breaks when the game is played:
+
+{error}
+
+Fix it and provide the complete corrected code, without any explanations or markdown formatting."""
+
 
 def wrap_game_body(code: str) -> str:
     """The exact shape the frontend executes (client/public/sandbox/game-runtime.js)."""
     return f"function Game() {{\n{code}\n}}"
 
 
-def validate_js_syntax(code: str) -> bool:
-    """Validate the generated function body by parsing it inside its wrapper."""
+def find_code_error(code: str) -> Optional[str]:
+    """Why the generated function body won't run as a game, or None if it plays."""
+    if not code.strip():
+        return "The game code is empty."
     try:
-        import esprima
         esprima.parseScript(wrap_game_body(code))
-        return True
-    except Exception as e:
-        logger.warning(f"JS syntax error: {e}")
-        return False
+    except esprima.Error as e:
+        # The wrapper's first line shifts esprima's line numbers by one
+        line = e.lineNumber - 1
+        lines = code.split("\n")
+        description = re.sub(r"^Line \d+: ", "", e.message)
+        if 0 < line <= len(lines):
+            return f"Syntax error: {description}\nAt line {line}: {lines[line - 1].strip()}"
+        return f"Syntax error: {description}"
+    return find_game_error(code)
 
 
 def post_process_game_code(code: str) -> str:
@@ -66,7 +85,4 @@ def post_process_game_code(code: str) -> str:
     wrapper = re.match(r"^(?:return\s+)?function\s*\w*\s*\(\s*\)\s*\{", code)
     if wrapper and code.endswith("}"):
         code = code[wrapper.end():-1].strip()
-
-    # Fix MathJax.Node → MathJax
-    code = code.replace("React.createElement(MathJax.Node,", "React.createElement(MathJax,")
     return code

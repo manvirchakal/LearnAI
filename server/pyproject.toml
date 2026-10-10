@@ -24,6 +24,7 @@ dependencies = [
     # LangGraph agents
     "langgraph>=1.0",
     "langchain-core>=1.0",
+    "langchain>=1.0",
 
     # MCP
     "fastmcp>=4.0",
@@ -46,6 +47,7 @@ dependencies = [
 
     # Code validation
     "esprima>=4.0",
+    "mini-racer>=0.14",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,7 @@ dependencies = [
 local-ml = [
     "sentence-transformers>=3.0",
     "faster-whisper>=1.0",
+    "av<19",  # faster-whisper 1.2.1 passes av.open(metadata_errors=), which PyAV 19 removed
     "argostranslate>=1.9",
 ]
 

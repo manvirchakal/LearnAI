@@ -3,6 +3,7 @@ Test fixtures: an isolated DATA_DIR, deterministic fake embeddings, and a
 scripted fake LLM — so the full HTTP → agent → storage/RAG path runs offline.
 """
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -47,11 +48,13 @@ class FakeLLM:
 
     def __init__(self):
         self.calls = []
+        self.conversations = []  # every call's full message list
         self.game_codes = []
+        self.tool_calls = []  # per answer to a human turn: [(tool name, args), ...] to call first
 
     def __call__(self, prompt: str) -> str:
         self.calls.append(prompt)
-        if "Create a fully functional React component" in prompt:
+        if "Create a fully functional React component" in prompt or "breaks when the game is played" in prompt:
             return self.game_codes.pop(0) if self.game_codes else self.VALID_GAME
         if "latest question" in prompt:
             return "(fake tutor) Here is a concise answer."
@@ -72,14 +75,39 @@ class FakeChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "fake-chat"
 
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def _tool_calls(self, messages):
+        """Scripted tool calls to answer a human turn with, if any."""
+        if isinstance(self.responder, FakeLLM) and self.responder.tool_calls and messages[-1].type == "human":
+            self.responder.conversations.append(list(messages))
+            calls = self.responder.tool_calls.pop(0)
+            return [{"name": name, "args": args, "id": f"call-{i}"} for i, (name, args) in enumerate(calls)]
+        return None
+
     def _reply(self, messages) -> str:
+        if isinstance(self.responder, FakeLLM):
+            self.responder.conversations.append(list(messages))
+        # A system prompt (the tutor's) is read along with the latest message
+        prompt = "\n\n".join(str(m.content) for m in messages if m.type == "system")
         content: Any = messages[-1].content
-        return self.responder(content if isinstance(content, str) else str(content))
+        prompt += content if isinstance(content, str) else str(content)
+        return self.responder(prompt)
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        calls = self._tool_calls(messages)
+        if calls:
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="", tool_calls=calls))])
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=self._reply(messages)))])
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        calls = self._tool_calls(messages)
+        if calls:
+            chunks = [{"name": c["name"], "args": json.dumps(c["args"]), "id": c["id"], "index": i}
+                      for i, c in enumerate(calls)]
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=chunks))
+            return
         for token in re.findall(r"\S+\s*", self._reply(messages)):
             if self.token_delay:
                 time.sleep(self.token_delay)

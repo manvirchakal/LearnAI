@@ -3,6 +3,8 @@ Shared LangGraph agent state types and node utilities.
 """
 from typing import Dict, List, Optional, TypedDict
 
+from langchain_core.messages import BaseMessage
+
 
 class ContentState(TypedDict):
     """State for the content (study materials) agent.
@@ -23,7 +25,8 @@ class ContentState(TypedDict):
     game_idea: str
     game_code: str
     diagrams: List[str]
-    code_valid: bool
+    game_messages: List[BaseMessage]  # the game code conversation; retries continue it
+    code_error: Optional[str]       # why the last game_code failed its check, fed back on retry
     retries: int
     error: Optional[str]
 
@@ -52,10 +55,9 @@ class ChatState(TypedDict):
     scope: str
     unit_id: str
     rag_file_id: Optional[str]
+    sources: List[Dict[str, str]]  # what the chat is about: {"source": id, "title"}; lengths added on load
     language: str
-    context_text: str
     narrative_summary: str
-    rag_context: str
     learning_profile: str
     history: List[Dict]             # [{role, content}]
     ai_response: str

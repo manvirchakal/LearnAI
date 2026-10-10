@@ -8,10 +8,10 @@ Providers (settings.LLM_PROVIDER):
 import logging
 import re
 from functools import lru_cache
-from typing import List, Literal
+from typing import Literal, Sequence, Union
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from core.config import settings
 
@@ -93,17 +93,11 @@ def image_block(data_b64: str, media_type: str = "image/jpeg") -> dict:
     return {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{data_b64}"}}
 
 
-def invoke_llm(prompt: str, max_tokens: int = 8192, role: Role = "text") -> str:
-    """Single-turn call. Inside a LangGraph run streamed with stream_mode="messages",
-    tokens are streamed to the graph's consumer automatically via callbacks."""
-    return message_text(get_llm(role, max_tokens).invoke([HumanMessage(content=prompt)]))
+def invoke_llm(prompt: Union[str, Sequence[BaseMessage]], max_tokens: int = 8192, role: Role = "text") -> str:
+    """Reply to a prompt, or continue a conversation given as messages (ending
+    with the human turn to answer). Inside a LangGraph run streamed with
+    stream_mode="messages", tokens are streamed to the graph's consumer
+    automatically via callbacks."""
+    messages = [HumanMessage(content=prompt)] if isinstance(prompt, str) else list(prompt)
+    return message_text(get_llm(role, max_tokens).invoke(messages))
 
-
-def invoke_llm_with_history(prompt: str, history: List[dict], max_tokens: int = 1024) -> str:
-    """Multi-turn call. History items: {"role": "user"|"assistant", "content": str}."""
-    messages: List[BaseMessage] = [
-        HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
-        for m in history
-    ]
-    messages.append(HumanMessage(content=prompt))
-    return message_text(get_llm("text", max_tokens).invoke(messages))

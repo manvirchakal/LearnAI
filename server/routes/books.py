@@ -175,9 +175,9 @@ def get_chat(file_id: str, section_id: str, user_id: str = Depends(get_user_id))
 
 @router.post("/{file_id}/sections/{section_id}/chat", response_model=ChatResponse)
 def send_chat(file_id: str, section_id: str, body: ChatRequest, user_id: str = Depends(get_user_id)):
-    text = _section_text(user_id, file_id, section_id)
+    _section_text(user_id, file_id, section_id)  # 404s, and indexes the section for the tutor
     try:
-        return run_chat_agent(body.message, text, user_id, scope=file_id, unit_id=section_id,
+        return run_chat_agent(body.message, [book_service.section_source(user_id, file_id, section_id)], user_id, scope=file_id, unit_id=section_id,
                               rag_file_id=file_id, language=body.language)
     except Exception as e:
         logger.exception("Chat failed")
@@ -186,8 +186,9 @@ def send_chat(file_id: str, section_id: str, body: ChatRequest, user_id: str = D
 
 @router.post("/{file_id}/sections/{section_id}/chat/stream")
 async def stream_chat(file_id: str, section_id: str, body: ChatRequest, user_id: str = Depends(get_user_id)):
-    text = await run_in_threadpool(_section_text, user_id, file_id, section_id)
-    events = stream_chat_agent(body.message, text, user_id, scope=file_id, unit_id=section_id,
+    await run_in_threadpool(_section_text, user_id, file_id, section_id)  # as in send_chat
+    sources = [book_service.section_source(user_id, file_id, section_id)]
+    events = stream_chat_agent(body.message, sources, user_id, scope=file_id, unit_id=section_id,
                                rag_file_id=file_id, language=body.language)
     return StreamingResponse(chat_ui_stream(events, logger), media_type="text/event-stream",
                              headers=UI_STREAM_HEADERS)

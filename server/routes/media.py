@@ -1,7 +1,8 @@
 """
 Media API — transcripts (YouTube, recorded/uploaded lectures) and presentations.
 
-    POST /media/youtube           {video_url}           (media agent)
+    POST /media/youtube           {video_url}           (media agent, in the background) -> task
+    GET  /media/tasks/{task_id}   a background task's progress, and its result when done
     POST /media/lectures          multipart audio+title (media agent)
     GET  /media/transcriptions
     GET  /media/transcriptions/{job_id}      metadata + transcript
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadF
 
 from agents.media_agent import run_lecture_agent, run_youtube_agent
 from core.dependencies import get_user_id
+from services import task_service
 from services.media_service import process_presentation
 from services.storage_service import (
     list_presentation_metadata,
@@ -28,13 +30,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/media", tags=["media"])
 
 
-@router.post("/youtube")
+@router.post("/youtube", status_code=202)
 def transcribe_youtube(video_url: str = Body(..., embed=True), user_id: str = Depends(get_user_id)):
-    try:
-        return run_youtube_agent(video_url, user_id)
-    except Exception as e:
-        logger.exception("YouTube transcription failed")
-        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+    """Downloading and transcribing takes minutes: poll the returned task for progress."""
+    return task_service.start_task(
+        user_id, "youtube", lambda report: run_youtube_agent(video_url, user_id, on_progress=report))
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: str, user_id: str = Depends(get_user_id)):
+    task = task_service.get_task(task_id, user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found; it may have expired or the server restarted")
+    return task
 
 
 @router.post("/lectures")

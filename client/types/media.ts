@@ -18,6 +18,19 @@ export interface TranscriptionResult {
   collection_id: string;
 }
 
+/** A transcription running on the server, polled at GET /media/tasks/{task_id} */
+export interface TranscriptionTask {
+  task_id: string;
+  status: "queued" | "running" | "done" | "failed";
+  stage: "queued" | "downloading" | "transcribing" | "saving" | "indexing" | "done";
+  /** Fraction of the current stage done, 0-1; null when unknown */
+  progress: number | null;
+  /** The video's title, once known */
+  title: string | null;
+  result: TranscriptionResult | null;
+  error: string | null;
+}
+
 export interface TranscriptionDetail {
   metadata: TranscriptionMetadata;
   transcript: string;

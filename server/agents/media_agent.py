@@ -5,14 +5,19 @@ LangGraph media ingestion agent — lecture audio and YouTube videos to transcri
 
 Transcripts are stored, embedded for RAG, and filed in a single-item
 collection so they can be studied like any other material.
+
+Nodes report progress on LangGraph's custom stream as {"stage", "progress",
+"title"?} (stages: downloading, transcribing, saving, indexing); pass
+on_progress to receive it.
 """
 import logging
 import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from agents.base import MediaState
@@ -24,9 +29,16 @@ from services.storage_service import save_transcription_content, save_transcript
 logger = logging.getLogger(__name__)
 
 
+def _report(stage: str, progress: Optional[float] = None, **fields) -> None:
+    get_stream_writer()({"stage": stage, "progress": progress, **fields})
+
+
 def node_acquire_audio(state: MediaState) -> dict:
     if state["source_type"] == "youtube":
-        path, title, video_id = download_youtube_audio(state["source_url"], state["work_dir"])
+        _report("downloading")
+        path, title, video_id = download_youtube_audio(
+            state["source_url"], state["work_dir"],
+            on_progress=lambda fraction, title: _report("downloading", fraction, title=title))
         return {"audio_path": str(path), "title": state["title"] or title, "video_id": video_id}
 
     path = Path(state["work_dir"]) / f"upload{Path(state['filename'] or '').suffix.lower()}"
@@ -35,13 +47,15 @@ def node_acquire_audio(state: MediaState) -> dict:
 
 
 def node_transcribe(state: MediaState) -> dict:
-    transcript = transcribe_file(state["audio_path"])
+    _report("transcribing")
+    transcript = transcribe_file(state["audio_path"], on_progress=lambda fraction: _report("transcribing", fraction))
     if not transcript.strip():
         raise ValueError("No speech was detected in the audio")
     return {"transcript": transcript}
 
 
 def node_store(state: MediaState) -> dict:
+    _report("saving")
     job_id = uuid.uuid4().hex
     metadata = {
         "job_id": job_id,
@@ -60,6 +74,7 @@ def node_store(state: MediaState) -> dict:
 
 
 def node_embed(state: MediaState) -> dict:
+    _report("indexing")
     try:
         ingest_transcript(state["user_id"], state["job_id"], state["transcript"])
     except Exception as e:  # transcript is already saved; RAG is best-effort
@@ -86,20 +101,27 @@ media_graph = build_media_graph()
 
 
 def _run(source_type: str, user_id: str, title: str = "", source_url: Optional[str] = None,
-         source_bytes: Optional[bytes] = None, filename: Optional[str] = None) -> dict:
+         source_bytes: Optional[bytes] = None, filename: Optional[str] = None,
+         on_progress: Optional[Callable[..., None]] = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="learnai-media-") as work_dir:
-        result = media_graph.invoke({
+        state = {
             "source_type": source_type, "source_url": source_url, "source_bytes": source_bytes,
             "filename": filename, "title": title, "user_id": user_id, "work_dir": work_dir,
             "audio_path": "", "video_id": "", "transcript": "", "job_id": "", "metadata": {},
             "collection_id": "",
-        })
+        }
+        for mode, chunk in media_graph.stream(state, stream_mode=["custom", "values"]):
+            if mode == "values":
+                result = chunk
+            elif on_progress:
+                on_progress(**chunk)
     return {"job_id": result["job_id"], "transcript": result["transcript"], "metadata": result["metadata"],
             "collection_id": result["collection_id"], "title": result["title"]}
 
 
-def run_youtube_agent(video_url: str, user_id: str) -> dict:
-    return _run("youtube", user_id, source_url=video_url)
+def run_youtube_agent(video_url: str, user_id: str, on_progress: Optional[Callable[..., None]] = None) -> dict:
+    """on_progress(stage=, progress=, title=) is called as the video downloads and transcribes."""
+    return _run("youtube", user_id, source_url=video_url, on_progress=on_progress)
 
 
 def run_lecture_agent(audio_bytes: bytes, filename: str, title: str, user_id: str) -> dict:
