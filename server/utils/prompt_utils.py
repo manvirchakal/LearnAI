@@ -8,7 +8,7 @@ from core.config import settings
 
 def clip_source(text: str) -> str:
     """Bound source material so prompts fit the model's context window."""
-    limit = settings.LLM_MAX_SOURCE_CHARS
+    limit = settings.max_source_chars
     if len(text) <= limit:
         return text
     return text[:limit] + "\n\n[... remaining material truncated ...]"
@@ -186,6 +186,6 @@ def build_chat_system_prompt(
 Here's the user's learning profile: {learning_profile}
 The student is studying these sources:
 {listed or "(none yet)"}
-The generated summary of this section is: {generated_summary[:2000]}
+The generated summary of this section is: {generated_summary[:8000]}
 
 Provide a helpful, accurate, and concise answer to the student's latest question based on the given context and conversation history. Answer but be concise (4-6 sentences)."""

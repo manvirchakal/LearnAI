@@ -61,7 +61,7 @@ def parse_toc_with_llm(images: List[bytes]) -> List[Dict]:
         content.append(image_block(base64.b64encode(img).decode()))
         content.append({"type": "text", "text": f"This is page {i} of the table of contents."})
 
-    raw = message_text(get_llm("vision", max_tokens=4096, temperature=0).invoke([HumanMessage(content=content)]))
+    raw = message_text(get_llm("vision", max_tokens=16384, temperature=0).invoke([HumanMessage(content=content)]))
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError("TOC parser returned no JSON")

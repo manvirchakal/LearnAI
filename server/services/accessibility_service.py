@@ -46,7 +46,7 @@ def _translate_llm(text: str, target_language: str, source_language: str) -> Opt
 
     prompt = _TRANSLATE_PROMPT.format(source=source_language, target=target_language, text=text)
     try:
-        return message_text(get_llm("text", max_tokens=4096, temperature=0).invoke([HumanMessage(content=prompt)])).strip()
+        return message_text(get_llm("text", max_tokens=32768, temperature=0).invoke([HumanMessage(content=prompt)])).strip()
     except Exception as e:
         logger.error(f"Translation error ({source_language}→{target_language}): {e}")
         return None

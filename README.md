@@ -158,7 +158,13 @@ One-time setup:
 
 Check the flags against your vLLM version and GPU memory.
 
-Keep `LLM_MAX_OUTPUT_TOKENS` plus the prompt under `--max-model-len`. Source material is clipped to `LLM_MAX_SOURCE_CHARS`, about 4 characters per token.
+Set `LLM_CONTEXT_TOKENS` to the chat model's `--max-model-len` (default 131072). The other budgets are derived from it:
+
+- The output cap per call is a quarter of the context (`LLM_MAX_OUTPUT_TOKENS` overrides it).
+- Source material is clipped to 40% of the context at about 4 characters per token (`LLM_MAX_SOURCE_CHARS` overrides it).
+- A game agent's conversation is restarted from the saved code once it passes half the context.
+
+The compose file serves Qwen2.5-VL-7B at 32k, so set `LLM_CONTEXT_TOKENS=32768` with it (as `deploy/k8s/server.env` does). For a long-context model, 128k is a good default even when it supports 262k: vLLM reserves KV-cache memory for the whole context of each request it runs at once, so a bigger window means fewer students served at a time, and small models get less reliable at very long prompts.
 
 ### k3s (Raspberry Pi cluster)
 

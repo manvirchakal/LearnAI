@@ -29,8 +29,8 @@ from utils.prompt_utils import build_chat_system_prompt
 
 logger = logging.getLogger(__name__)
 
-HISTORY_WINDOW = 20  # messages sent to the model; full history is still stored
-MAX_REPLY_TOKENS = 1024
+HISTORY_WINDOW = 60  # messages sent to the model; full history is still stored
+MAX_REPLY_TOKENS = 4096  # room for tool calls, and reasoning on thinking models
 REPLY_SEPARATOR = "\n\n"  # between texts the tutor writes in separate steps of one turn
 
 

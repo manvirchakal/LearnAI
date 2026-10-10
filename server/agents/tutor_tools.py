@@ -17,9 +17,9 @@ from langchain.tools import ToolRuntime, tool
 
 from services.rag_service import parse_source, search_passages, section_text, source_id
 
-SEARCH_BUDGET_CHARS = 6000
-MAX_SEARCH_RESULTS = 8
-READ_WINDOW_CHARS = 4000
+SEARCH_BUDGET_CHARS = 16000
+MAX_SEARCH_RESULTS = 12
+READ_WINDOW_CHARS = 12000
 
 
 @dataclass

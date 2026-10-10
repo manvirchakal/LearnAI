@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,13 +16,17 @@ class Settings(BaseSettings):
     # Turn off when the served model can't take images: scanned-TOC parsing is
     # then skipped and books without a PDF outline become a single section.
     LLM_VISION_ENABLED: bool = True
-    # Upper bound on generated tokens per call; keep prompt + this below the
-    # server's context length (vLLM --max-model-len).
-    LLM_MAX_OUTPUT_TOKENS: int = 8192
-    LLM_TIMEOUT_SECONDS: float = 300
+    # The served model's context length in tokens (vLLM --max-model-len). The
+    # budgets below are derived from it, so this is the one number to change
+    # when the model server changes.
+    LLM_CONTEXT_TOKENS: int = 131_072
+    # Upper bound on generated tokens per call. Unset = a quarter of the context.
+    LLM_MAX_OUTPUT_TOKENS: Optional[int] = None
+    LLM_TIMEOUT_SECONDS: float = 600
     # Source material (a section, a collection) is truncated to this many
-    # characters before prompting. ~4 chars/token: 40k chars ≈ 10k tokens.
-    LLM_MAX_SOURCE_CHARS: int = 40_000
+    # characters before prompting. Unset = 40% of the context at ~4 chars/token
+    # (~210k chars at 128k tokens).
+    LLM_MAX_SOURCE_CHARS: Optional[int] = None
 
     # OpenAI-compatible endpoint (vLLM serves it at http://<host>:<port>/v1)
     OPENAI_BASE_URL: str = "http://localhost:8001/v1"
@@ -70,6 +74,18 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ── Derived ───────────────────────────────────────────────────────────────
+    @property
+    def max_output_tokens(self) -> int:
+        return self.LLM_MAX_OUTPUT_TOKENS or self.LLM_CONTEXT_TOKENS // 4
+
+    @property
+    def max_source_chars(self) -> int:
+        return self.LLM_MAX_SOURCE_CHARS or self.context_chars(0.4)
+
+    def context_chars(self, fraction: float) -> int:
+        """A fraction of the context window, in characters (~4 per token)."""
+        return int(self.LLM_CONTEXT_TOKENS * fraction * 4)
+
     @property
     def embedding_base_url(self) -> str:
         return self.EMBEDDING_BASE_URL or self.OPENAI_BASE_URL

@@ -202,3 +202,18 @@ def test_clip_source(monkeypatch):
     monkeypatch.setattr(settings, "LLM_MAX_SOURCE_CHARS", 10)
     assert clip_source("short") == "short"
     assert clip_source("x" * 50).startswith("x" * 10) and "truncated" in clip_source("x" * 50)
+
+
+def test_budgets_follow_context_length(vllm, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MAX_OUTPUT_TOKENS", None)
+    monkeypatch.setattr(settings, "LLM_MAX_SOURCE_CHARS", None)
+    monkeypatch.setattr(settings, "LLM_CONTEXT_TOKENS", 131_072)
+    assert settings.max_output_tokens == 32_768
+    assert settings.max_source_chars == 209_715
+    monkeypatch.setattr(settings, "LLM_CONTEXT_TOKENS", 32_768)
+    assert settings.max_output_tokens == 8192
+    assert core.llm.get_llm(max_tokens=32_768).max_tokens == 8192
+
+    monkeypatch.setattr(settings, "LLM_MAX_OUTPUT_TOKENS", 2000)
+    monkeypatch.setattr(settings, "LLM_MAX_SOURCE_CHARS", 5000)
+    assert (settings.max_output_tokens, settings.max_source_chars) == (2000, 5000)

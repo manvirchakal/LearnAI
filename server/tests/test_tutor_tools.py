@@ -10,7 +10,7 @@ from agents.tutor_tools import (READ_WINDOW_CHARS, SEARCH_BUDGET_CHARS, TutorCon
 from services.rag_service import ingest_section, section_text
 
 USER = "tools-user"
-WORDS = 1500  # 5 chunks of 300 words
+WORDS = 3000  # 10 chunks of 300 words
 
 
 def runtime(file_id=None) -> ToolRuntime:
@@ -50,7 +50,7 @@ def test_more_results_share_the_same_budget():
 
 
 def test_cut_preview_says_where_to_read_on():
-    out = search("cells", file_id="bio", max_results=8)
+    out = search("cells", file_id="bio", max_results=12)
     first = out.split("\n[2]")[0]
     start, = re.search(r"characters (\d+)-", first).groups()
     shown = re.search(r"of \d+\n(.*)\n\[Preview cut", first, re.DOTALL).group(1)

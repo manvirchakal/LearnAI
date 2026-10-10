@@ -61,8 +61,8 @@ def model_name(role: Role = "text") -> str:
 
 
 def get_llm(role: Role = "text", max_tokens: int = 4096, temperature: float = 1.0) -> BaseChatModel:
-    """Chat model for a role, with max_tokens capped at LLM_MAX_OUTPUT_TOKENS."""
-    max_tokens = min(max_tokens, settings.LLM_MAX_OUTPUT_TOKENS)
+    """Chat model for a role, with max_tokens capped at settings.max_output_tokens."""
+    max_tokens = min(max_tokens, settings.max_output_tokens)
     if settings.LLM_PROVIDER == "bedrock":
         from langchain_aws import ChatBedrock
 

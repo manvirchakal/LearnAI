@@ -30,6 +30,7 @@ from langgraph.graph import END, StateGraph
 import core.llm
 from agents.base import ContentState
 from agents.game_tools import GAME_TOOLS, GameArtifact, GameContext
+from core.config import settings
 from core.llm import invoke_llm, message_text
 from services.profile_service import get_learning_profile
 from services.rag_service import retrieve_context
@@ -42,9 +43,8 @@ from utils.prompt_utils import build_game_idea_prompt, build_narrative_prompt, c
 logger = logging.getLogger(__name__)
 
 RESULT_KEYS = ("narrative", "game_idea", "game_code", "diagrams", "game_version")
-GAME_MAX_TOKENS = 8192      # write_game carries the whole game as its argument
-GAME_RECURSION_LIMIT = 40   # graph steps per agent run: about 20 tool calls
-HISTORY_BUDGET_CHARS = 120_000  # a longer game conversation is restarted from the artifact
+GAME_MAX_TOKENS = 32768     # write_game carries the whole game as its argument
+GAME_RECURSION_LIMIT = 60   # graph steps per agent run: about 30 tool calls
 
 
 _DEFAULTS = {"diagrams": [], "game_version": 0}
@@ -67,13 +67,14 @@ def node_load_cached(state: ContentState) -> dict:
 
 
 def node_retrieve_rag(state: ContentState) -> dict:
-    context = retrieve_context(state["user_id"], state["source_text"][:2000], file_id=state["rag_file_id"])
+    context = retrieve_context(state["user_id"], state["source_text"][:2000], file_id=state["rag_file_id"],
+                               top_k=6)
     return {"rag_context": context}
 
 
 def node_generate_narrative(state: ContentState) -> dict:
     prompt = build_narrative_prompt(state["source_text"], state["learning_profile"], state["rag_context"])
-    return {"narrative": invoke_llm(prompt, max_tokens=8192)}
+    return {"narrative": invoke_llm(prompt, max_tokens=16384)}
 
 
 def node_generate_game_idea(state: ContentState) -> dict:
@@ -103,7 +104,7 @@ def _game_messages(state: ContentState, session: dict) -> List[BaseMessage]:
     if not state.get("game_error"):
         return [system, HumanMessage(content=GAME_TASK_PROMPT.format(game_idea=state["game_idea"]))]
     history = messages_from_dict(session.get("messages", []))
-    if not history or _history_size(history) > HISTORY_BUDGET_CHARS:
+    if not history or _history_size(history) > settings.context_chars(0.5):
         history = [system, HumanMessage(content=GAME_RESUME_PROMPT.format(game_idea=state["game_idea"]))]
     return [*history, HumanMessage(content=state["game_error"])]
 
@@ -139,7 +140,7 @@ def node_generate_diagrams(state: ContentState) -> dict:
         f"Generated Summary:\n{state['narrative']}\n\nUser Profile:\n{state['learning_profile']}"
     )
     try:
-        response = invoke_llm(prompt, max_tokens=4096)
+        response = invoke_llm(prompt, max_tokens=8192)
         return {"diagrams": [post_process_mermaid(d) for d in extract_mermaid_blocks(response)]}
     except Exception as e:
         logger.error(f"Diagram generation failed: {e}")
