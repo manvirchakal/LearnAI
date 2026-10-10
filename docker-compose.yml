@@ -1,0 +1,29 @@
+# Single-machine deployment: docker compose up -d → http://localhost:3000
+# Model servers are external (see deploy/vllm/); point server/.env at them.
+services:
+  server:
+    image: ghcr.io/manvirchakal/learnai-server:latest
+    build: server
+    env_file:
+      - path: server/.env
+        required: false
+    volumes:
+      - learnai-data:/data
+    ports:
+      - "8000:8000"   # API docs at /docs, MCP at /mcp; remove to keep it internal
+    restart: unless-stopped
+
+  client:
+    image: ghcr.io/manvirchakal/learnai-client:latest
+    build: client
+    environment:
+      API_URL: http://server:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  learnai-data:

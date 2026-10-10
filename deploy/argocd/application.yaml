@@ -1,0 +1,23 @@
+# Register once: kubectl apply -n argocd -f deploy/argocd/application.yaml
+# Argo CD then keeps the cluster in sync with deploy/k8s on the default branch.
+# Woodpecker's deploy-bump step pins new image tags there after each build.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: learnai
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://git.example.lan/OWNER/LearnAI.git
+    targetRevision: main
+    path: deploy/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: learnai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

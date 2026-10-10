@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "learnai-server"
+version = "2.0.0"
+requires-python = ">=3.11"
+
+dependencies = [
+    # Web framework
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+
+    # LLM providers: OpenAI-compatible (vLLM) and AWS Bedrock
+    "langchain-openai>=1.0",
+    "openai>=1.40",
+    "boto3>=1.35",
+    "langchain-aws>=1.0",
+
+    # LangGraph agents
+    "langgraph>=1.0",
+    "langchain-core>=1.0",
+    "langchain>=1.0",
+
+    # MCP
+    "fastmcp>=4.0",
+
+    # Vector store (embeddings come from the model server, or [local-ml])
+    "chromadb>=1.0",
+
+    # TTS (espeak-ng on Linux)
+    "pyttsx3>=2.90",
+
+    # PDF processing
+    "PyMuPDF>=1.24",
+    "Pillow>=10.0",
+
+    # Presentations
+    "python-pptx>=1.0",
+
+    # Media
+    "yt-dlp>=2024.0",
+]
+
+[project.optional-dependencies]
+# In-process models (EMBEDDING_PROVIDER=local, STT_PROVIDER=local,
+# TRANSLATION_PROVIDER=argos). Pulls in PyTorch: skip it on small ARM nodes.
+local-ml = [
+    "sentence-transformers>=3.0",
+    "faster-whisper>=1.0",
+    "av<19",  # faster-whisper 1.2.1 passes av.open(metadata_errors=), which PyAV 19 removed
+    "argostranslate>=1.9",
+]
+
+[dependency-groups]
+# `uv sync` installs this group by default; images use --no-dev
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agents*", "core*", "mcp_server*", "models*", "routes*", "services*", "utils*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# bare `pytest` (as in CI) does not put the cwd on sys.path
+pythonpath = ["."]
+addopts = "-q"

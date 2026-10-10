@@ -1,0 +1,19 @@
+# k3s ships Traefik. Browsers only need the client: it proxies /api-backend/*
+# to the server in-cluster. /mcp exposes the read-only MCP tools on the LAN.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: learnai
+spec:
+  rules:
+    - host: learnai.home.arpa
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service: {name: learnai-server, port: {name: http}}
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: learnai-client, port: {name: http}}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Game</title>
+  <!--
+    Runs AI-generated game code. The page is always framed with
+    sandbox="allow-scripts" (and served with a CSP sandbox header), so it has
+    an opaque origin: no access to the app's DOM, storage or API, and no
+    network access beyond the scripts below. See components/game/DynamicGameComponent.tsx.
+
+    Scripts load with crossorigin (served with Access-Control-Allow-Origin: *):
+    to the opaque origin they are cross-origin, and without CORS the browser
+    hides the message of every error they throw, game errors included.
+  -->
+  <style>
+    html, body { margin: 0; padding: 0; background: #fff; color: #212529;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    #root { min-height: 300px; }
+    button { font: inherit; }
+  </style>
+  <script src="/vendor/react/react-bundle.js" crossorigin="anonymous"></script>
+  <script>
+    // Only the TeX input and SVG output (no web fonts, and no menu, which needs storage)
+    window.MathJax = {
+      loader: { load: ["input/tex", "output/svg"] },
+      tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] },
+      svg: { fontCache: "global" },
+      startup: { typeset: false },
+    };
+  </script>
+  <script src="/vendor/mathjax/startup.js" async></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/sandbox/game-runtime.js" crossorigin="anonymous"></script>
+</body>
+</html>

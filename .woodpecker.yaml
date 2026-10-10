@@ -1,0 +1,104 @@
+# Woodpecker CI → Forgejo container registry → Argo CD (GitOps)
+#
+#   every push / PR      server tests + client checks
+#   default branch, tag  build linux/amd64 + linux/arm64 images, push to Forgejo,
+#                        then pin the new tag in deploy/k8s/kustomization.yaml
+#                        (Argo CD syncs that path and rolls the pods)
+#
+# Edit the anchors below for your Forgejo host/owner, and add these repo secrets
+# in Woodpecker:
+#   registry_username   Forgejo user that owns the packages
+#   registry_password   Forgejo access token with package:write
+#   forgejo_push_token  Forgejo access token with repository:write (tag bump commit)
+#
+# The agent builds arm64 under QEMU. Register it once on the agent host:
+#   docker run --privileged --rm tonistiigi/binfmt --install arm64
+# Woodpecker 3 only runs the buildx plugin privileged if the server allows it:
+#   WOODPECKER_PLUGINS_PRIVILEGED=woodpeckerci/plugin-docker-buildx
+
+variables:
+  - &registry "git.example.lan"                           # Forgejo host (serves the registry)
+  - &server_repo "git.example.lan/OWNER/learnai-server"
+  - &client_repo "git.example.lan/OWNER/learnai-client"
+  - &platforms "linux/amd64,linux/arm64"
+  - &on_release
+    - event: push
+      branch: ${CI_REPO_DEFAULT_BRANCH}
+    - event: tag
+
+when:
+  - event: [push, pull_request, tag, manual]
+
+steps:
+  - name: server-tests
+    image: ghcr.io/astral-sh/uv:0.10.9-python3.12-bookworm-slim
+    depends_on: []
+    directory: server
+    commands:
+      - uv sync --locked --quiet
+      - uv run pytest
+
+  - name: client-checks
+    image: node:22-alpine
+    depends_on: []
+    directory: client
+    commands:
+      - npm ci
+      - npm run type-check
+      - npm run lint
+      - npm run build
+
+  - name: image-server
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on: [server-tests, client-checks]
+    settings:
+      registry: *registry
+      repo: *server_repo
+      context: server
+      dockerfile: server/Dockerfile
+      platforms: *platforms
+      tags: ["${CI_COMMIT_SHA}", "latest"]
+      cache_from: "type=registry,ref=git.example.lan/OWNER/learnai-server:buildcache"
+      cache_to: "type=registry,ref=git.example.lan/OWNER/learnai-server:buildcache,mode=max"
+      username:
+        from_secret: registry_username
+      password:
+        from_secret: registry_password
+    when: *on_release
+
+  - name: image-client
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on: [server-tests, client-checks]
+    settings:
+      registry: *registry
+      repo: *client_repo
+      context: client
+      dockerfile: client/Dockerfile
+      platforms: *platforms
+      tags: ["${CI_COMMIT_SHA}", "latest"]
+      cache_from: "type=registry,ref=git.example.lan/OWNER/learnai-client:buildcache"
+      cache_to: "type=registry,ref=git.example.lan/OWNER/learnai-client:buildcache,mode=max"
+      username:
+        from_secret: registry_username
+      password:
+        from_secret: registry_password
+    when: *on_release
+
+  # GitOps: pin the images Argo CD deploys to this commit's tag. The commit
+  # carries [CI SKIP] so it doesn't trigger another pipeline.
+  - name: deploy-bump
+    image: alpine/git
+    depends_on: [image-server, image-client]
+    environment:
+      PUSH_TOKEN:
+        from_secret: forgejo_push_token
+    commands:
+      - sed -i -E "s/^(\s*newTag:).*/\1 ${CI_COMMIT_SHA}/" deploy/k8s/kustomization.yaml
+      - git diff --quiet && exit 0
+      - git config user.name "woodpecker"
+      - git config user.email "woodpecker@localhost"
+      - 'git commit -am "deploy: images ${CI_COMMIT_SHA:0:8} [CI SKIP]"'
+      - git push "https://woodpecker:$${PUSH_TOKEN}@$${CI_REPO_CLONE_URL#https://}" "HEAD:${CI_REPO_DEFAULT_BRANCH}"
+    when:
+      - event: push
+        branch: ${CI_REPO_DEFAULT_BRANCH}
