@@ -1,22 +1,22 @@
 """
-JavaScript game code validation and post-processing.
+Game agent prompt, error reports for it, and game code post-processing.
+
+The game is checked where it runs: the sandboxed iframe in the browser reports
+compile, render and gameplay errors (client/public/sandbox/game-runtime.js),
+and they come back to the game agent as messages (agents/content_agent.py).
 """
-import logging
 import re
 from typing import Optional
 
-import esprima
+GAME_AGENT_PROMPT = """You write educational games as React components. The game is a code artifact you build with your tools:
+- write_game writes the whole game. Use it once, for the first draft.
+- view_game shows the code with line numbers.
+- edit_game replaces one exact snippet. Use it for every change after the first draft.
 
-from utils.game_check import find_game_error
-
-logger = logging.getLogger(__name__)
-
-GAME_CODE_SYSTEM_PROMPT = """Create a fully functional React component for the following game idea that integrates concepts from multiple learning materials:
-
-{game_idea}
+The game runs in the student's browser. If it breaks, at the start or while being played, you get a message with the error and the line it happened on. Then view_game around that line, find the cause and fix it with edit_game; never rewrite the whole game to fix a bug. Fix every place the same mistake occurs.
 
 The component runs inside a sandboxed iframe with no network access, compiled via:
-  const factory = new Function('React', 'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'MathJax', `return function Game() {{ <your code> }}`);
+  const factory = new Function('React', 'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'MathJax', `return function Game() { <your code> }`);
 Your code is the BODY of the Game function: declare state/handlers, then end with `return React.createElement(...)`.
 MathJax is a React component that typesets LaTeX children, e.g. React.createElement(MathJax, null, "\\(x^2\\)").
 
@@ -26,8 +26,8 @@ Requirements:
 3. Return a single root element (usually a div) containing all other elements
 4. Ensure all variables and functions are properly declared
 5. Do not use any external libraries or components not provided; do not fetch, load scripts or use storage
-6. Provide ONLY the JavaScript code, without any explanations or markdown formatting
-7. Do not include 'return function Game() {{' at the beginning or '}}' at the end
+6. The code you write is ONLY JavaScript, without explanations or markdown formatting
+7. Do not include 'return function Game() {' at the beginning or '}' at the end
 8. Use proper JavaScript syntax (no semicolons after blocks or object literals in arrays)
 9. Do not use 'function' as a variable name; use 'func' or 'mathFunction' instead
 10. Create instructions for the user on how to play the game in the game component
@@ -41,37 +41,32 @@ Requirements:
 18. Container sizing: use relative units (%, vh, vw); game must auto-scale to its container
 19. Add useEffect for window resizing; use getBoundingClientRect() for accurate dimensions
 
-Generate the game code now, no explanations or comments, just the code:"""
+When the game is written (or fixed), reply with one short sentence saying what you did."""
 
-# Sent as the next turn of the game code conversation when the code breaks, so
-# the model fixes its own game with the original task in view
-GAME_CODE_FEEDBACK_PROMPT = """That code breaks when the game is played:
+GAME_TASK_PROMPT = "Create a fully functional React game for this idea, integrating concepts from the learning materials:\n\n{game_idea}"
 
-{error}
-
-Fix it and provide the complete corrected code, without any explanations or markdown formatting."""
+# Starts a fresh conversation about a game that already exists (one made before
+# game sessions were kept, or whose conversation grew too long to keep)
+GAME_RESUME_PROMPT = GAME_TASK_PROMPT + "\n\nThe game is already written; it is in the artifact (view_game)."
 
 
-def wrap_game_body(code: str) -> str:
-    """The exact shape the frontend executes (client/public/sandbox/game-runtime.js)."""
-    return f"function Game() {{\n{code}\n}}"
-
-
-def find_code_error(code: str) -> Optional[str]:
-    """Why the generated function body won't run as a game, or None if it plays."""
-    if not code.strip():
-        return "The game code is empty."
-    try:
-        esprima.parseScript(wrap_game_body(code))
-    except esprima.Error as e:
-        # The wrapper's first line shifts esprima's line numbers by one
-        line = e.lineNumber - 1
-        lines = code.split("\n")
-        description = re.sub(r"^Line \d+: ", "", e.message)
-        if 0 < line <= len(lines):
-            return f"Syntax error: {description}\nAt line {line}: {lines[line - 1].strip()}"
-        return f"Syntax error: {description}"
-    return find_game_error(code)
+def format_game_error(error: str, code: str, line: Optional[int] = None, phase: Optional[str] = None,
+                      stack: Optional[str] = None) -> str:
+    """An error the browser reported, as the message that asks the agent to fix it."""
+    when = {
+        "compile": "while compiling",
+        "render": "while rendering",
+        "runtime": "while being played",
+        "promise": "in an unhandled promise rejection",
+    }.get(phase or "", "in the browser")
+    parts = [f"The game broke {when}:\n{error.strip()}"]
+    lines = code.split("\n")
+    if line and 0 < line <= len(lines):
+        parts.append(f"At line {line}: {lines[line - 1].strip()}")
+    if stack and stack.strip():
+        parts.append(f"Stack:\n{stack.strip()[:1500]}")
+    parts.append("Fix it with targeted edits.")
+    return "\n\n".join(parts)
 
 
 def post_process_game_code(code: str) -> str:

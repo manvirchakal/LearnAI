@@ -152,6 +152,9 @@ def test_collection_lifecycle(client, book, lecture, llm):
 
     game = client.post(f"/collections/{cid}/game")
     assert game.status_code == 200 and game.json()["game_code"]
+    fix = client.post(f"/collections/{cid}/game/fix",
+                      json={"error": "TypeError: x is undefined", "version": game.json()["game_version"]})
+    assert fix.status_code == 200 and fix.json()["game_version"] == game.json()["game_version"] + 1
 
     chat = client.post(f"/collections/{cid}/chat", json={"message": "hi"})
     assert chat.status_code == 200

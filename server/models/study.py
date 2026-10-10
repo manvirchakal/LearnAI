@@ -1,5 +1,5 @@
-from typing import List, Literal
-from pydantic import BaseModel
+from typing import List, Literal, Optional
+from pydantic import BaseModel, Field
 
 
 class StudyRequest(BaseModel):
@@ -11,10 +11,21 @@ class StudyMaterials(BaseModel):
     game_idea: str
     game_code: str
     diagrams: List[str]
+    game_version: int = 0
 
 
 class GameResponse(BaseModel):
     game_code: str
+    game_version: int = 0
+
+
+class GameFixRequest(BaseModel):
+    """An error the browser hit running a game, reported by the game sandbox."""
+    error: str = Field(max_length=4000)
+    version: int                    # the game_version that broke
+    line: Optional[int] = None      # line in the game code, if the stack named one
+    phase: Optional[Literal["compile", "render", "runtime", "promise"]] = None
+    stack: Optional[str] = Field(None, max_length=8000)
 
 
 class ChatMessage(BaseModel):

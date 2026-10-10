@@ -66,39 +66,69 @@ def test_study_materials_generated_once_then_cached(client, book, llm):
     assert len(llm.calls) > calls
 
 
-def test_game_code_retries_until_valid(client, book, llm):
+def test_game_agent_writes_the_game_artifact(client, book, llm):
     base = f"/books/{book['file_id']}/sections/ch2.s1"
     assert client.post(f"{base}/game").status_code == 409  # nothing generated yet
 
     client.post(f"{base}/study", json={})
-    llm.game_codes = ["return React.createElement(", "const = ;"]  # two syntax errors, then valid
+    first = client.get(f"{base}/study").json()
+    llm.tool_calls = [[("write_game", {"code": "```js\n" + BROKEN_GAME + "\n```"})]]
     r = client.post(f"{base}/game")
-    assert r.status_code == 200
-    assert r.json()["game_code"] == FakeLLM.VALID_GAME
-    assert llm.game_codes == [], "both invalid attempts should have been consumed by retries"
-    # one conversation: task, attempt, error, attempt, error (then the valid reply)
-    assert [m.type for m in llm.conversations[-1]] == ["human", "ai", "human", "ai", "human"]
-    assert client.get(f"{base}/study").json()["game_code"] == FakeLLM.VALID_GAME
+    assert r.status_code == 200, r.text
+    assert r.json() == {"game_code": BROKEN_GAME, "game_version": first["game_version"] + 1}
+    task = llm.conversations[-1]  # the agent's final turn, after its write
+    assert [m.type for m in task] == ["system", "human", "ai", "tool"]
+    assert "write_game" in task[0].content and "A clicking game" in task[1].content
+    assert client.get(f"{base}/study").json()["game_code"] == BROKEN_GAME
 
 
-def test_game_error_fed_back_for_repair(client, book, llm):
+BROKEN_GAME = (
+    'const [on, setOn] = useState(false);\n'
+    'if (!on) return React.createElement("button", {onClick: () => setOn(true)}, "Start");\n'
+    'return React.createElement("div", null, panel.title);'
+)
+
+
+def test_browser_error_fixed_with_an_edit_in_the_same_conversation(client, book, llm):
+    base = f"/books/{book['file_id']}/sections/ch1.s2"
+    assert client.post(f"{base}/game/fix", json={"error": "x", "version": 0}).status_code == 409
+
+    client.post(f"{base}/study", json={})
+    llm.tool_calls = [[("write_game", {"code": BROKEN_GAME})]]
+    version = client.post(f"{base}/game").json()["game_version"]
+
+    llm.tool_calls = [[("edit_game", {"old_text": "panel.title", "new_text": '"Playing"'})]]
+    report = {"error": "ReferenceError: panel is not defined", "version": version, "line": 3,
+              "phase": "runtime", "stack": "ReferenceError: panel is not defined\n    at onClick (learnai-game.js:6:9)"}
+    r = client.post(f"{base}/game/fix", json=report)
+    assert r.status_code == 200, r.text
+    fixed = BROKEN_GAME.replace("panel.title", '"Playing"')
+    assert r.json() == {"game_code": fixed, "game_version": version + 1}
+    assert client.get(f"{base}/study").json()["game_code"] == fixed
+
+    # The agent continued its conversation: the task, its write, the error, then its edit
+    convo = llm.conversations[-1]
+    assert [m.type for m in convo] == ["system", "human", "ai", "tool", "ai", "human", "ai", "tool"]
+    assert convo[2].tool_calls[0]["name"] == "write_game"
+    assert convo[6].tool_calls[0]["name"] == "edit_game"
+    error = convo[5].content
+    assert "while being played" in error and "panel is not defined" in error
+    assert 'At line 3: return React.createElement("div", null, panel.title);' in error
+
+    # A report about the version before the fix gets the fixed game, without the agent
+    calls = len(llm.calls)
+    stale = client.post(f"{base}/game/fix", json=report)
+    assert stale.json() == {"game_code": fixed, "game_version": version + 1}
+    assert len(llm.calls) == calls
+
+
+def test_new_game_starts_a_new_conversation(client, book, llm):
     base = f"/books/{book['file_id']}/sections/ch1.s2"
     client.post(f"{base}/study", json={})
-    # Parses fine; breaks only once the student clicks Start
-    broken = (
-        'const [on, setOn] = useState(false);\n'
-        'if (!on) return React.createElement("button", {onClick: () => setOn(true)}, "Start");\n'
-        'return React.createElement("div", {color: "red"}, {id: "panel"}, "Playing");'
-    )
-    llm.game_codes = [broken]
-    r = client.post(f"{base}/game")
-    assert r.status_code == 200 and r.json()["game_code"] == FakeLLM.VALID_GAME
-
-    # The fix continues the game code conversation: task, the broken game, then the error
-    task, attempt, feedback = (m.content for m in llm.conversations[-1])
-    assert "Create a fully functional React component" in task and "A clicking game" in task
-    assert attempt == broken
-    assert 'clicking the <button> "Start"' in feedback and "Objects are not valid as a React child" in feedback
+    old = client.post(f"{base}/game").json()["game_version"]
+    new = client.post(f"{base}/game").json()
+    assert new["game_version"] > old  # versions only go up, across games
+    assert [m.type for m in llm.conversations[-1]] == ["system", "human", "ai", "tool"]
 
 
 def test_chat_persists_role_content_history(client, book, llm):

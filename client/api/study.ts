@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import apiClient, { API_BASE, USER_ID, isStatus } from "./client";
 import { readSSE } from "@/lib/sse";
-import type { GameResponse, StudyMaterials, StudyStreamEvent } from "@/types/study";
+import type { GameErrorReport, GameResponse, StudyMaterials, StudyStreamEvent } from "@/types/study";
 
 /**
  * A study unit is anything with the study/game/chat endpoints under one path:
@@ -49,11 +49,25 @@ export async function* streamStudyMaterials(
   for await (const e of readSSE(res)) yield e as StudyStreamEvent;
 }
 
-export const useRegenerateGame = (unit: StudyUnit) => {
+const useSetGame = (unit: StudyUnit) => {
   const qc = useQueryClient();
+  return (game: GameResponse) =>
+    qc.setQueryData<StudyMaterials | null>(studyKey(unit), (prev) => prev && { ...prev, ...game });
+};
+
+export const useRegenerateGame = (unit: StudyUnit) => {
+  const setGame = useSetGame(unit);
   return useMutation<GameResponse, Error, void>({
     mutationFn: () => apiClient.post(`${unit}/game`).then((r) => r.data),
-    onSuccess: ({ game_code }) =>
-      qc.setQueryData<StudyMaterials | null>(studyKey(unit), (prev) => prev && { ...prev, game_code }),
+    onSuccess: setGame,
+  });
+};
+
+/** Send an error the game hit in the browser; the game agent fixes the game with targeted edits. */
+export const useFixGame = (unit: StudyUnit) => {
+  const setGame = useSetGame(unit);
+  return useMutation<GameResponse, Error, GameErrorReport & { version: number }>({
+    mutationFn: (report) => apiClient.post(`${unit}/game/fix`, report).then((r) => r.data),
+    onSuccess: setGame,
   });
 };

@@ -11,6 +11,7 @@ Books API — uploaded PDFs and their sections, the primary unit of study.
     POST   /books/{file_id}/sections/{section_id}/study   get-or-generate (content agent)
     POST   /books/{file_id}/sections/{section_id}/study/stream  same, as SSE (token/stage/done/error)
     POST   /books/{file_id}/sections/{section_id}/game    regenerate game (content agent, game graph)
+    POST   /books/{file_id}/sections/{section_id}/game/fix  fix the game after a browser error (game graph)
     GET    /books/{file_id}/sections/{section_id}/chat    history
     POST   /books/{file_id}/sections/{section_id}/chat    send message (chat agent)
     POST   /books/{file_id}/sections/{section_id}/chat/stream  same, as an AI SDK UI message stream
@@ -26,11 +27,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 
 from agents.chat_agent import get_history, run_chat_agent, stream_chat_agent
-from agents.content_agent import load_cached_materials, run_content_agent, run_game_agent, stream_content_agent
+from agents.content_agent import (load_cached_materials, run_content_agent, run_game_agent, run_game_fix,
+                                  stream_content_agent)
 from agents.document_agent import run_document_agent
 from core.dependencies import get_user_id
 from models.book import BookDetail, BookSummary
-from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
+from models.study import ChatHistory, ChatRequest, ChatResponse, GameFixRequest, GameResponse, StudyMaterials, StudyRequest
 from services import book_service
 from utils.streaming_utils import SSE_HEADERS, sse
 from utils.ui_stream import UI_STREAM_HEADERS, chat_ui_stream
@@ -159,12 +161,24 @@ async def stream_study_materials(
 def regenerate_game(file_id: str, section_id: str, user_id: str = Depends(get_user_id)):
     text = _section_text(user_id, file_id, section_id)
     try:
-        return {"game_code": run_game_agent(text, user_id, scope=file_id, unit_id=section_id, new_idea=True)}
+        return run_game_agent(text, user_id, scope=file_id, unit_id=section_id, new_idea=True)
     except LookupError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.exception("Game generation failed")
         raise HTTPException(status_code=502, detail=f"Generation failed: {e}")
+
+
+@router.post("/{file_id}/sections/{section_id}/game/fix", response_model=GameResponse)
+def fix_game(file_id: str, section_id: str, body: GameFixRequest, user_id: str = Depends(get_user_id)):
+    _section_or_404(user_id, file_id, section_id)
+    try:
+        return run_game_fix(user_id, scope=file_id, unit_id=section_id, **body.model_dump())
+    except LookupError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.exception("Game fix failed")
+        raise HTTPException(status_code=502, detail=f"Fix failed: {e}")
 
 
 @router.get("/{file_id}/sections/{section_id}/chat", response_model=ChatHistory)

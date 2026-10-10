@@ -30,7 +30,6 @@ export const STUDY_STEPS: { stage: StudyStage; label: string }[] = [
   { stage: "narrative", label: "Writing your personalized narrative" },
   { stage: "game_idea", label: "Designing a game" },
   { stage: "game_code", label: "Building the game" },
-  { stage: "validate_code", label: "Testing the game" },
   { stage: "diagrams", label: "Drawing diagrams" },
   { stage: "save", label: "Saving" },
 ];
@@ -41,8 +40,7 @@ const NEXT_ACTIVITY: Record<StudyStage, string | null> = {
   rag: "Writing your personalized narrative…",
   narrative: "Designing a game…",
   game_idea: "Building the game…",
-  game_code: "Testing the game…",
-  validate_code: "Drawing diagrams…",
+  game_code: "Drawing diagrams…",
   diagrams: "Saving…",
   save: null,
 };

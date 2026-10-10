@@ -151,6 +151,6 @@ def delete_book(user_id: str, file_id: str) -> None:
     meta = load_book_metadata(user_id, file_id)
     storage.delete(meta["local_key"])
     storage.delete(f"metadata/{user_id}/{file_id}.json")
-    for prefix in ("extracted-text", "narratives", "chat-history"):
+    for prefix in ("extracted-text", "narratives", "chat-history", "game-sessions"):
         storage.delete_prefix(f"{prefix}/{user_id}/{file_id}/")
     delete_file_chunks(user_id, file_id)

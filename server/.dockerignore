@@ -7,4 +7,3 @@ data/
 .DS_Store
 *.egg-info
 build/
-game_check/node_modules

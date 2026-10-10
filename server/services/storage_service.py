@@ -76,6 +76,16 @@ def load_chat_history(user_id: str, scope: str, unit_id: str) -> list:
     return storage.load_json(key) if storage.json_exists(key) else []
 
 
+def save_game_session(user_id: str, scope: str, unit_id: str, session: dict) -> None:
+    """The game artifact and the game agent's conversation: {code, version, messages}."""
+    storage.save_json(f"game-sessions/{user_id}/{scope}/{unit_id}.json", session)
+
+
+def load_game_session(user_id: str, scope: str, unit_id: str) -> dict:
+    key = f"game-sessions/{user_id}/{scope}/{unit_id}.json"
+    return storage.load_json(key) if storage.json_exists(key) else {}
+
+
 # ── Collections ───────────────────────────────────────────────────────────────
 
 def save_collection(user_id: str, collection_id: str, data: dict) -> None:
@@ -90,6 +100,7 @@ def delete_collection_data(user_id: str, collection_id: str) -> None:
     storage.delete(f"collections/{user_id}/{collection_id}.json")
     storage.delete(f"narratives/{user_id}/collections/{collection_id}.json")
     storage.delete(f"chat-history/{user_id}/collections/{collection_id}.json")
+    storage.delete(f"game-sessions/{user_id}/collections/{collection_id}.json")
 
 
 def list_collections(user_id: str) -> List[dict]:

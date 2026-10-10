@@ -12,6 +12,7 @@ are studied together, with the same study/game/chat endpoints as a section.
     POST   /collections/{id}/study          get-or-generate
     POST   /collections/{id}/study/stream   same, as SSE (token/stage/done/error)
     POST   /collections/{id}/game           regenerate game
+    POST   /collections/{id}/game/fix       fix the game after a browser error
     GET    /collections/{id}/chat           history
     POST   /collections/{id}/chat           send message
     POST   /collections/{id}/chat/stream    same, as an AI SDK UI message stream
@@ -24,9 +25,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from agents.chat_agent import get_history, run_chat_agent, stream_chat_agent
-from agents.content_agent import load_cached_materials, run_content_agent, run_game_agent, stream_content_agent
+from agents.content_agent import (load_cached_materials, run_content_agent, run_game_agent, run_game_fix,
+                                  stream_content_agent)
 from core.dependencies import get_user_id
-from models.study import ChatHistory, ChatRequest, ChatResponse, GameResponse, StudyMaterials, StudyRequest
+from models.study import ChatHistory, ChatRequest, ChatResponse, GameFixRequest, GameResponse, StudyMaterials, StudyRequest
 from services.collection_service import (
     collection_sources,
     create_collection,
@@ -174,13 +176,24 @@ async def stream_collection_study(collection_id: str, body: StudyRequest = Study
 def regenerate_collection_game(collection_id: str, user_id: str = Depends(get_user_id)):
     text = _collection_text(collection_id, user_id)
     try:
-        return {"game_code": run_game_agent(text, user_id, scope="collections", unit_id=collection_id,
-                                            new_idea=True)}
+        return run_game_agent(text, user_id, scope="collections", unit_id=collection_id, new_idea=True)
     except LookupError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.exception("Collection game generation failed")
         raise HTTPException(status_code=502, detail=f"Generation failed: {e}")
+
+
+@router.post("/{collection_id}/game/fix", response_model=GameResponse)
+def fix_collection_game(collection_id: str, body: GameFixRequest, user_id: str = Depends(get_user_id)):
+    _collection_or_404(collection_id, user_id)
+    try:
+        return run_game_fix(user_id, scope="collections", unit_id=collection_id, **body.model_dump())
+    except LookupError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.exception("Collection game fix failed")
+        raise HTTPException(status_code=502, detail=f"Fix failed: {e}")
 
 
 @router.get("/{collection_id}/chat", response_model=ChatHistory)

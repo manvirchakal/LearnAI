@@ -72,6 +72,7 @@ def update_collection_materials(collection_id: str, materials: Dict, user_id: st
     save_collection(user_id, collection_id, col)
     # Generated study materials described the old contents; chat history is kept
     storage.delete(f"narratives/{user_id}/collections/{collection_id}.json")
+    storage.delete(f"game-sessions/{user_id}/collections/{collection_id}.json")
     return col
 
 

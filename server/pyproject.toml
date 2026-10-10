@@ -44,10 +44,6 @@ dependencies = [
 
     # Media
     "yt-dlp>=2024.0",
-
-    # Code validation
-    "esprima>=4.0",
-    "mini-racer>=0.14",
 ]
 
 [project.optional-dependencies]

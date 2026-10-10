@@ -56,8 +56,9 @@ server/  FastAPI · LangGraph · FastMCP
 
 **Agents.**
 - **Document agent:** `save_upload → read_outline → (vision TOC) → normalize → save_metadata`. Section text is then indexed in the background.
-- **Content agent:** `load_cached → rag → narrative → game_idea → game_code ⇄ validate_code → diagrams → save`. A cache hit short-circuits the run. `validate_code` plays the game briefly in an embedded V8 (render, a few frames, a click on each button) with the sandbox's React. If it breaks, the error is sent as the next message in the same game code conversation for the model to fix, up to 2 times. A separate game-only graph regenerates just the game.
-- **Game check bundle.** The check runs `server/game_check/bundle.js`, which is committed because the server image has no Node. After changing `harness.js` or `env.js`, or when the client's React version changes, run `npm install && npm run build` in `server/game_check` (a test fails when the versions differ).
+- **Content agent:** `load_cached → rag → narrative → game_idea → game_code → diagrams → save`. A cache hit short-circuits the run.
+- **Game agent.** `game_code` is a LangChain ReAct agent that builds the game as a code artifact with three tools (`agents/game_tools.py`): `write_game` for the first draft, `view_game` to read it with line numbers, and `edit_game` for targeted replacements. Each write saves the artifact with a new `game_version`. The agent's conversation is kept per unit (`game-sessions/`), so it picks up where it left off.
+- **Fixing games from the browser.** Games are checked where they run. When a game breaks, at the start or mid-game, the sandbox reports the error, the game code line and the game's stack frames. The client sends them to `/game/fix` automatically (up to 3 times in a row; after that the student can retry). The game graph then enters straight at `game_code`, and the agent continues its conversation with the error as the next message, fixing the game with edits. A report about an older `game_version` gets the current game back. The same graph, entered at `game_idea`, makes a new game.
 - **Chat agent:** `load_context → translate_input → tutor → translate_output → save_history`. `tutor` is a LangChain ReAct agent (`create_agent`) with tools in `server/agents/tutor_tools.py`: `search_materials` finds passages and `read_materials` reads a source from an offset. Instead of the section text, its system prompt lists the chat's sources (id, title, length) so it can read them directly. Each tool response is capped in code (search previews share 6,000 characters, a read returns at most 4,000) and says where its text sits and how to read on. The web client streams it through `/chat/stream`, which speaks the [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol), so `useChat` consumes the backend directly. The server keeps the history, so each request carries only the new message.
 - **Media agent:** `acquire_audio → transcribe → store → embed`.
 
@@ -66,7 +67,7 @@ server/  FastAPI · LangGraph · FastMCP
 **Game sandbox.** Generated game code never runs in the app's own page:
 
 - **The frame.** `DynamicGameComponent` renders `public/sandbox/game.html` in an iframe with `sandbox="allow-scripts"` and no `allow-same-origin`. The frame therefore has an opaque origin: it can't read the app's DOM, cookies or storage, call the API, or navigate the page.
-- **Running a game.** The frame loads React and MathJax from `public/vendor`. When it posts `ready`, the parent sends the game code with `postMessage`. The frame compiles it with the same contract as before and posts back errors and its content height.
+- **Running a game.** The frame loads React and MathJax from `public/vendor`. When it posts `ready`, the parent sends the game code with `postMessage`. The frame compiles it with the same contract as before and posts back its content height and the first error the game hits (with the game code line and stack).
 - **Headers.** Next.js serves `/sandbox/*` with a CSP that re-applies the sandbox and sets `connect-src 'none'` (no fetch, XHR or WebSocket, and images only from `data:`/`blob:`), so the frame stays isolated even if opened directly. Sandbox scripts are loaded with CORS so game error messages aren't hidden.
 
 ## Running locally
@@ -203,6 +204,7 @@ cd client && npm run type-check && npm run lint && npm run build
 | `GET`/`POST` | `/books/{file_id}/sections/{section_id}/study` | Cached materials / get-or-generate |
 | `POST` | `/books/{file_id}/sections/{section_id}/study/stream` | Same as SSE: `token`, `stage`, `done`, `error` |
 | `POST` | `/books/{file_id}/sections/{section_id}/game` | Regenerate the game |
+| `POST` | `/books/{file_id}/sections/{section_id}/game/fix` | Fix the game after a browser error (`{error, version, line?, phase?, stack?}`) |
 | `GET`/`POST` | `/books/{file_id}/sections/{section_id}/chat` | Chat history / send a message |
 | `POST` | `/books/{file_id}/sections/{section_id}/chat/stream` | Same, streamed as an AI SDK UI message stream (`{message, language}`) |
 | `GET`/`PUT` | `/profile`, `GET /profile/questionnaire` | VARK learning profile |
@@ -214,7 +216,7 @@ cd client && npm run type-check && npm run lint && npm run build
 | `GET`/`POST` | `/collections` | List (`?include_auto=true` adds per-upload ones) / create `{name, materials}` |
 | `GET`/`PATCH`/`DELETE` | `/collections/{id}` | One collection / rename `{name}` / delete |
 | `PUT` | `/collections/{id}/materials` | Replace materials |
-| | `/collections/{id}/study`, `/study/stream`, `/game`, `/chat`, `/chat/stream` | Same as for a section |
+| | `/collections/{id}/study`, `/study/stream`, `/game`, `/game/fix`, `/chat`, `/chat/stream` | Same as for a section |
 | `POST` | `/accessibility/{translate,speech}` | Translation and TTS |
 
 ## Known limitations

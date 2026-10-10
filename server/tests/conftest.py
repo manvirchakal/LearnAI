@@ -41,7 +41,8 @@ core.vectorstore._embed = _fake_embed
 
 
 class FakeLLM:
-    """Answers by prompt type; game code can be scripted per call."""
+    """Answers by prompt type; tool calls can be scripted per human turn.
+    Unscripted, the game agent writes VALID_GAME."""
 
     VALID_GAME = 'const [n, setN] = useState(0);\nreturn React.createElement("button", {onClick: () => setN(n + 1)}, `Clicks: ${n}`);'
     NARRATIVE = "## Narrative\nPersonalized explanation of this section."
@@ -49,13 +50,12 @@ class FakeLLM:
     def __init__(self):
         self.calls = []
         self.conversations = []  # every call's full message list
-        self.game_codes = []
         self.tool_calls = []  # per answer to a human turn: [(tool name, args), ...] to call first
 
     def __call__(self, prompt: str) -> str:
         self.calls.append(prompt)
-        if "Create a fully functional React component" in prompt or "breaks when the game is played" in prompt:
-            return self.game_codes.pop(0) if self.game_codes else self.VALID_GAME
+        if "write_game writes the whole game" in prompt:
+            return "(fake game agent) Done."
         if "latest question" in prompt:
             return "(fake tutor) Here is a concise answer."
         if "mermaid" in prompt.lower():
@@ -70,21 +70,27 @@ class FakeChatModel(BaseChatModel):
 
     responder: Callable[[str], str]
     token_delay: float = 0.0  # seconds per streamed token, to make streaming visible in UI runs
+    tools_bound: bool = False  # only an agent's model (tools bound) makes tool calls
 
     @property
     def _llm_type(self) -> str:
         return "fake-chat"
 
     def bind_tools(self, tools, **kwargs):
-        return self
+        return self.model_copy(update={"tools_bound": True})
 
     def _tool_calls(self, messages):
         """Scripted tool calls to answer a human turn with, if any."""
-        if isinstance(self.responder, FakeLLM) and self.responder.tool_calls and messages[-1].type == "human":
-            self.responder.conversations.append(list(messages))
+        if not self.tools_bound or not isinstance(self.responder, FakeLLM) or messages[-1].type != "human":
+            return None
+        if self.responder.tool_calls:
             calls = self.responder.tool_calls.pop(0)
-            return [{"name": name, "args": args, "id": f"call-{i}"} for i, (name, args) in enumerate(calls)]
-        return None
+        elif "write_game writes the whole game" in str(messages[0].content):
+            calls = [("write_game", {"code": FakeLLM.VALID_GAME})]
+        else:
+            return None
+        self.responder.conversations.append(list(messages))
+        return [{"name": name, "args": args, "id": f"call-{i}"} for i, (name, args) in enumerate(calls)]
 
     def _reply(self, messages) -> str:
         if isinstance(self.responder, FakeLLM):

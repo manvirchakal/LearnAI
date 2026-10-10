@@ -25,9 +25,9 @@ class ContentState(TypedDict):
     game_idea: str
     game_code: str
     diagrams: List[str]
-    game_messages: List[BaseMessage]  # the game code conversation; retries continue it
-    code_error: Optional[str]       # why the last game_code failed its check, fed back on retry
-    retries: int
+    game_version: int               # bumped by every write to the game artifact
+    game_messages: List[BaseMessage]  # the game agent's conversation; fixes continue it
+    game_error: Optional[str]       # an error the browser hit playing the game, for the agent to fix
     error: Optional[str]
 
 
